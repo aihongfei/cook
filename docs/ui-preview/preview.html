@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>御膳 · UI 预览</title>
+<style id="theme">
+:root{
+  --brand:#E4633C; --brand-2:#F5A65B; --bg:#FDF6EC; --card:#FFFFFF;
+  --ink:#2B2622; --ink-2:#8B8177; --line:#F1E7D9; --soft:#FBF1E3;
+  --ok:#3FAE7A; --warn:#E0A33A; --radius:20px; --radius-sm:12px;
+  --hero:linear-gradient(135deg,#F7C57E,#E4633C);
+  --shadow:0 6px 18px rgba(180,120,70,.10);
+}
+</style>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#E7E2DA;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  display:flex;gap:20px;align-items:flex-start;justify-content:center;padding:26px;min-height:100vh;color:#333}
+.phone{width:390px;height:844px;border-radius:40px;background:var(--bg);overflow:hidden;position:relative;
+  box-shadow:0 26px 64px rgba(0,0,0,.26);display:flex;flex-direction:column;color:var(--ink);flex:0 0 auto}
+
+/* 状态栏 */
+.statusbar{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:13px;font-weight:600;flex:0 0 auto}
+.statusbar .dots{display:flex;gap:4px;align-items:center}
+.statusbar .bat{width:22px;height:11px;border:1.5px solid currentColor;border-radius:3px;position:relative;opacity:.85}
+.statusbar .bat::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:5px;background:currentColor;border-radius:0 1px 1px 0}
+.statusbar .bat i{position:absolute;inset:1.5px;background:var(--ok);border-radius:1px;width:80%}
+
+/* 页面标题栏 */
+.navbar{height:52px;display:flex;align-items:center;justify-content:center;position:relative;flex:0 0 auto;font-weight:600;font-size:17px}
+.navbar .back{position:absolute;left:18px;font-size:19px;opacity:.5}
+
+/* 内容区 */
+.screen{flex:1;overflow-y:auto;padding:2px 16px 100px;scrollbar-width:none}
+.screen::-webkit-scrollbar{display:none}
+.screen{display:none}
+.screen.on{display:block}
+
+/* 通用 */
+.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 15px;margin-bottom:12px}
+.row{display:flex;align-items:center;justify-content:space-between}
+.mut{color:var(--ink-2)}
+.tiny{font-size:11px}
+.sm{font-size:12px}
+.sec-title{font-size:16px;font-weight:700;margin:18px 2px 10px;display:flex;align-items:center;justify-content:space-between}
+.sec-title .more{font-size:12px;font-weight:400;color:var(--ink-2)}
+.chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px 0 4px}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;font-size:13px;padding:7px 14px;border-radius:999px;background:var(--card);color:var(--ink-2);border:1px solid var(--line);white-space:nowrap}
+.chip.on{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:600}
+.chip.ghost{background:var(--soft);border-color:transparent}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;border-radius:999px;background:var(--soft);color:var(--ink-2)}
+.pill.ok{background:rgba(63,174,122,.13);color:var(--ok);font-weight:600}
+.pill.warn{background:rgba(224,163,58,.15);color:#B67C1B;font-weight:600}
+.pill.brand{background:rgba(228,99,60,.11);color:var(--brand);font-weight:600}
+
+/* hero */
+.hero{border-radius:var(--radius);background:var(--hero);color:#fff;padding:16px 17px;margin:6px 0 14px;position:relative;overflow:hidden}
+.hero .en{font-size:9px;letter-spacing:2px;opacity:.8;font-weight:600}
+.hero h1{margin:7px 0 5px;font-size:21px;letter-spacing:.5px}
+.hero p{margin:0;font-size:12.5px;opacity:.92}
+.hero .ip{position:absolute;right:12px;bottom:6px;opacity:.95}
+.hero .avatar{position:absolute;right:14px;top:12px;font-size:11px;background:rgba(255,255,255,.24);padding:4px 10px;border-radius:999px}
+
+/* 今日安排 */
+.meal{display:flex;gap:11px;padding:11px 0;border-top:1px solid var(--line)}
+.meal:first-of-type{border-top:0}
+.meal .tag{flex:0 0 42px;font-weight:700;font-size:13.5px;padding-top:1px}
+.meal .dishes{font-size:13px;line-height:1.5}
+.meal .st{font-size:11px;margin-top:3px}
+
+/* 菜品行 */
+.dish{display:flex;gap:12px;align-items:center;background:var(--card);border-radius:var(--radius-sm);padding:11px;margin-bottom:9px;box-shadow:var(--shadow)}
+.dish .thumb{width:54px;height:54px;border-radius:12px;background:var(--soft);display:flex;align-items:center;justify-content:center;font-size:27px;flex:0 0 auto}
+.dish .name{font-weight:700;font-size:14.5px}
+.dish .tags{display:flex;gap:5px;margin:4px 0 3px}
+.dish .tag{font-size:10px;padding:1.5px 6px;border-radius:5px;background:var(--soft);color:var(--ink-2)}
+.dish .add{width:32px;height:32px;border-radius:50%;background:var(--brand);color:#fff;border:0;font-size:19px;line-height:1;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+
+/* 订单卡 */
+.ordcard{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 15px;margin-bottom:12px}
+.thumbs{display:flex;gap:6px}
+.thumbs .t{width:40px;height:40px;border-radius:10px;background:var(--soft);display:flex;align-items:center;justify-content:center;font-size:20px}
+.note{background:var(--soft);border-radius:9px;padding:7px 10px;font-size:12px;color:var(--ink-2);margin-top:10px}
+.ghost-btn{border:1px solid var(--brand);color:var(--brand);background:transparent;font-size:12.5px;padding:6px 15px;border-radius:999px;font-weight:600}
+
+/* 大卡（发现） */
+.disc-hero{border-radius:var(--radius);background:linear-gradient(135deg,#F2A65A,#E4633C);color:#fff;padding:18px;margin:6px 0 14px;position:relative;overflow:hidden}
+.disc-hero .en{font-size:9px;letter-spacing:2px;opacity:.85}
+.disc-hero h2{margin:8px 0 6px;font-size:22px}
+.disc-hero p{margin:0 0 13px;font-size:12.5px;opacity:.92}
+.disc-hero .go{background:#fff;color:#C9502C;border:0;font-weight:700;font-size:13px;padding:9px 17px;border-radius:999px}
+.disc-hero .dice{position:absolute;right:16px;bottom:16px;font-size:44px;opacity:.9}
+.entry2{display:flex;gap:11px}
+.entry2 .e{flex:1;background:var(--card);border-radius:var(--radius-sm);box-shadow:var(--shadow);padding:13px}
+.entry2 .e .ic{font-size:22px}
+.entry2 .e .t{font-weight:700;font-size:13.5px;margin-top:7px}
+.week{display:flex;gap:10px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.week::-webkit-scrollbar{display:none}
+.week .d{flex:0 0 118px;border-radius:var(--radius-sm);padding:12px;border:1px dashed var(--line);background:var(--card)}
+.week .d.today{background:var(--brand);color:#fff;border:0}
+.week .d .h{font-weight:700;font-size:14px;margin-bottom:7px}
+.week .d .m{font-size:11.5px;line-height:1.45;opacity:.9;min-height:34px}
+.fav{display:flex;gap:11px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.fav::-webkit-scrollbar{display:none}
+.fav .f{flex:0 0 130px;background:var(--card);border-radius:var(--radius-sm);box-shadow:var(--shadow);overflow:hidden}
+.fav .f .img{height:74px;background:var(--soft);display:flex;align-items:center;justify-content:center;font-size:34px}
+.fav .f .body{padding:9px 10px}
+.fav .f .nm{font-weight:700;font-size:13px}
+.fav .f .btn{margin-top:8px;text-align:center;font-size:11.5px;color:var(--brand);border:1px solid var(--brand);border-radius:8px;padding:4px 0;font-weight:600}
+
+/* 冰箱 */
+.stat3{display:flex;background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 0;margin-bottom:12px}
+.stat3 .s{flex:1;text-align:center;position:relative}
+.stat3 .s+.s::before{content:"";position:absolute;left:0;top:4px;bottom:4px;width:1px;background:var(--line)}
+.stat3 .n{font-size:22px;font-weight:800}
+.stat3 .l{font-size:11.5px;color:var(--ink-2);margin-top:2px}
+.ai-cta{border-radius:var(--radius);padding:15px;margin-bottom:12px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;display:flex;align-items:center;gap:13px}
+.ai-cta .ic{font-size:26px}
+.ai-cta .t{font-weight:700;font-size:14.5px}
+.ai-cta .s{font-size:11.5px;opacity:.9;margin-top:3px}
+.ai-cta .go{margin-left:auto;background:rgba(255,255,255,.22);padding:7px 12px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.grid4{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid4 .g{background:var(--card);border-radius:var(--radius-sm);box-shadow:var(--shadow);padding:12px}
+.grid4 .g .ic{font-size:20px}
+.grid4 .g .t{font-size:13px;font-weight:600;margin-top:6px}
+.grid4 .g .n{font-size:11.5px;color:var(--ink-2)}
+.soon{display:flex;align-items:center;gap:9px;padding:9px 0;border-top:1px solid var(--line)}
+.soon:first-of-type{border-top:0}
+
+/* 我的 */
+.me{display:flex;align-items:center;gap:13px;background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:15px;margin:6px 0 12px}
+.me .ava{width:52px;height:52px;border-radius:50%;background:var(--soft);display:flex;align-items:center;justify-content:center;font-size:27px}
+.me .nm{font-weight:700;font-size:16px}
+.list{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;margin-bottom:12px}
+.item{display:flex;align-items:center;gap:12px;padding:13px 15px;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.item .ic{width:34px;height:34px;border-radius:10px;background:var(--soft);display:flex;align-items:center;justify-content:center;font-size:17px;flex:0 0 auto}
+.item .tx{flex:1;min-width:0}
+.item .tx .t{font-size:14px;font-weight:600}
+.item .tx .s{font-size:11.5px;color:var(--ink-2);margin-top:2px}
+.item .arw{color:var(--ink-2);font-size:15px;opacity:.55}
+
+/* 底部 tab */
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:78px;background:var(--card);border-top:1px solid var(--line);display:flex;padding-bottom:8px}
+.tabbar .tb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:10.5px;color:var(--ink-2);cursor:pointer}
+.tabbar .tb.on{color:var(--brand);font-weight:700}
+.tabbar .tb svg{width:23px;height:23px}
+
+/* 浮动面板 */
+.panel{position:fixed;left:22px;top:22px;width:250px;background:#fff;border-radius:14px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.13);font-size:12px;line-height:1.7}
+.panel h3{margin:0 0 8px;font-size:14px}
+.panel .sw{display:flex;gap:6px;margin-bottom:10px}
+.panel .sw a{flex:1;text-align:center;padding:6px 0;border-radius:8px;font-size:12px;text-decoration:none;color:#555;background:#F1EDE7;font-weight:600}
+.panel .sw a.on{background:#2B2622;color:#fff}
+.panel .kv{display:flex;justify-content:space-between;border-top:1px dashed #E6E0D8;padding-top:6px;margin-top:6px;color:#666}
+.panel .kv b{color:#222;font-weight:600}
+.panel .dot{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:5px}
+.hint{font-size:11px;color:#8a8177;margin-top:8px}
+@media(max-width:900px){.panel{position:static;width:auto;margin-bottom:16px}}
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <h3 id="pname">方案 A · 暖橙家庭感</h3>
+  <div class="sw">
+    <a href="?theme=a" id="sa">A 暖橙</a>
+    <a href="?theme=b" id="sb">B 清新绿</a>
+    <a href="?theme=c" id="sc">C 融合</a>
+  </div>
+  <div>点击左侧手机里的底部 Tab 可切换页面。</div>
+  <div class="kv"><span>主色</span><b><span class="dot" style="background:var(--brand)"></span><span id="k-brand"></span></b></div>
+  <div class="kv"><span>辅色</span><b><span class="dot" style="background:var(--brand-2)"></span><span id="k-brand2"></span></b></div>
+  <div class="kv"><span>背景</span><b><span class="dot" style="background:var(--bg);border:1px solid #ddd"></span><span id="k-bg"></span></b></div>
+  <div class="kv"><span>主字号</span><b>14 / 17 / 21px</b></div>
+  <div class="kv"><span>圆角</span><b id="k-r"></b></div>
+  <div class="kv"><span>卡片间距</span><b>12px</b></div>
+  <div class="kv"><span>页面左右边距</span><b>16px</b></div>
+  <div class="hint">尺寸基准 390×844（安卓主流机型）</div>
+  <div class="hint"><a href="index.html">← 三方案并排对比</a></div>
+</div>
+
+<div class="phone">
+  <div class="statusbar">
+    <span>9:41</span>
+    <span class="dots"><span>5G</span><span class="bat"><i></i></span></span>
+  </div>
+
+  <!-- ================= 厨房 ================= -->
+  <div class="screen on" id="s-kitchen">
+    <div class="hero">
+      <span class="avatar">妈妈 · 今天 周三</span>
+      <div class="en">OUR FAMILY KITCHEN</div>
+      <h1>御膳 · 家庭小厨房</h1>
+      <p>今天想吃什么，点给掌勺人看</p>
+      <div class="ip">
+        <svg width="62" height="62" viewBox="0 0 64 64" fill="none">
+          <ellipse cx="24" cy="14" rx="5.5" ry="12" fill="#fff"/><ellipse cx="24" cy="15" rx="2.5" ry="7" fill="#F7B8AE"/>
+          <ellipse cx="40" cy="14" rx="5.5" ry="12" fill="#fff"/><ellipse cx="40" cy="15" rx="2.5" ry="7" fill="#F7B8AE"/>
+          <circle cx="32" cy="35" r="15" fill="#fff"/>
+          <circle cx="26" cy="33" r="2.4" fill="#3A3330"/><circle cx="38" cy="33" r="2.4" fill="#3A3330"/>
+          <ellipse cx="26.8" cy="31.8" rx=".8" ry=".8" fill="#fff"/><ellipse cx="38.8" cy="31.8" rx=".8" ry=".8" fill="#fff"/>
+          <ellipse cx="32" cy="38.5" rx="2.4" ry="1.7" fill="#F2927F"/>
+          <path d="M28 42q4 3 8 0" stroke="#3A3330" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+          <circle cx="20" cy="38" r="3" fill="#FBD3CC" opacity=".85"/><circle cx="44" cy="38" r="3" fill="#FBD3CC" opacity=".85"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="margin-bottom:2px">
+        <b style="font-size:15px">今日安排</b><span class="sm mut">最终菜单和做饭进度 ›</span>
+      </div>
+      <div class="meal">
+        <div class="tag">午餐</div>
+        <div>
+          <div class="dishes">番茄炒蛋 · 清炒菜心 · 家常米饭</div>
+          <div class="st" style="color:var(--ok)">● 菜单已确定</div>
+        </div>
+      </div>
+      <div class="meal">
+        <div class="tag">晚餐</div>
+        <div>
+          <div class="dishes">土豆烧排骨 · 凉拌黄瓜 · 小米南瓜粥</div>
+          <div class="st" style="color:var(--warn)">● 正在收集想吃的菜</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="padding:11px 14px;color:var(--ink-2);font-size:13px">🔍 搜菜名、食材、口味或标签</div>
+
+    <div class="chips" style="margin-bottom:4px">
+      <span class="chip on">🎲 今天吃什么</span>
+      <span class="chip">👤 邀请家人一起</span>
+      <span class="chip">📷 拍照识菜</span>
+    </div>
+
+    <div class="sec-title">私房菜 <span class="mut" style="font-size:12px;font-weight:400">85 道 · 管理 / + 加菜</span></div>
+
+    <div class="chips" style="margin-bottom:10px">
+      <span class="chip on">今日推荐</span><span class="chip ghost">家人常点</span><span class="chip ghost">素炒</span><span class="chip ghost">家常炒菜</span><span class="chip ghost">荤菜</span>
+    </div>
+
+    <div class="dish">
+      <div class="thumb">🫘</div>
+      <div style="flex:1">
+        <div class="name">干煸四季豆</div>
+        <div class="tags"><span class="tag">香辣</span><span class="tag">下饭菜</span></div>
+        <div class="tiny mut">爸爸爱吃 · 做过 8 次 · 上次 09/26</div>
+      </div>
+      <button class="add">+</button>
+    </div>
+    <div class="dish">
+      <div class="thumb">🥦</div>
+      <div style="flex:1">
+        <div class="name">干煸花菜</div>
+        <div class="tags"><span class="tag">微辣干香</span><span class="tag">下饭菜</span></div>
+        <div class="tiny mut">爸爸爱吃 · 做过 5 次 · 上次 09/18</div>
+      </div>
+      <button class="add">+</button>
+    </div>
+    <div class="dish">
+      <div class="thumb">🥔</div>
+      <div style="flex:1">
+        <div class="name">干锅土豆片</div>
+        <div class="tags"><span class="tag">香辣干香</span><span class="tag">下饭菜</span></div>
+        <div class="tiny mut">做过 3 次 · 家里有土豆</div>
+      </div>
+      <button class="add">+</button>
+    </div>
+  </div>
+
+  <!-- ================= 订单 ================= -->
+  <div class="screen" id="s-order">
+    <div class="navbar"><span class="back">‹</span>家庭点菜单</div>
+    <div class="card" style="background:var(--soft);box-shadow:none">
+      <b style="font-size:15px">家庭点菜单</b>
+      <div class="sm mut" style="margin-top:4px">记录大家想吃什么，也记录每顿饭的回应</div>
+    </div>
+
+    <div class="card" style="padding:5px;display:flex;margin-bottom:12px">
+      <div style="flex:1;text-align:center;padding:8px;border-radius:14px;background:var(--brand);color:#fff;font-size:13.5px;font-weight:600">全家点菜单</div>
+      <div style="flex:1;text-align:center;padding:8px;font-size:13.5px;color:var(--ink-2)">只看我的</div>
+    </div>
+
+    <div class="chips" style="margin-bottom:12px">
+      <span class="chip on">全部 2</span><span class="chip">待确认 1</span><span class="chip">已安排</span><span class="chip">准备中</span><span class="chip">已做好 1</span>
+    </div>
+
+    <div class="ordcard">
+      <div class="row">
+        <b style="font-size:15px">10月10日 · 晚餐</b>
+        <span class="pill ok">✓ 已做好</span>
+      </div>
+      <div class="sm mut" style="margin:5px 0 10px">爸爸、小满 点的</div>
+      <div class="row" style="align-items:flex-start">
+        <div class="thumbs"><span class="t">🍅</span><span class="t">🍖</span><span class="t">🥒</span><span class="t">🍚</span></div>
+        <div style="flex:1;margin-left:11px">
+          <div style="font-size:13px;font-weight:600">番茄炒蛋、土豆烧排骨、凉拌黄瓜…</div>
+          <div class="tiny mut" style="margin-top:3px">共 4 道菜 · 4 人吃</div>
+        </div>
+      </div>
+      <div class="note">备注：小满那份不要辣</div>
+      <div class="row" style="margin-top:11px">
+        <span class="tiny mut">提交于 2026-10-10 10:20</span>
+        <button class="ghost-btn">再点一次</button>
+      </div>
+    </div>
+
+    <div class="ordcard">
+      <div class="row">
+        <b style="font-size:15px">10月11日 · 午餐</b>
+        <span class="pill warn">待确认</span>
+      </div>
+      <div class="sm mut" style="margin:5px 0 10px">妈妈 点的</div>
+      <div class="row" style="align-items:flex-start">
+        <div class="thumbs"><span class="t">🥬</span><span class="t">🍚</span></div>
+        <div style="flex:1;margin-left:11px">
+          <div style="font-size:13px;font-weight:600">清炒菜心、家常米饭</div>
+          <div class="tiny mut" style="margin-top:3px">共 2 道菜 · 3 人吃</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:11px">
+        <span class="tiny mut">提交于 2026-10-11 08:05</span>
+        <button class="ghost-btn">再点一次</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 发现 ================= -->
+  <div class="screen" id="s-discover">
+    <div class="navbar">发现</div>
+    <div class="disc-hero">
+      <div class="en">DINNER INSPIRATION</div>
+      <h2>今天吃什么？</h2>
+      <p>摇出一组家人都能吃的菜单</p>
+      <button class="go">🎲 开始随机 →</button>
+      <div class="dice">🎲</div>
+    </div>
+
+    <div class="entry2" style="margin-bottom:14px">
+      <div class="e"><div class="ic">🧊</div><div class="t">冰箱食材</div><div class="tiny mut">看看家里有什么</div></div>
+      <div class="e"><div class="ic">🧾</div><div class="t">采购清单</div><div class="tiny mut">缺什么一目了然</div></div>
+    </div>
+
+    <div class="sec-title">本周菜单 <span class="more">提前安排更省心</span></div>
+    <div class="week" style="margin-bottom:6px">
+      <div class="d today"><div class="h">今天</div><div class="m">番茄炒蛋、清炒菜心、家常米饭</div><div class="tiny" style="margin-top:8px;font-weight:600">查看安排 ›</div></div>
+      <div class="d"><div class="h">明天</div><div class="m mut">还没有安排</div><div class="tiny" style="margin-top:8px;color:var(--brand);font-weight:600">去安排 ›</div></div>
+      <div class="d"><div class="h">后天</div><div class="m mut">还没有安排</div><div class="tiny" style="margin-top:8px;color:var(--brand);font-weight:600">去安排 ›</div></div>
+    </div>
+
+    <div class="sec-title">家人最爱 <span class="more">按喜欢和做过次数</span></div>
+    <div class="fav">
+      <div class="f"><div class="img">🍚</div><div class="body"><div class="nm">家常米饭</div><div class="tiny mut">4 位家人喜欢 · 做过 32 次</div><div class="btn">+ 想吃</div></div></div>
+      <div class="f"><div class="img">🍖</div><div class="body"><div class="nm">土豆烧排骨</div><div class="tiny mut">4 位家人喜欢 · 做过 15 次</div><div class="btn">+ 想吃</div></div></div>
+      <div class="f"><div class="img">🍅</div><div class="body"><div class="nm">番茄炒蛋</div><div class="tiny mut">3 位家人喜欢 · 做过 9 次</div><div class="btn">+ 想吃</div></div></div>
+    </div>
+  </div>
+
+  <!-- ================= 冰箱 ================= -->
+  <div class="screen" id="s-fridge">
+    <div class="navbar">我的冰箱</div>
+    <div class="sm mut" style="text-align:center;margin:-6px 0 12px">食材管理助手，让每一餐更新鲜、更安心</div>
+
+    <div class="ai-cta">
+      <div class="ic">📷</div>
+      <div>
+        <div class="t">拍一张冰箱，自动识别入库</div>
+        <div class="s">AI 识别食材 · 确认后批量加入库存</div>
+      </div>
+      <div class="go">开始 ›</div>
+    </div>
+
+    <div class="stat3">
+      <div class="s"><div class="n">12</div><div class="l">食材数</div></div>
+      <div class="s"><div class="n" style="color:var(--warn)">3</div><div class="l">快过期</div></div>
+      <div class="s"><div class="n">8</div><div class="l">品类</div></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="margin-bottom:6px"><b style="font-size:15px">今日先吃</b><span class="sm mut">查看全部 ›</span></div>
+      <div class="soon"><span style="font-size:19px">🥬</span><div style="flex:1"><div style="font-size:13.5px;font-weight:600">小油菜</div><div class="tiny mut">保鲜 · 还剩 1 天</div></div><span class="pill warn">优先吃</span></div>
+      <div class="soon"><span style="font-size:19px">🥚</span><div style="flex:1"><div style="font-size:13.5px;font-weight:600">鸡蛋</div><div class="tiny mut">冷藏 · 还剩 2 天</div></div><span class="pill warn">优先吃</span></div>
+    </div>
+
+    <div class="sec-title">存放位置 <span class="more">4 区</span></div>
+    <div class="grid4">
+      <div class="g"><div class="ic">🧺</div><div class="t">常温</div><div class="n">2 件</div></div>
+      <div class="g"><div class="ic">🥗</div><div class="t">保鲜</div><div class="n">5 件</div></div>
+      <div class="g"><div class="ic">❄️</div><div class="t">冷藏</div><div class="n">4 件</div></div>
+      <div class="g"><div class="ic">🧊</div><div class="t">冷冻</div><div class="n">1 件</div></div>
+    </div>
+
+    <div class="sec-title">今日推荐 <span class="more">3 道菜能用上冰箱食材</span></div>
+    <div class="chips">
+      <span class="chip on">🍅 番茄炒蛋</span><span class="chip ghost">🥬 蒜蓉油菜</span><span class="chip ghost">🥔 干锅土豆片</span>
+    </div>
+  </div>
+
+  <!-- ================= 我的 ================= -->
+  <div class="screen" id="s-mine">
+    <div class="navbar">我的</div>
+    <div class="me">
+      <div class="ava">🐰</div>
+      <div style="flex:1">
+        <div class="nm">妈妈</div>
+        <div class="tiny mut">ID: 御厨8373</div>
+      </div>
+      <span class="pill brand">切换成员</span>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="item" style="border-top:0"><div class="ic">🌶️</div><div class="tx"><div class="t">口味、忌口与过敏</div><div class="s">微辣 · 少盐 · 不吃香菜</div></div><span class="arw">›</span></div>
+      <div class="item"><div class="ic">👨‍👩‍👧</div><div class="tx"><div class="t">家庭共享与成员</div><div class="s">3 位成员 · 妈妈 / 爸爸 / 小满</div></div><span class="arw">›</span></div>
+      <div class="item"><div class="ic">🔔</div><div class="tx"><div class="t">家庭消息提醒</div><div class="s">菜单安排和饭已做好通知</div></div><span class="arw">›</span></div>
+    </div>
+
+    <div class="sec-title" style="margin-top:6px">家庭工具</div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="item" style="border-top:0"><div class="ic">🧊</div><div class="tx"><div class="t">冰箱食材</div><div class="s">12 件 · 3 件快过期</div></div><span class="arw">›</span></div>
+      <div class="item"><div class="ic">🧾</div><div class="tx"><div class="t">采购清单</div><div class="s">根据最终菜单自动整理</div></div><span class="arw">›</span></div>
+      <div class="item"><div class="ic">📚</div><div class="tx"><div class="t">家庭菜谱管理</div><div class="s">85 道 · 添加、编辑或隐藏</div></div><span class="arw">›</span></div>
+    </div>
+
+    <div class="sec-title" style="margin-top:6px">AI 设置</div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="item" style="border-top:0"><div class="ic">🤖</div><div class="tx"><div class="t">模型配置</div><div class="s">pi-agent · 自行填入 provider 与模型</div></div><span class="arw">›</span></div>
+      <div class="item"><div class="ic">💬</div><div class="tx"><div class="t">提示词模板</div><div class="s">冰箱识别 / 菜品识别 / 营养分析</div></div><span class="arw">›</span></div>
+    </div>
+    <div class="tiny mut" style="text-align:center;margin:18px 0 4px">以御膳之礼，待日常三餐</div>
+  </div>
+
+  <!-- tab bar -->
+  <div class="tabbar">
+    <div class="tb on" data-s="kitchen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg>厨房</div>
+    <div class="tb" data-s="order">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="3" width="16" height="18" rx="2.5"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>订单</div>
+    <div class="tb" data-s="discover">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z"/><path d="M18 15.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"/></svg>发现</div>
+    <div class="tb" data-s="fridge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M6 10h12M9 6v1.5M9 13v2"/></svg>冰箱</div>
+    <div class="tb" data-s="mine">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20.5c1.4-3.6 4.2-5.2 7.5-5.2s6.1 1.6 7.5 5.2"/></svg>我的</div>
+  </div>
+</div>
+
+<script>
+const THEMES = {
+  a:{name:"方案 A · 暖橙家庭感",brand:"#E4633C",brand2:"#F5A65B",bg:"#FDF6EC",r:"20px",
+     css:":root{--brand:#E4633C;--brand-2:#F5A65B;--bg:#FDF6EC;--card:#FFFFFF;--ink:#2B2622;--ink-2:#8B8177;--line:#F1E7D9;--soft:#FBF1E3;--ok:#3FAE7A;--warn:#E0A33A;--radius:20px;--radius-sm:12px;--hero:linear-gradient(135deg,#F7C57E,#E4633C);--shadow:0 6px 18px rgba(180,120,70,.10)}"},
+  b:{name:"方案 B · 清新绿料理感",brand:"#2FA36B",brand2:"#7ED3A6",bg:"#F3FAF6",r:"16px",
+     css:":root{--brand:#2FA36B;--brand-2:#7ED3A6;--bg:#F3FAF6;--card:#FFFFFF;--ink:#1F2E27;--ink-2:#7C8F86;--line:#E2EFE8;--soft:#EAF7F0;--ok:#2FA36B;--warn:#D69A2E;--radius:16px;--radius-sm:11px;--hero:linear-gradient(135deg,#9ADEC0,#2FA36B);--shadow:0 6px 18px rgba(60,150,110,.10)}"},
+  c:{name:"方案 C · 融合（橙主绿辅）",brand:"#E4633C",brand2:"#34A76A",bg:"#FFF8F3",r:"18px",
+     css:":root{--brand:#E4633C;--brand-2:#34A76A;--bg:#FFF8F3;--card:#FFFFFF;--ink:#2A2724;--ink-2:#8A8178;--line:#F1E7DC;--soft:#FBEEE5;--ok:#34A76A;--warn:#DE9A2C;--radius:18px;--radius-sm:12px;--hero:linear-gradient(135deg,#F3B567,#E4633C);--shadow:0 6px 18px rgba(190,110,70,.10)}"}
+};
+const key = (new URLSearchParams(location.search).get("theme") || "a").toLowerCase();
+const t = THEMES[key] || THEMES.a;
+document.getElementById("theme").textContent = t.css;
+document.getElementById("pname").textContent = t.name;
+["a","b","c"].forEach(k=>document.getElementById("s"+k).classList.toggle("on", k===key));
+document.getElementById("k-brand").textContent = t.brand;
+document.getElementById("k-brand2").textContent = t.brand2;
+document.getElementById("k-bg").textContent = t.bg;
+document.getElementById("k-r").textContent = t.r;
+
+document.querySelectorAll(".tabbar .tb").forEach(el=>{
+  el.onclick = ()=>{
+    document.querySelectorAll(".tabbar .tb").forEach(x=>x.classList.remove("on"));
+    document.querySelectorAll(".screen").forEach(x=>x.classList.remove("on"));
+    el.classList.add("on");
+    document.getElementById("s-"+el.dataset.s).classList.add("on");
+    document.querySelector(".screen.on").scrollTop = 0;
+  };
+});
+document.querySelectorAll(".chips").forEach(c=>{
+  c.addEventListener("click", e=>{
+    if(!e.target.classList.contains("chip")) return;
+    [...c.children].forEach(x=>x.classList.remove("on"));
+    e.target.classList.add("on");
+  });
+});
+</script>
+</body>
+</html>

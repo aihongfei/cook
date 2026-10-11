@@ -1,0 +1,20 @@
+// Prisma schema（M0 仅最小可用骨架）
+// 业务模型（User / Family / Recipe / Order / Inventory…）在 M1、M2 随之补全。
+// 开发期 SQLite，生产切 PostgreSQL（见 docs/context/PLAN.md 技术路线）。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// 键值型元信息，M0 用来验证 Prisma 迁移与读写链路可用
+model AppMeta {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}

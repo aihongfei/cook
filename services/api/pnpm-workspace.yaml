@@ -1,0 +1,12 @@
+# pnpm v10 起，依赖构建脚本的白/黑名单从 package.json 搬到了这里
+# （package.json 的 "pnpm" 字段已不再被读取）。
+#
+# Prisma 需要执行 postinstall 来准备引擎，因此显式放行；
+# @scarf/scarf 只是遥测上报，明确忽略，避免它把安装链打断。
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - prisma
+
+ignoredBuiltDependencies:
+  - '@scarf/scarf'

@@ -1,0 +1,270 @@
+/* 厨房（首屏）—— 与已确认的设计稿 docs/ui-preview/handpainted 保持一致 */
+
+.hero {
+  position: relative;
+  height: 252px;
+  overflow: hidden;
+}
+
+.hero__art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 62% center;
+}
+
+/* 透明底笔绘品牌字直接落在插画上，只用米色微光提可读性（无遮挡层） */
+.hero__logo {
+  position: absolute;
+  top: 18px;
+  left: 16px;
+  width: 170px;
+  height: auto;
+  filter: drop-shadow(0 0 10px rgb(252 241 218 / 95%)) drop-shadow(0 0 3px rgb(252 241 218 / 90%))
+    drop-shadow(0 2px 6px rgb(90 53 32 / 16%));
+}
+
+/* 搜索条（上移压在 hero 下沿） */
+.search {
+  position: relative;
+  z-index: 3;
+  margin-top: -16px;
+  padding-inline: var(--spacing-page);
+}
+
+.search__box {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 12px 13px 12px 15px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  box-shadow: 0 7px 16px rgb(150 100 60 / 13%);
+}
+
+.search__input {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--color-ink);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.search__input::placeholder {
+  color: #b79a82;
+}
+
+.search__filter {
+  display: flex;
+  padding: 0;
+  color: var(--color-ink-3);
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+/* 分类：5 个独立按钮 */
+.cats {
+  display: flex;
+  gap: 7px;
+  padding: 18px var(--spacing-page) 2px;
+}
+
+.cats__item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: center;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: #7a5540;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.cats__item img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* 选中态：给笔绘方块加一圈品牌色描边（不改变图片本身） */
+.cats__item.is-active img {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 18px;
+}
+
+/* 快捷入口 */
+.quick {
+  display: flex;
+  gap: 8px;
+  padding: 14px var(--spacing-page) 0;
+}
+
+.quick__item {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 9px 14px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: #8e6b52;
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.quick__item--primary {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+/* 今日安排 */
+.today-meals__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 15px;
+  color: #6e3a1c;
+}
+
+.today-meals__more {
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+.today-meals__row {
+  display: flex;
+  gap: 11px;
+  padding: 11px 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.today-meals__label {
+  flex: 0 0 44px;
+  font-size: 13.5px;
+  color: #6e3a1c;
+}
+
+.today-meals__dishes {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.today-meals__status {
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.is-done,
+.is-planned {
+  color: #5f7f4a;
+}
+
+.is-collecting {
+  color: #a8762f;
+}
+
+/* 菜品卡横向列表 */
+.dish-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 0 var(--spacing-page) 6px;
+}
+
+.dish-card {
+  flex: 0 0 150px;
+  overflow: hidden;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.dish-card__pic {
+  position: relative;
+  height: 120px;
+  background: var(--color-cream-2);
+}
+
+.dish-card__pic img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dish-card__fav {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+  background: rgb(255 252 244 / 90%);
+  border: 0;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgb(120 80 45 / 18%);
+}
+
+.dish-card__body {
+  padding: 10px 11px 12px;
+}
+
+.dish-card__name {
+  font-size: 13.5px;
+  color: #6e3a1c;
+}
+
+.dish-card__meta {
+  display: flex;
+  gap: 11px;
+  margin-top: 7px;
+  padding-top: 7px;
+  font-size: 10.5px;
+  color: var(--color-ink-3);
+  border-top: 1px dashed var(--color-line);
+}
+
+.dish-card__add {
+  width: 100%;
+  margin-top: 9px;
+  padding: 6px 0;
+  font-family: inherit;
+  font-size: 11.5px;
+  color: #c4652a;
+  cursor: pointer;
+  background: none;
+  border: 1.5px solid #de9057;
+  border-radius: 999px;
+}
+
+/* 时令食材横幅（整块为笔绘图片） */
+.seasonal {
+  margin: 16px var(--spacing-page);
+  overflow: hidden;
+  background: #fcf0d8;
+  border-radius: 22px;
+  box-shadow: 0 8px 18px rgb(150 110 50 / 16%);
+}
+
+.seasonal img {
+  display: block;
+  width: 100%;
+  height: 136px;
+  object-fit: cover;
+  object-position: center 47%;
+}

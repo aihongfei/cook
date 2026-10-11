@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>御膳 · 六版设计方向（AI 出图）</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#EFEBE4;font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:#2B2622;padding:26px 30px}
+  h1{margin:0 0 6px;font-size:21px}
+  .sub{font-size:13px;color:#7A7269;line-height:1.75;max-width:1200px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px 22px;margin-top:22px}
+  .cell{background:#fff;border-radius:14px;padding:12px;box-shadow:0 8px 22px rgba(0,0,0,.09)}
+  .cell img{width:100%;display:block;border-radius:8px;background:#eee}
+  .cell .nm{font-size:14px;font-weight:700;margin:10px 2px 3px}
+  .cell .note{font-size:11.5px;color:#7A7269;line-height:1.65;margin:0 2px}
+  .warn{margin-top:22px;font-size:12px;color:#8A6A3A;background:#FBF1DF;border:1px dashed #E0C79A;border-radius:10px;padding:12px 14px;line-height:1.8}
+</style>
+</head>
+<body>
+  <h1>御膳 · 六版设计方向（AI 出图稿）</h1>
+  <div class="sub">
+    这六版是<b>从零设计</b>的方向探索，不沿用参考图的布局与视觉。每版只做了一张「首页」概念图（第 2 版是点单页），用来定<b>气质、配色与排版骨架</b>；选定方向后我再把它铺成完整的 HTML 可交互稿、再落地成代码。
+  </div>
+
+  <div class="grid">
+    <div class="cell">
+      <img src="01-杂志风-首页.png" alt="杂志风">
+      <div class="nm">01 · 杂志编辑风「食光」</div>
+      <p class="note">大字衬线标题 + 整幅食物大图 + 细分隔线 + 双栏网格。靠留白和字重分层，直角、无卡片阴影。适合想做出「讲究、有质感」的调性。</p>
+    </div>
+    <div class="cell">
+      <img src="02-杂志风-点单页.png" alt="杂志风点单">
+      <div class="nm">02 · 杂志风 · 点单页</div>
+      <p class="note">同方向的点菜单页：餐厅小票式的虚线分隔 + 旋转的印章状状态标（待确认／已做好）。把「家庭点菜」做出仪式感。</p>
+    </div>
+    <div class="cell">
+      <img src="03-便签墙-家的板.png" alt="便签墙">
+      <div class="nm">03 · 便签墙「家的板」</div>
+      <p class="note">牛皮纸底 + 三列彩色便签（早/午/晚），胶带、手写感标题、圆形大按钮。最有「家庭手账」的温度，适合突出家人协作留言。</p>
+    </div>
+    <div class="cell">
+      <img src="04-极简几何-时间轴.png" alt="极简时间轴">
+      <div class="nm">04 · 极简几何「一日三餐」</div>
+      <p class="note">纯白 + 单一墨绿强调色，纵向时间轴串起早/午/晚，节点用「实心／半实心／空心」表示进度。信息最清晰、最像工具。</p>
+    </div>
+    <div class="cell">
+      <img src="05-暗色-夜厨.png" alt="暗色夜厨">
+      <div class="nm">05 · 暗色「夜厨」</div>
+      <p class="note">近黑底 + 暖琥珀色，深色分层与微光。有高级感和夜间使用友好度，配合拍照识别入口做视觉重心。</p>
+    </div>
+    <div class="cell">
+      <img src="06-新中式-雅致.png" alt="新中式">
+      <div class="nm">06 · 新中式「雅致」</div>
+      <p class="note">宣纸底 + 墨色 + 一点朱红，双细线框、印章元素、水墨感插画。承接「御膳」这个品牌名的调性，最契合中式家庭厨房。</p>
+    </div>
+  </div>
+
+  <div class="warn">
+    <b>说明：</b>这是 AI 概念图，图中文字是模型生成的示意字形（不可读），只用于看<b>版式、配色、气质</b>；真实文字会在落地时按设计规范重排。<br>
+    <b>下一步：</b>请告诉我留哪一版（或哪几版的组合，例如「06 的调性 + 03 的便签交互」），我再把该方向做成完整的可交互 HTML 稿（首页／点菜单／冰箱／发现／我的），确认后再进入 M0 编码。
+  </div>
+</body>
+</html>

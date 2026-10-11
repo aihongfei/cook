@@ -1,0 +1,73 @@
+.tab-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-cream);
+  /* 页面背景加一点纸感颗粒，与笔绘素材统一 */
+  background-image: radial-gradient(rgb(190 160 120 / 10%) 1px, transparent 1px);
+  background-size: 5px 5px;
+}
+
+.tab-layout__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tab-bar {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  height: var(--spacing-tabbar);
+  padding-bottom: calc(var(--safe-bottom) + 9px);
+  background: var(--color-paper);
+  border-top: 1px solid var(--color-line);
+}
+
+.tab-bar__item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.tab-bar__item.is-active {
+  color: var(--color-brand);
+}
+
+.tab-bar__bar {
+  width: 18px;
+  height: 3px;
+  margin-top: 1px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.tab-bar__item.is-active .tab-bar__bar {
+  background: var(--color-brand);
+}
+
+/* 两角的手绘草枝 */
+.tab-bar__deco {
+  position: absolute;
+  bottom: calc(var(--safe-bottom) + 24px);
+  color: #c7a97e;
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.tab-bar__deco--left {
+  left: 6px;
+}
+
+.tab-bar__deco--right {
+  right: 6px;
+  transform: scaleX(-1);
+}

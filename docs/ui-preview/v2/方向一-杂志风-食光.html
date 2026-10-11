@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>方向一 · 杂志风「食光」</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --paper:#FBF8F3; --ink:#171614; --red:#C8402F; --sand:#E9E1D2;
+  --gray:#8B857C; --line:#DED6C6; --dim:#F3EEE5;
+  --serif:Georgia,"Times New Roman","Songti SC","SimSun",serif;
+  --sans:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+body{margin:0;background:#DEDAD2;font-family:var(--sans);color:var(--ink);
+  display:flex;gap:22px;justify-content:center;align-items:flex-start;padding:24px;min-height:100vh}
+.phone{width:390px;height:844px;background:var(--paper);border-radius:6px;overflow:hidden;position:relative;display:flex;flex-direction:column;
+  box-shadow:0 20px 50px rgba(0,0,0,.22);flex:0 0 auto}
+.status{height:40px;display:flex;justify-content:space-between;align-items:center;padding:0 20px;font-size:12px;color:var(--gray);letter-spacing:.5px;flex:0 0 auto}
+.masthead{display:flex;justify-content:space-between;align-items:baseline;padding:4px 20px 12px;border-bottom:1px solid var(--ink);flex:0 0 auto}
+.masthead .mark{font-family:var(--serif);font-size:25px;letter-spacing:8px}
+.masthead .tools{font-size:11px;color:var(--gray);letter-spacing:1px}
+.scroll{flex:1;overflow-y:auto;padding:0 20px 96px;scrollbar-width:none}
+.scroll::-webkit-scrollbar{display:none}
+.screen{display:none}
+.screen.on{display:block}
+
+.kicker{font-size:9.5px;letter-spacing:2.4px;color:var(--gray);text-transform:uppercase;margin:18px 0 8px}
+.rule{height:1px;background:var(--line);margin:16px 0}
+
+/* 大幅主图 */
+.feature{position:relative;height:300px;margin-top:14px;overflow:hidden;background:linear-gradient(150deg,#E8B98A,#C8402F 78%)}
+.feature .art{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:104px;opacity:.9;
+  filter:saturate(.9)}
+.feature .cap{position:absolute;left:0;right:0;bottom:0;padding:16px 18px 15px;color:#fff;
+  background:linear-gradient(to top,rgba(20,14,10,.72),rgba(20,14,10,0))}
+.feature .cap .d{font-size:10px;letter-spacing:2.5px;opacity:.85}
+.feature .cap h2{font-family:var(--serif);font-size:23px;margin:8px 0 6px;line-height:1.35;font-weight:400}
+.feature .cap .n{font-size:11.5px;opacity:.9}
+
+/* 三餐票券 */
+.tickets{display:flex;gap:10px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.tickets::-webkit-scrollbar{display:none}
+.ticket{flex:0 0 108px;border:1px solid var(--ink);background:#fff;padding:11px 11px 13px;position:relative}
+.ticket .no{font-family:var(--serif);font-size:11px;color:var(--red);letter-spacing:1px}
+.ticket .meal{font-size:15px;font-weight:700;margin:6px 0 7px}
+.ticket .bar{border-top:1px dashed var(--line);margin-bottom:7px}
+.ticket .list{font-size:11px;line-height:1.6;color:#4A453E;min-height:52px}
+.ticket .st{font-size:9.5px;letter-spacing:1px;margin-top:7px;padding-top:6px;border-top:1px solid var(--line)}
+.st.done{color:var(--red)}.st.hold{color:var(--gray)}
+
+/* 入口条 */
+.entry{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--ink);padding:14px 16px;margin:4px 0 0;background:#fff}
+.entry .t{font-family:var(--serif);font-size:16px}
+.entry .s{font-size:10.5px;color:var(--gray);margin-top:3px;letter-spacing:.4px}
+.entry .go{font-size:11px;letter-spacing:1.5px;color:var(--red)}
+
+/* 菜谱网格 */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px 14px}
+.dish .pic{height:110px;display:flex;align-items:center;justify-content:center;font-size:44px;background:var(--dim)}
+.dish .nm{font-family:var(--serif);font-size:15.5px;margin-top:9px}
+.dish .meta{font-size:10.5px;color:var(--gray);margin-top:4px;padding-top:6px;border-top:1px solid var(--line);display:flex;justify-content:space-between}
+.dish .kcal{color:var(--red)}
+
+/* 点菜单（餐厅单页风） */
+.sheet{background:#fff;border:1px solid var(--line);margin-top:16px;padding:20px 18px 16px;position:relative}
+.sheet::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:10px;
+  background:radial-gradient(circle at 6px 0,transparent 6px,var(--paper) 6.5px) repeat-x;background-size:12px 10px}
+.sheet .h{text-align:center;font-family:var(--serif);font-size:19px;letter-spacing:4px}
+.sheet .sub{text-align:center;font-size:10px;letter-spacing:2px;color:var(--gray);margin:7px 0 16px}
+.order{border-top:1px dashed var(--line);padding:14px 0}
+.order:first-of-type{border-top:0;padding-top:2px}
+.order .top{display:flex;justify-content:space-between;align-items:flex-start}
+.order .date{font-family:var(--serif);font-size:17px}
+.order .who{font-size:10.5px;color:var(--gray);margin-top:4px}
+.seal{font-size:9.5px;letter-spacing:1.5px;border:1.5px solid var(--red);color:var(--red);padding:4px 8px;transform:rotate(-6deg);white-space:nowrap}
+.seal.gray{border-color:var(--gray);color:var(--gray)}
+.order .items{font-size:12.5px;line-height:1.85;margin-top:10px;color:#37332D}
+.order .note{font-size:11px;color:var(--gray);margin-top:8px;padding-left:10px;border-left:2px solid var(--sand)}
+.order .foot{display:flex;justify-content:space-between;align-items:center;margin-top:11px;font-size:10px;color:var(--gray);letter-spacing:.4px}
+.order .again{border:1px solid var(--ink);background:#fff;font-size:10.5px;letter-spacing:1.2px;padding:6px 12px;font-family:var(--sans)}
+
+/* 台账 */
+.ledger{margin-top:16px}
+.lrow{display:grid;grid-template-columns:1fr 62px 72px;gap:10px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line)}
+.lrow .nm{font-size:13px}
+.lrow .nm i{font-style:normal;color:var(--gray);font-size:10.5px;display:block;margin-top:2px;letter-spacing:.4px}
+.lrow .where{font-size:10.5px;color:var(--gray);letter-spacing:.6px}
+.gauge{height:4px;background:var(--sand);position:relative}
+.gauge i{position:absolute;left:0;top:0;bottom:0;background:var(--ink)}
+.gauge i.warn{background:var(--red)}
+.gauge+.small{font-size:9.5px;color:var(--gray);margin-top:4px;letter-spacing:.4px}
+.small.warn{color:var(--red)}
+.nums{display:flex;border-top:1px solid var(--ink);border-bottom:1px solid var(--ink)}
+.nums div{flex:1;padding:14px 0;text-align:center;border-left:1px solid var(--line)}
+.nums div:first-child{border-left:0}
+.nums b{font-family:var(--serif);font-size:26px;font-weight:400;display:block}
+.nums span{font-size:9.5px;letter-spacing:1.6px;color:var(--gray)}
+.aistrip{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--red);color:var(--red);padding:13px 15px;margin-top:18px}
+.aistrip .t{font-size:13px;font-weight:700}
+.aistrip .s{font-size:10px;color:var(--gray);margin-top:3px;letter-spacing:.3px}
+
+/* 底部导航：极简文字 */
+.nav{position:absolute;left:0;right:0;bottom:0;height:66px;background:var(--paper);border-top:1px solid var(--ink);display:flex;align-items:center;padding-bottom:6px}
+.nav div{flex:1;text-align:center;font-size:10.5px;letter-spacing:2.6px;color:var(--gray);cursor:pointer;padding:6px 0}
+.nav div.on{color:var(--ink);font-weight:700;position:relative}
+.nav div.on::after{content:"";position:absolute;left:50%;transform:translateX(-50%);bottom:-9px;width:16px;height:2px;background:var(--red)}
+
+.spec{width:260px;background:#fff;padding:16px;font-size:12px;line-height:1.75;box-shadow:0 8px 24px rgba(0,0,0,.12)}
+.spec h3{margin:0 0 4px;font-size:15px;font-family:var(--serif);letter-spacing:2px}
+.spec .tagline{font-size:11px;color:var(--gray);margin-bottom:10px}
+.spec .kv{display:flex;justify-content:space-between;border-top:1px dashed var(--line);padding-top:6px;margin-top:6px}
+.spec .sw{display:inline-block;width:12px;height:12px;border:1px solid rgba(0,0,0,.15);vertical-align:-2px;margin-right:6px}
+.spec a{color:var(--red);font-size:11px}
+@media(max-width:1000px){body{flex-wrap:wrap}}
+</style>
+</head>
+<body>
+
+<div class="spec">
+  <h3>食光</h3>
+  <div class="tagline">方向一 · 杂志编辑风</div>
+  <div>以「大字标题 + 整幅食物大图 + 细分隔线 + 双栏网格」构成，像一本美食杂志的内页；信息靠留白与字重分层，不用圆角卡片。</div>
+  <div class="kv"><span>底色</span><b><span class="sw" style="background:#FBF8F3"></span>#FBF8F3</b></div>
+  <div class="kv"><span>墨</span><b><span class="sw" style="background:#171614"></span>#171614</b></div>
+  <div class="kv"><span>朱红</span><b><span class="sw" style="background:#C8402F"></span>#C8402F</b></div>
+  <div class="kv"><span>标题字</span><b>衬线 / 400</b></div>
+  <div class="kv"><span>正文字</span><b>无衬线 / 11–13</b></div>
+  <div class="kv"><span>圆角</span><b>直角 0px</b></div>
+  <div class="kv"><span>栅格</span><b>左右 20px</b></div>
+  <div class="kv"><span>导航</span><b>纯文字 + 短下划线</b></div>
+  <div style="margin-top:10px"><a href="index.html">← 返回三方向对比</a></div>
+</div>
+
+<div class="phone">
+  <div class="status"><span>9:41</span><span>5G ▮</span></div>
+  <div class="masthead"><div class="mark">食光</div><div class="tools">搜索 · 我的</div></div>
+
+  <div class="scroll">
+    <!-- 首页 -->
+    <div class="screen on" id="s0">
+      <div class="feature">
+        <div class="art">🍲</div>
+        <div class="cap">
+          <div class="d">今日 · 周三 · 十月十一</div>
+          <h2>番茄炒蛋，清炒菜心，<br>还有一锅家常米饭</h2>
+          <div class="n">午餐已定 · 晚餐正在收集（3 道候选）</div>
+        </div>
+      </div>
+
+      <div class="kicker">The Three Meals</div>
+      <div class="tickets">
+        <div class="ticket"><div class="no">01</div><div class="meal">早餐</div><div class="bar"></div><div class="list">小米南瓜粥<br>水煮蛋</div><div class="st done">已完成</div></div>
+        <div class="ticket"><div class="no">02</div><div class="meal">午餐</div><div class="bar"></div><div class="list">番茄炒蛋<br>清炒菜心<br>家常米饭</div><div class="st done">菜单已定</div></div>
+        <div class="ticket"><div class="no">03</div><div class="meal">晚餐</div><div class="bar"></div><div class="list">土豆烧排骨<br>凉拌黄瓜<br>小米南瓜粥</div><div class="st hold">收集中</div></div>
+      </div>
+
+      <div class="rule"></div>
+      <div class="entry">
+        <div><div class="t">家宴 · 点菜单</div><div class="s">爸爸与小满点了 4 道菜，1 条备注</div></div>
+        <div class="go">查看 ›</div>
+      </div>
+
+      <div class="kicker">From The Kitchen · 私房菜 85 道</div>
+      <div class="grid2">
+        <div class="dish"><div class="pic">🫘</div><div class="nm">干煸四季豆</div><div class="meta"><span>川味 · 香辣</span><span class="kcal">180</span></div></div>
+        <div class="dish"><div class="pic">🥦</div><div class="nm">干煸花菜</div><div class="meta"><span>家常 · 下饭</span><span class="kcal">150</span></div></div>
+        <div class="dish"><div class="pic">🥔</div><div class="nm">干锅土豆片</div><div class="meta"><span>川味 · 香辣</span><span class="kcal">240</span></div></div>
+        <div class="dish"><div class="pic">🍅</div><div class="nm">番茄炒蛋</div><div class="meta"><span>家常 · 微甜</span><span class="kcal">220</span></div></div>
+      </div>
+    </div>
+
+    <!-- 点单 -->
+    <div class="screen" id="s1">
+      <div class="kicker">The Order Sheet</div>
+      <div class="sheet">
+        <div class="h">家宴点菜单</div>
+        <div class="sub">RECORDED BY THE FAMILY</div>
+
+        <div class="order">
+          <div class="top">
+            <div><div class="date">10 / 10 · 晚餐</div><div class="who">爸爸 · 小满 点的</div></div>
+            <div class="seal">已做好</div>
+          </div>
+          <div class="items">番茄炒蛋　·　土豆烧排骨<br>凉拌黄瓜　·　家常米饭<br><span style="color:#8B857C;font-size:11px">共 4 道 · 4 人吃</span></div>
+          <div class="note">小满那份不要辣</div>
+          <div class="foot"><span>2026-10-10 10:20 提交</span><button class="again">再点一次</button></div>
+        </div>
+
+        <div class="order">
+          <div class="top">
+            <div><div class="date">10 / 11 · 午餐</div><div class="who">妈妈 点的</div></div>
+            <div class="seal gray">待确认</div>
+          </div>
+          <div class="items">清炒菜心　·　家常米饭<br><span style="color:#8B857C;font-size:11px">共 2 道 · 3 人吃</span></div>
+          <div class="foot"><span>2026-10-11 08:05 提交</span><button class="again">再点一次</button></div>
+        </div>
+      </div>
+      <div class="rule"></div>
+      <div class="ledger" style="margin-top:0">
+        <div class="lrow" style="grid-template-columns:1fr"><div class="nm">家庭常用组合 <i>快手三菜一汤 · 有荤有素的一餐</i></div></div>
+      </div>
+    </div>
+
+    <!-- 冰箱 -->
+    <div class="screen" id="s2">
+      <div class="kicker">Inventory Ledger</div>
+      <div class="nums">
+        <div><b>12</b><span>在库</span></div>
+        <div><b style="color:#C8402F">3</b><span>临期</span></div>
+        <div><b>8</b><span>品类</span></div>
+      </div>
+      <div class="aistrip">
+        <div><div class="t">拍照识别 · 一键入库</div><div class="s">拍一张冰箱内部，自动列出食材清单，你确认后写入台账</div></div>
+        <div style="font-size:20px">📷</div>
+      </div>
+
+      <div class="kicker">Use First</div>
+      <div class="ledger">
+        <div class="lrow"><div class="nm">小油菜<i>保鲜</i></div><div class="where">剩 1 天</div><div><div class="gauge"><i class="warn" style="width:14%"></i></div><div class="small warn">快过期</div></div></div>
+        <div class="lrow"><div class="nm">鸡蛋<i>冷藏</i></div><div class="where">剩 2 天</div><div><div class="gauge"><i class="warn" style="width:28%"></i></div><div class="small warn">快过期</div></div></div>
+        <div class="lrow"><div class="nm">土豆<i>常温</i></div><div class="where">剩 12 天</div><div><div class="gauge"><i style="width:62%"></i></div><div class="small">充足</div></div></div>
+      </div>
+
+      <div class="kicker">By Storage</div>
+      <div class="ledger">
+        <div class="lrow" style="grid-template-columns:1fr auto"><div class="nm">常温</div><div class="where">2 件</div></div>
+        <div class="lrow" style="grid-template-columns:1fr auto"><div class="nm">保鲜</div><div class="where">5 件</div></div>
+        <div class="lrow" style="grid-template-columns:1fr auto"><div class="nm">冷藏</div><div class="where">4 件</div></div>
+        <div class="lrow" style="grid-template-columns:1fr auto"><div class="nm">冷冻</div><div class="where">1 件</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nav">
+    <div class="on" data-i="0">首页</div>
+    <div data-i="1">点菜单</div>
+    <div data-i="2">冰箱</div>
+    <div data-i="3">发现</div>
+    <div data-i="4">我的</div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.nav div').forEach(function(el){
+  el.onclick=function(){
+    document.querySelectorAll('.nav div').forEach(function(x){x.classList.remove('on')});
+    document.querySelectorAll('.screen').forEach(function(x){x.classList.remove('on')});
+    el.classList.add('on');
+    var t=document.getElementById('s'+el.dataset.i);
+    if(t){t.classList.add('on')}else{document.getElementById('s0').classList.add('on')}
+    document.querySelector('.scroll').scrollTop=0;
+  };
+});
+</script>
+</body>
+</html>

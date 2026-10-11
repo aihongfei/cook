@@ -1,0 +1,41 @@
+@import 'tailwindcss';
+
+/*
+ * 设计 token（唯一来源）
+ * 用 @theme static：强制把所有 token 输出为 :root 上的 CSS 变量，
+ * 否则 Tailwind v4 只会保留「被工具类引用到」的那些，SCSS 里的 var(--color-*) 会失效。
+ */
+@theme static {
+  --font-sans:
+    'ZCOOL KuaiLe', ui-sans-serif, system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+  /* 品牌与文字 */
+  --color-brand: #e07b39;
+  --color-brick: #b94a2c;
+  --color-ink: #5a3520;
+  --color-ink-2: #8e6b52;
+  --color-ink-3: #a8785a;
+
+  /* 面 */
+  --color-cream: #fcf1da;
+  --color-cream-2: #f8ead4;
+  --color-paper: #fffbf2;
+  --color-line: #eadcc4;
+
+  /* 分类粉彩 */
+  --color-peach: #f6c9a8;
+  --color-sage: #bccba6;
+  --color-butter: #f5d98b;
+  --color-rose: #e8b4a6;
+  --color-teal: #a8bfb4;
+
+  /* 圆角与阴影 */
+  --radius-card: 20px;
+  --radius-tile: 18px;
+  --shadow-card: 0 8px 18px rgb(150 100 60 / 10%);
+  --shadow-hero: 0 20px 46px rgb(80 50 25 / 24%);
+
+  /* 页面基准 */
+  --spacing-page: 16px;
+  --spacing-tabbar: 76px;
+}

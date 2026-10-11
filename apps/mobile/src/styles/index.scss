@@ -1,0 +1,62 @@
+/* 手写体：站酷快乐体 ZCOOL KuaiLe（SIL OFL 1.1，可商用），简体中文单文件 */
+@font-face {
+  font-family: 'ZCOOL KuaiLe';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/zcool-kuaile-chinese-simplified-400-normal.woff2') format('woff2');
+}
+
+/* 基础重置 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background: var(--color-cream);
+  -webkit-font-smoothing: antialiased;
+  text-size-adjust: 100%;
+  overscroll-behavior-y: none;
+}
+
+/* 手写体只有一个字重，避免浏览器合成假粗体导致变形 */
+h1,
+h2,
+h3,
+h4,
+strong,
+b {
+  font-weight: 400;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* 移动端：隐藏滚动条 + 安全区变量 */
+::-webkit-scrollbar {
+  display: none;
+}
+
+:root {
+  /* 供组件使用的安全区（刘海屏 / 手势条） */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}

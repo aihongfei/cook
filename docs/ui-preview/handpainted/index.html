@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>御膳 · 手绘水粉风实现（对照 04）</title>
+<style>
+@font-face{font-family:'ZCOOL KuaiLe';font-style:normal;font-weight:400;font-display:swap;
+  src:url('assets/fonts/zcool-kuaile-chinese-simplified-400-normal.woff2') format('woff2')}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --cream:#FCF1DA; --cream2:#F8EAD4; --ink:#5A3520; --ink2:#8E6B52; --ink3:#A8785A;
+  --orange:#E07B39; --brick:#B94A2C; --peach:#F6C9A8; --sage:#BCCBA6;
+  --butter:#F5D98B; --rose:#E8B4A6; --teal:#A8BFB4; --line:#EADCC4; --paper:#FFFBF2;
+  --sans:'ZCOOL KuaiLe',-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+body{margin:0;background:#D8CCB9;font-family:var(--sans);color:var(--ink);
+  display:flex;justify-content:center;align-items:flex-start;gap:26px;padding:24px;min-height:100vh}
+.col{display:flex;flex-direction:column;gap:9px}
+.col .cap{font-size:12px;color:#6B5A48;font-weight:700;letter-spacing:.5px}
+.orig{border-radius:26px;box-shadow:0 20px 46px rgba(80,50,25,.24);display:block;width:390px}
+
+/* ===== 手机 ===== */
+.phone{width:390px;height:844px;background:var(--cream);border-radius:30px;overflow:hidden;position:relative;
+  display:flex;flex-direction:column;box-shadow:0 20px 46px rgba(80,50,25,.28);
+  background-image:radial-gradient(rgba(190,160,120,.10) 1px,transparent 1px);background-size:5px 5px}
+.phone::after{content:"";position:absolute;inset:0;border-radius:30px;pointer-events:none;
+  box-shadow:inset 0 0 0 1px rgba(160,120,80,.18)}
+.scroll{flex:1;overflow-y:auto;padding-bottom:88px;scrollbar-width:none}
+.scroll::-webkit-scrollbar{display:none}
+.screen{display:none}
+.screen.on{display:block}
+
+/* hero */
+.hero{position:relative;height:252px;flex:0 0 auto;overflow:hidden}
+.hero img{width:100%;height:100%;object-fit:cover;object-position:62% center}
+/* 透明底笔绘 logo 直接落在插画上：只用米色微光提可读性，不遮挡插画 */
+.hero .logoimg{position:absolute;left:16px;top:18px;width:170px;height:auto;
+  filter:drop-shadow(0 0 10px rgba(252,241,218,.95)) drop-shadow(0 0 3px rgba(252,241,218,.9)) drop-shadow(0 2px 6px rgba(90,53,32,.16))}
+
+/* 搜索 */
+.search{padding:0 16px;margin-top:-16px;position:relative;z-index:3}
+.search .box{display:flex;align-items:center;gap:9px;background:var(--paper);border:1px solid var(--line);
+  border-radius:999px;padding:12px 13px 12px 15px;box-shadow:0 7px 16px rgba(150,100,60,.13)}
+.search .ph{flex:1;font-size:13px;color:#B79A82}
+.search .filt{color:var(--ink3)}
+
+/* 分类：5 个独立按钮，每个 = 一张笔绘水彩图标 + 手写字体标签 */
+.cats{display:flex;gap:7px;padding:18px 14px 2px}
+.cat{flex:1;text-align:center;cursor:pointer}
+.cat img{width:100%;height:auto;display:block}
+.cat span{display:block;margin-top:5px;font-size:12.5px;color:#7A5540;letter-spacing:.5px}
+
+/* 区块头 */
+.sechead{display:flex;align-items:center;justify-content:space-between;padding:20px 16px 11px}
+.sechead .t{font-size:19px;font-weight:800;color:#6E3A1C;display:flex;align-items:center;gap:9px}
+.sechead .t .orn{color:#E29A5A;font-size:11px;letter-spacing:-1px}
+.sechead .all{font-size:11.5px;color:var(--ink3);display:flex;align-items:center;gap:4px}
+
+/* 菜谱卡 */
+.cards{display:flex;gap:12px;overflow-x:auto;padding:0 16px 6px;scrollbar-width:none}
+.cards::-webkit-scrollbar{display:none}
+.card{flex:0 0 150px;background:var(--paper);border:1px solid var(--line);border-radius:20px;overflow:hidden;
+  box-shadow:0 8px 18px rgba(150,100,60,.11)}
+.card .pic{position:relative;height:120px;background:var(--cream2)}
+.card .pic img{width:100%;height:100%;object-fit:cover;display:block}
+.card .fav{position:absolute;right:8px;top:8px;width:26px;height:26px;border-radius:50%;
+  background:rgba(255,252,244,.9);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(120,80,45,.18)}
+.card .body{padding:10px 11px 12px}
+.card .nm{font-size:13.5px;font-weight:700;color:#6E3A1C;line-height:1.35;min-height:37px}
+.card .meta{display:flex;gap:11px;align-items:center;margin-top:7px;font-size:10.5px;color:var(--ink3);padding-top:7px;border-top:1px dashed var(--line)}
+
+/* 时令横幅（整块用图片，含手写体文字） */
+.banner{margin:16px;border-radius:22px;height:136px;overflow:hidden;background:#FCF0D8;
+  box-shadow:0 8px 18px rgba(150,110,50,.16)}
+.banner img{width:100%;height:100%;object-fit:cover;object-position:center 47%;display:block}
+
+/* 底部导航 */
+.nav{position:absolute;left:0;right:0;bottom:0;height:76px;background:var(--paper);border-top:1px solid var(--line);
+  display:flex;align-items:center;padding-bottom:9px}
+.nav .nb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;color:var(--ink3);cursor:pointer}
+.nav .nb.on{color:#E07B39;font-weight:700}
+.nav .nb .bar{width:18px;height:3px;border-radius:2px;background:transparent;margin-top:1px}
+.nav .nb.on .bar{background:#E07B39}
+.deco{position:absolute;bottom:24px;font-size:15px;color:#C7A97E;opacity:.75}
+.deco.l{left:6px}.deco.r{right:6px}
+
+/* ===== 其它页共用 ===== */
+.pad{padding:20px 16px 0}
+.ptitle{font-size:21px;font-weight:800;color:#6E3A1C;letter-spacing:.5px}
+.psub{font-size:11.5px;color:var(--ink3);margin-top:6px}
+.softcard{background:var(--paper);border:1px solid var(--line);border-radius:20px;padding:15px;
+  box-shadow:0 8px 18px rgba(150,100,60,.10);margin-top:14px}
+.tabs2{display:flex;gap:8px;margin-top:14px}
+.tabs2 span{flex:1;text-align:center;font-size:12.5px;padding:9px 0;border-radius:13px;background:var(--cream2);color:var(--ink3)}
+.tabs2 span.on{background:#E9A15E;color:#fff;font-weight:700}
+.chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin-top:12px}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;font-size:12px;padding:7px 13px;border-radius:999px;background:var(--cream2);color:var(--ink3);border:1px solid var(--line)}
+.chip.on{background:#E07B39;color:#fff;border-color:#E07B39;font-weight:700}
+.order{background:var(--paper);border:1px dashed #D9C4A4;border-radius:18px;padding:14px;margin-top:12px}
+.order .row1{display:flex;justify-content:space-between;align-items:flex-start}
+.order .d{font-size:15.5px;font-weight:800;color:#6E3A1C}
+.order .who{font-size:10.5px;color:var(--ink3);margin-top:4px}
+.stamp{font-size:10px;font-weight:800;letter-spacing:1px;padding:5px 9px;border-radius:8px;transform:rotate(-5deg);
+  border:1.5px solid #7FA06A;color:#5F7F4A;background:rgba(188,203,166,.28)}
+.stamp.wait{border-color:#D8A25C;color:#A8762F;background:rgba(245,217,139,.30)}
+.order .items{font-size:12.5px;color:#4A3225;line-height:1.8;margin-top:10px}
+.order .note{font-size:11px;color:var(--ink3);margin-top:9px;padding-left:10px;border-left:2.5px solid #E4C79E}
+.order .foot{display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:10px;color:var(--ink3)}
+.gbtn{border:1.5px solid #DE9057;color:#C4652A;background:transparent;font-size:11px;font-weight:700;
+  padding:6px 13px;border-radius:999px;font-family:var(--sans)}
+.stats{display:flex;background:var(--paper);border:1px solid var(--line);border-radius:20px;margin-top:14px;overflow:hidden;
+  box-shadow:0 8px 18px rgba(150,100,60,.10)}
+.stats div{flex:1;text-align:center;padding:15px 0;border-left:1px dashed var(--line)}
+.stats div:first-child{border-left:0}
+.stats b{display:block;font-size:23px;color:#6E3A1C;font-weight:800}
+.stats span{font-size:10.5px;color:var(--ink3)}
+.aicta{display:flex;align-items:center;gap:12px;margin-top:14px;border-radius:20px;padding:15px;
+  background:linear-gradient(100deg,#F8D9A8,#EEB877);box-shadow:0 8px 18px rgba(150,110,50,.16)}
+.aicta .ic{width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,.55);display:flex;align-items:center;justify-content:center;font-size:20px}
+.aicta .t{font-size:14.5px;font-weight:800;color:#7A4A18}
+.aicta .s{font-size:11px;color:#96702F;margin-top:3px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-top:14px}
+.quad{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:13px;box-shadow:0 8px 18px rgba(150,100,60,.09)}
+.quad .t{font-size:13px;font-weight:700;color:#6E3A1C}
+.quad .n{font-size:11px;color:var(--ink3);margin-top:3px}
+.lrow{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px dashed var(--line)}
+.lrow:last-child{border-bottom:0}
+.lrow .ic2{width:34px;height:34px;border-radius:12px;background:var(--cream2);display:flex;align-items:center;justify-content:center;font-size:16px}
+.lrow .tt{flex:1;font-size:13.5px;font-weight:700;color:#6E3A1C}
+.lrow .ss{font-size:11px;color:var(--ink3);margin-top:2px;font-weight:400}
+.me{display:flex;align-items:center;gap:13px;background:var(--paper);border:1px solid var(--line);border-radius:20px;
+  padding:15px;margin-top:14px;box-shadow:0 8px 18px rgba(150,100,60,.10)}
+.me .av{width:52px;height:52px;border-radius:50%;background:var(--cream2);display:flex;align-items:center;justify-content:center;font-size:26px}
+.rank{background:linear-gradient(100deg,#F6C9A8,#EFB183);border-radius:20px;padding:16px;margin-top:14px;position:relative;overflow:hidden}
+.rank .en{font-size:9px;letter-spacing:2.4px;color:#9A6238}
+.rank .t{font-size:19px;font-weight:800;color:#7A3B1E;margin-top:7px}
+.rank .go{background:var(--paper);color:#C4652A;border:0;font-weight:800;font-size:12.5px;padding:9px 16px;border-radius:999px;margin-top:13px;font-family:var(--sans)}
+.rank .dice{position:absolute;right:14px;bottom:12px;font-size:44px;opacity:.9}
+</style>
+</head>
+<body>
+
+<!-- 原图 -->
+<div class="col">
+  <div class="cap">① 你选的原图（AI 概念图）</div>
+  <img class="orig" src="../directions2/04-手绘水粉-插画.png" alt="原图">
+</div>
+
+<!-- 实现 -->
+<div class="col">
+  <div class="cap">② 我的实现（HTML/CSS + 同风格生成的插画素材）</div>
+  <div class="phone">
+    <div class="scroll">
+
+      <!-- 厨房 -->
+      <div class="screen on" id="s-kitchen">
+        <div class="hero">
+          <img src="assets/hero.png" alt="">
+          <img class="logoimg" src="assets/logo-t.png" alt="御膳私房菜">
+        </div>
+
+        <div class="search"><div class="box">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B08C6C" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.4 15.4 21 21"/></svg>
+          <div class="ph">搜菜名、食材、口味…</div>
+          <svg class="filt" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M7 12h10M10 17h4"/></svg>
+        </div></div>
+
+        <div class="cats">
+          <div class="cat"><img src="assets/cat-1.png" alt="快捷菜"><span>快手菜</span></div>
+          <div class="cat"><img src="assets/cat-2.png" alt="家常菜"><span>家常菜</span></div>
+          <div class="cat"><img src="assets/cat-3.png" alt="荤菜"><span>荤菜</span></div>
+          <div class="cat"><img src="assets/cat-4.png" alt="素菜"><span>素菜</span></div>
+          <div class="cat"><img src="assets/cat-5.png" alt="汤羹"><span>汤羹</span></div>
+        </div>
+
+        <div class="sechead">
+          <div class="t"><span class="orn">❯❯</span>今日推荐</div>
+          <div class="all">全部 <span>→</span></div>
+        </div>
+
+        <div class="cards">
+          <div class="card">
+            <div class="pic"><img src="assets/dish-tomato-egg.png" alt=""><div class="fav">❤</div></div>
+            <div class="body"><div class="nm">番茄炒蛋</div>
+              <div class="meta"><span>⏱ 15 分钟</span><span>❤ 128</span></div></div>
+          </div>
+          <div class="card">
+            <div class="pic"><img src="assets/dish-ribs.png" alt=""><div class="fav">❤</div></div>
+            <div class="body"><div class="nm">红烧排骨</div>
+              <div class="meta"><span>⏱ 45 分钟</span><span>❤ 96</span></div></div>
+          </div>
+          <div class="card">
+            <div class="pic"><img src="assets/dish-soup.png" alt=""><div class="fav">❤</div></div>
+            <div class="body"><div class="nm">香菇炖鸡</div>
+              <div class="meta"><span>⏱ 60 分钟</span><span>❤ 74</span></div></div>
+          </div>
+        </div>
+
+        <div class="banner"><img src="assets/banner.png" alt="时令食材"></div>
+      </div>
+
+      <!-- 订单 -->
+      <div class="screen" id="s-order">
+        <div class="pad">
+          <div class="ptitle">家宴点菜单</div>
+          <div class="psub">记录大家想吃什么，也记录每顿饭的回应</div>
+          <div class="tabs2"><span class="on">全家点菜单</span><span>只看我的</span></div>
+          <div class="chips"><span class="chip on">全部 2</span><span class="chip">待确认 1</span><span class="chip">已安排</span><span class="chip">已做好 1</span></div>
+
+          <div class="order">
+            <div class="row1"><div><div class="d">10 / 10 · 晚餐</div><div class="who">爸爸 · 小满 点的</div></div><div class="stamp">已做好</div></div>
+            <div class="items">番茄炒蛋　·　红烧排骨<br>凉拌黄瓜　·　家常米饭<br><span style="font-size:11px;color:#A8785A">共 4 道 · 4 人吃</span></div>
+            <div class="note">小满那份不要辣</div>
+            <div class="foot"><span>2026-10-10 10:20 提交</span><button class="gbtn">再点一次</button></div>
+          </div>
+
+          <div class="order">
+            <div class="row1"><div><div class="d">10 / 11 · 午餐</div><div class="who">妈妈 点的</div></div><div class="stamp wait">待确认</div></div>
+            <div class="items">清炒菜心　·　香菇炖鸡<br><span style="font-size:11px;color:#A8785A">共 2 道 · 3 人吃</span></div>
+            <div class="foot"><span>2026-10-11 08:05 提交</span><button class="gbtn">再点一次</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 发现 -->
+      <div class="screen" id="s-discover">
+        <div class="pad">
+          <div class="ptitle">发现</div>
+          <div class="psub">今天不知道吃什么，交给它</div>
+          <div class="rank">
+            <div class="en">WHAT TO EAT TODAY</div>
+            <div class="t">今天吃什么？</div>
+            <button class="go">开始随机 →</button>
+            <div class="dice">🎲</div>
+          </div>
+          <div class="stats">
+            <div><b>85</b><span>私房菜</span></div>
+            <div><b>12</b><span>冰箱食材</span></div>
+            <div><b>3</b><span>临期</span></div>
+          </div>
+          <div class="sechead" style="padding-left:0;padding-right:0"><div class="t"><span class="orn">❯❯</span>本周菜单</div><div class="all">去安排 <span>→</span></div></div>
+          <div class="softcard" style="margin-top:0">
+            <div class="lrow"><div class="ic2">今</div><div class="tt">今天 · 午餐<div class="ss">番茄炒蛋 · 清炒菜心 · 家常米饭</div></div><div class="stamp">已定</div></div>
+            <div class="lrow"><div class="ic2">明</div><div class="tt">明天 · 晚餐<div class="ss">还没有安排</div></div><button class="gbtn">去安排</button></div>
+            <div class="lrow"><div class="ic2">后</div><div class="tt">后天 · 晚餐<div class="ss">还没有安排</div></div><button class="gbtn">去安排</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 冰箱 -->
+      <div class="screen" id="s-fridge">
+        <div class="pad">
+          <div class="ptitle">我的冰箱</div>
+          <div class="psub">食材管理助手，让每一餐更新鲜</div>
+          <div class="aicta">
+            <div class="ic">📷</div>
+            <div style="flex:1"><div class="t">拍照识别 · 一键入库</div><div class="s">拍一张冰箱，自动列出食材，你确认即可</div></div>
+          </div>
+          <div class="stats">
+            <div><b>12</b><span>在库</span></div>
+            <div><b style="color:#C4652A">3</b><span>临期</span></div>
+            <div><b>8</b><span>品类</span></div>
+          </div>
+          <div class="sechead" style="padding-left:0;padding-right:0"><div class="t"><span class="orn">❯❯</span>今日先吃</div><div class="all">全部 <span>→</span></div></div>
+          <div class="softcard" style="margin-top:0">
+            <div class="lrow"><div class="ic2">🥬</div><div class="tt">小油菜<div class="ss">保鲜 · 还剩 1 天</div></div><div class="stamp wait">优先吃</div></div>
+            <div class="lrow"><div class="ic2">🥚</div><div class="tt">鸡蛋<div class="ss">冷藏 · 还剩 2 天</div></div><div class="stamp wait">优先吃</div></div>
+          </div>
+          <div class="sechead" style="padding-left:0;padding-right:0"><div class="t"><span class="orn">❯❯</span>存放位置</div><div class="all">4 区</div></div>
+          <div class="grid2" style="margin-top:0">
+            <div class="quad"><div class="t">常温</div><div class="n">2 件</div></div>
+            <div class="quad"><div class="t">保鲜</div><div class="n">5 件</div></div>
+            <div class="quad"><div class="t">冷藏</div><div class="n">4 件</div></div>
+            <div class="quad"><div class="t">冷冻</div><div class="n">1 件</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 我的 -->
+      <div class="screen" id="s-mine">
+        <div class="pad">
+          <div class="ptitle">我的</div>
+          <div class="me">
+            <div class="av">🐰</div>
+            <div style="flex:1"><div style="font-size:16px;font-weight:800;color:#6E3A1C">妈妈</div>
+              <div class="ss" style="font-size:11px;color:#A8785A;margin-top:3px">ID: 御厨8373</div></div>
+            <button class="gbtn">切换成员</button>
+          </div>
+          <div class="softcard">
+            <div class="lrow"><div class="ic2">🌶️</div><div class="tt">口味、忌口与过敏<div class="ss">微辣 · 少盐 · 不吃香菜</div></div><span style="color:#C7A97E">›</span></div>
+            <div class="lrow"><div class="ic2">👨‍👩‍👧</div><div class="tt">家庭共享与成员<div class="ss">3 位成员</div></div><span style="color:#C7A97E">›</span></div>
+            <div class="lrow"><div class="ic2">🔔</div><div class="tt">家庭消息提醒<div class="ss">菜单安排与饭已做好通知</div></div><span style="color:#C7A97E">›</span></div>
+          </div>
+          <div class="softcard">
+            <div class="lrow" style="padding-top:0"><div class="ic2">🤖</div><div class="tt">AI 模型配置<div class="ss">pi-agent · 自定义 provider 与模型</div></div><span style="color:#C7A97E">›</span></div>
+            <div class="lrow" style="border-bottom:0"><div class="ic2">💬</div><div class="tt">提示词模板<div class="ss">冰箱识别 / 菜品识别 / 营养分析</div></div><span style="color:#C7A97E">›</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="nav">
+      <div class="nb on" data-i="kitchen">
+        <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 12 4l8 7"/><path d="M6 10.5V20h12v-9.5"/><path d="M10 20v-5h4v5"/></svg>
+        <span>厨房</span><div class="bar"></div></div>
+      <div class="nb" data-i="order">
+        <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="3.5" width="15" height="17" rx="3"/><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4"/></svg>
+        <span>订单</span><div class="bar"></div></div>
+      <div class="nb" data-i="discover">
+        <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l1.8 4.4 4.4 1.8-4.4 1.8L12 15.9l-1.8-4.4-4.4-1.8 4.4-1.8z"/><path d="M18 16l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z"/></svg>
+        <span>发现</span><div class="bar"></div></div>
+      <div class="nb" data-i="fridge">
+        <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.8" width="12" height="18.4" rx="3"/><path d="M6 10h12"/><path d="M9 6v1.6M9 13v2"/></svg>
+        <span>冰箱</span><div class="bar"></div></div>
+      <div class="nb" data-i="mine">
+        <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.6" r="3.9"/><path d="M4.6 20.6c1.4-3.6 4.1-5.2 7.4-5.2s6 1.6 7.4 5.2"/></svg>
+        <span>我的</span><div class="bar"></div></div>
+      <div class="deco l">
+        <svg width="26" height="24" viewBox="0 0 26 24" fill="none" stroke="#9FB183" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3.4 22.2C7.4 18 9.9 11.6 10.2 3.4"/>
+          <path d="M10 6.2c1.9-1.7 4.2-1.6 5.3.2-1.7 1.5-4 1.6-5.3-.2z" fill="#C6D3AC"/>
+          <path d="M8.9 10.8c-1.9-1.7-4.2-1.6-5.3.2 1.7 1.5 4 1.6 5.3-.2z" fill="#C6D3AC"/>
+          <path d="M7.6 15.4c1.9-1.6 4.1-1.4 5.2.4-1.7 1.4-3.9 1.5-5.2-.4z" fill="#C6D3AC"/>
+        </svg>
+      </div>
+      <div class="deco r">
+        <svg width="26" height="24" viewBox="0 0 26 24" fill="none" stroke="#9FB183" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="transform:scaleX(-1)">
+          <path d="M3.4 22.2C7.4 18 9.9 11.6 10.2 3.4"/>
+          <path d="M10 6.2c1.9-1.7 4.2-1.6 5.3.2-1.7 1.5-4 1.6-5.3-.2z" fill="#C6D3AC"/>
+          <path d="M8.9 10.8c-1.9-1.7-4.2-1.6-5.3.2 1.7 1.5 4 1.6 5.3-.2z" fill="#C6D3AC"/>
+          <path d="M7.6 15.4c1.9-1.6 4.1-1.4 5.2.4-1.7 1.4-3.9 1.5-5.2-.4z" fill="#C6D3AC"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.nav .nb').forEach(function(el){
+  el.onclick=function(){
+    document.querySelectorAll('.nav .nb').forEach(function(x){x.classList.remove('on')});
+    document.querySelectorAll('.screen').forEach(function(x){x.classList.remove('on')});
+    el.classList.add('on');
+    document.getElementById('s-'+el.dataset.i).classList.add('on');
+    document.querySelector('.scroll').scrollTop=0;
+  };
+});
+document.querySelectorAll('.chips').forEach(function(c){
+  c.addEventListener('click',function(e){
+    if(!e.target.classList.contains('chip'))return;
+    [].forEach.call(c.children,function(x){x.classList.remove('on')});
+    e.target.classList.add('on');
+  });
+});
+</script>
+</body>
+</html>
