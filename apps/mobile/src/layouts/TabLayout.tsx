@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { LeafSprig } from '@/components/icons/TabIcons'
 import { tabs } from '@/config/tabs'
@@ -9,10 +10,12 @@ import './TabLayout.scss'
  */
 export default function TabLayout() {
   const { pathname } = useLocation()
+  const bodyRef = useRef<HTMLElement>(null)
+  useEffect(() => { bodyRef.current?.scrollTo?.({ top: 0 }) }, [pathname])
   const isRecipePage = pathname === '/recipes' || pathname.startsWith('/recipes/')
   return (
     <div className="tab-layout">
-      <main className="tab-layout__body">
+      <main ref={bodyRef} className="tab-layout__body">
         <Outlet />
       </main>
 

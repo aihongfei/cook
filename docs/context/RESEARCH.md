@@ -108,6 +108,6 @@
 | `@earendil-works/pi-ai` | 1.1.0 | 统一 LLM API + 自动模型发现 + provider 配置 | MIT |
 
 - 归属：`github.com/earendil-works/pi`（monorepo，`packages/agent`、`packages/ai`）。Pi 自我定位为"minimal, extensible agent harness"，提供 TypeScript SDK（`pi-agent-core` 即 Agent runtime），并支持 extensions / **skills** / **prompt templates** —— 与"内置提示词"的需求天然契合。
-- **硬性要求：Node ≥ 22.19**（本机尚未安装 Node，见 `DECISIONS.md` D-012）。
+- **硬性要求：Node ≥ 22.19**（本机已具备 Node v26.7.0，见 `DECISIONS.md` D-012 与 `RUNBOOK.md` R-000）。
 - `pi-ai` 的 provider 出口覆盖：OpenAI（Responses / Completions）、Azure OpenAI、Anthropic、Google / Vertex、Mistral、Amazon Bedrock、OpenRouter 等 —— 足以支撑"用户自己配模型"，也能指向任意 OpenAI 兼容网关。
 - **待实现时确认**：`pi-agent-core` 的具体 API（创建 agent、传图片附件、结构化输出/流式）需读 `packages/agent` 文档后再落地。

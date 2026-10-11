@@ -42,6 +42,13 @@
   border: 1px solid var(--color-line);
   border-radius: 999px;
   box-shadow: 0 7px 16px rgb(150 100 60 / 13%);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* 聚焦：与菜谱页一致，胶囊泛暖光而不是给输入框画硬框 */
+.search__box:focus-within {
+  border-color: var(--color-focus-line);
+  box-shadow: var(--shadow-focus), 0 7px 16px rgb(150 100 60 / 13%);
 }
 
 .search__input {
@@ -57,6 +64,11 @@
 
 .search__input::placeholder {
   color: #b79a82;
+}
+
+/* 聚焦由 .search__box 的泛光表示，输入框本身不画框 */
+.search__input:focus-visible {
+  outline: none;
 }
 
 .search__filter {
@@ -259,7 +271,7 @@
 }
 
 .dish-card__link:focus-visible {
-  outline: 2px solid var(--color-brand);
+  outline: 2px solid var(--color-focus);
   outline-offset: -3px;
 }
 

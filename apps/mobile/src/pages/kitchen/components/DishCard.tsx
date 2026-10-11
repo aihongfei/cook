@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { caloriesLabel, type RecipeSummary } from '@/api/recipes'
 import RecipeImage from '@/pages/recipes/components/RecipeImage'
+import '../kitchen.scss'
 
 /** 真实菜谱卡：本阶段只浏览，加入菜单与收藏由后续功能接入。 */
 export default function DishCard({ dish }: { dish: RecipeSummary }) {

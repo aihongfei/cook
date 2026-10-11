@@ -12,4 +12,4 @@
 
 | 日期 | 文件 | 内容 |
 | --- | --- | --- |
-| — | — | 尚无归档（项目处于启动阶段） |
+| 2026-10-11 | `package-lock.mobile.pre-pnpm.json` | 前端迁到 pnpm 前保留的 npm 锁文件（`apps/mobile`，lockfileVersion 3，包名 `mobile`）。仅用于回溯迁移前的依赖树，不再是活动锁文件（活动锁为 `apps/mobile/pnpm-lock.yaml`）。 |

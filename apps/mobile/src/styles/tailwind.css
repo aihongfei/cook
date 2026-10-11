@@ -35,6 +35,11 @@
   --shadow-card: 0 8px 18px rgb(150 100 60 / 10%);
   --shadow-hero: 0 20px 46px rgb(80 50 25 / 24%);
 
+  /* 聚焦态：柔和暖色，替代浏览器默认硬描边（手绘风适配） */
+  --color-focus: rgb(224 123 57 / 42%);
+  --color-focus-line: #e8b183;
+  --shadow-focus: 0 0 0 4px rgb(224 123 57 / 13%);
+
   /* 页面基准 */
   --spacing-page: 16px;
   --spacing-tabbar: 76px;

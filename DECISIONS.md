@@ -59,6 +59,7 @@
   1. **设置项不再读 `package.json` 的 `pnpm` 字段**，搬到了 `pnpm-workspace.yaml` / `.npmrc`；
   2. 依赖的 postinstall 脚本被安全策略拦截时，pnpm 会**非零退出并中断整个安装链**（本次被 `@scarf/scarf` 的遥测脚本卡住）→ 在 `services/api/.npmrc` 设 `strict-dep-builds=false`。
 - **版本解析必须在场**：`pnpm add -D <pkg>` 取的是 `latest`，本次误装了 `prisma@8.0.0-rc`（RC）和 `typescript@7`，已改回 `pnpm install`（严格按 package.json）并钉到稳定版：`prisma` 与 `@prisma/client` 同主版本、`typescript ^6`。
+- **前端迁入 pnpm（2026-10-11 完成）**：`pnpm import` 转换锁文件 + `pnpm install` 通过；原 npm 锁文件归档 `history/package-lock.mobile.pre-pnpm.json`（不删除）。**pnpm 12 的依赖构建许可实际配置键是 `pnpm-workspace.yaml` 的 `allowBuilds` 映射**，实测旧的 `onlyBuiltDependencies` / `ignoredBuiltDependencies` 在本机仍报 `ERR_PNPM_IGNORED_BUILDS`；前端放行 `esbuild`、`@parcel/watcher`，拒绝 `@scarf/scarf`。`pnpm install --frozen-lockfile` 在锁文件元数据未同步时会失败，先跑一次普通安装同步。
 - **NestJS 12 的硬要求**：`@nestjs/schematics@12` 要求 **TypeScript ≥ 6**（按 TS 5 装会 ERESOLVE 失败）。
 - **Tailwind v4 的 `@theme static`**：Tailwind v4 默认**只输出被工具类引用到的** token 变量。若在 SCSS 里用 `var(--color-*)` 而不写对应工具类，这些变量不会被输出，样式会静默失效（本次踩过：整页背景变透明）。已改用 `@theme static` 强制全量输出。
 - **样式分工**：Tailwind utilities 负责布局/间距/排版，SCSS（每页一个，组件不各自引样式）负责笔绘视觉细节。

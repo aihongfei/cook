@@ -26,4 +26,9 @@
 
 ## 状态
 
-工程尚在启动阶段，**业务代码尚未开始**。技术路线与功能清单见 `docs/context/PLAN.md` 与 `docs/context/FEATURES.md`。
+**M0 工程基建与 M1 菜谱库已交付并通过验收**（2026-10-11）：前端 `apps/mobile`（React 18 + Vite + Tailwind v4，pnpm）、后端 `services/api`（NestJS 12 + Prisma 6 + SQLite），菜谱库已内置 28 道真实菜谱（HowToCook，Unlicense）。当前进展见 [`NOW.md`](NOW.md)。
+
+- 本地跑起来：前端 `pnpm --dir apps/mobile run dev`（http://127.0.0.1:5173），后端 `pnpm --dir services/api run start:prod`（http://127.0.0.1:3000/api，文档 `/api/docs`）。完整步骤见 [`RUNBOOK.md`](RUNBOOK.md)。
+- 下一步：M2 注册登录与家庭；功能条目与优先级见 [`docs/context/FEATURES.md`](docs/context/FEATURES.md)。
+- 平台：**仅 Android**（Capacitor 打包），iOS 与桌面端暂缓（`DECISIONS.md` D-002）。
+

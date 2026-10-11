@@ -50,6 +50,12 @@ button {
   color: inherit;
 }
 
+/* 键盘聚焦：柔和暖色描边，保证可见性又不破坏手绘风 */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
 /* 移动端：隐藏滚动条 + 安全区变量 */
 ::-webkit-scrollbar {
   display: none;

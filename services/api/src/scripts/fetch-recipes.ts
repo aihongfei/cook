@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { HOWTOCOOK_COMMIT, HOWTOCOOK_REPOSITORY, parseHowToCook } from '../modules/recipes/howtocook.parser'
 import { SeedBundle } from '../modules/recipes/recipe.types'
 
@@ -21,12 +21,32 @@ async function sourceText(path: string): Promise<string> {
     const response = await fetch(raw, { signal: AbortSignal.timeout(2000) })
     if (response.ok) return await response.text()
   } catch { /* The Contents API returns the same commit-pinned original bytes. */ }
-  const content = await githubJson(`https://api.github.com/repos/Anduin2017/HowToCook/contents/${encodeURI(path)}?ref=${HOWTOCOOK_COMMIT}`)
-  if (content.encoding !== 'base64' || typeof content.content !== 'string') throw new Error(`Unsupported content: ${path}`)
-  return Buffer.from(content.content, 'base64').toString('utf8')
+  try {
+    const content = await githubJson(`https://api.github.com/repos/Anduin2017/HowToCook/contents/${encodeURI(path)}?ref=${HOWTOCOOK_COMMIT}`)
+    if (content.encoding !== 'base64' || typeof content.content !== 'string') throw new Error(`Unsupported content: ${path}`)
+    return Buffer.from(content.content, 'base64').toString('utf8')
+  } catch (error) {
+    // A completed local seed is a reproducible offline input for reruns after GitHub rate limits.
+    try {
+      const bundle = JSON.parse(await readFile('seeds/howtocook.json', 'utf8')) as { commit: string; licenseText: string; recipes: { sourcePath: string; rawMarkdown: string }[] }
+      if (bundle.commit === HOWTOCOOK_COMMIT && path !== 'LICENSE') {
+        const local = bundle.recipes.find(recipe => recipe.sourcePath === path)
+        if (local) return local.rawMarkdown
+      }
+    } catch { /* Report the original GitHub failure below. */ }
+    throw error
+  }
 }
 
 async function main() {
+  if (process.argv.includes('--offline')) {
+    const bundle = JSON.parse(await readFile('seeds/howtocook.json', 'utf8')) as SeedBundle
+    if (bundle.commit !== HOWTOCOOK_COMMIT || bundle.license !== 'Unlicense' || !bundle.licenseText.includes('This is free and unencumbered software released into the public domain.')) throw new Error('Offline provenance mismatch')
+    bundle.recipes = bundle.recipes.map(recipe => parseHowToCook(recipe.rawMarkdown, recipe.sourcePath, bundle.commit))
+    await writeFile('seeds/howtocook.json', JSON.stringify(bundle, null, 2) + '\n')
+    console.log(`Reparsed ${bundle.recipes.length} original Markdown sources offline at ${bundle.commit}`)
+    return
+  }
   const tree = await githubJson(`https://api.github.com/repos/Anduin2017/HowToCook/git/trees/${HOWTOCOOK_COMMIT}?recursive=1`)
   if (tree.truncated) throw new Error('GitHub tree truncated')
   const licenseText = await sourceText('LICENSE')

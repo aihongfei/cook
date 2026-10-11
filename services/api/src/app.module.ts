@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { HealthModule } from './modules/health/health.module'
+import { RecipesModule } from './modules/recipes/recipes.module'
 
 /**
  * 应用根模块。
@@ -13,6 +14,7 @@ import { HealthModule } from './modules/health/health.module'
       envFilePath: ['.env'],
     }),
     HealthModule,
+    RecipesModule,
   ],
 })
 export class AppModule {}

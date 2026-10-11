@@ -31,6 +31,7 @@ services/api/prisma/*.db
 coverage/
 test-results/
 playwright-report/
+.test-build/
 
 # 第三方参考截图（仅本地对照，不入库）
 参考图片/

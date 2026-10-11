@@ -44,7 +44,7 @@
 ### 前端
 
 - **React 18 + TypeScript + Vite**，Tailwind CSS，Zustand（状态），React Router。
-- **移动端优先**：375px 基准、安全区适配、底部 Tab + 手势。
+- **移动端优先**：390px 基准、安全区适配、底部 Tab + 手势。
 - **打包**：**Capacitor → Android**（唯一首版目标）；iOS 与 Electron 桌面端暂缓，见 D-002。
 - **不做微信小程序**（首版）：定位 App。若后续确认小程序可免费上架，再作为 P2 单独评估（见 `DECISIONS.md` D-010）。
 - 说明：Electron **不能**做移动端，故不作为移动端方案（见 `DECISIONS.md` D-002）。
@@ -73,11 +73,11 @@
 | 样式 / 主题 | Tailwind CSS + CSS 变量（暖橙 / 清新绿双主题） |
 | 状态管理 | Zustand |
 | 数据请求与缓存 | TanStack Query（React Query） |
-| 路由 | React Router v6 |
-| 表单与校验 | react-hook-form + zod |
+| 路由 | React Router v7 |
+| 表单与校验 | zod（react-hook-form 待接入表单页时再加） |
 | 动画 | framer-motion |
-| 图表（营养/统计） | Recharts 或 ECharts |
-| 虚拟列表 / 无限滚动 | react-virtuoso / @tanstack/react-virtual |
+| 图表（营养/统计） | ECharts（echarts-for-react，已安装） |
+| 虚拟列表 / 无限滚动 | @tanstack/react-virtual（菜谱列表用 useInfiniteQuery + 滚动加载） |
 | **3D 渲染** | **three + @react-three/fiber + @react-three/drei**（安卓 WebView 需降级策略，见 D-015） |
 | 手势 / 轮播 | @use-gesture/react、Swiper |
 | 日期 / 工具 | dayjs、lodash-es、clsx |
@@ -140,7 +140,7 @@
 
 一项功能算"完成"需同时满足：
 
-1. **可运行**：前端 `npm run dev` 可启动、相关页面能打开；后端接口用真实请求验证通过。
+1. **可运行**：前端 `pnpm --dir apps/mobile run dev` 可启动、相关页面能打开；后端接口用真实请求验证通过（`pnpm --dir services/api run test:http`）。
 2. **符合 PLAN**：与本节描述的行为一致，无擅自扩大范围。
 3. **有证据**：记录运行的命令与输出（或截图、本地 URL）到 `NOW.md`。
 4. **UI 达标**：视觉符合选定 UI 方案（尺寸/间距/色彩 token）。
@@ -157,12 +157,11 @@
 
 ## 七、待产出/待确认
 
-- ⬜ **UI 方案**：2–3 个可交互 HTML 预览（暖橙 / 清新绿 / 融合），含关键尺寸、间距、色彩规则，供选择。
-- ⬜ 用户对 `FEATURES.md` 全量功能清单的确认（可增删、调优先级）。
+- ✅ **UI 方案**：用户选定「04 手绘水粉」，实现稿 `docs/ui-preview/handpainted/index.html`，并已落成真实代码（详见 `docs/ui-preview/README.md`）。
+- ✅ **完整功能清单**：已确认并在执行（`FEATURES.md`，19 个里程碑 / 139 条）；M18 的 9 项经用户取舍后定档（D-016）。
 - ✅ **注册渠道**：账号 + 密码（首版不做短信验证码与第三方登录）。
 - ✅ **AI harness**：pi-agent（`@earendil-works/pi-agent-core` + `@earendil-works/pi-ai`）。
 - ✅ **小程序**：首版不做；**平台收敛为仅 Android**（iOS / 桌面暂缓，见 D-002、D-010）。
 - ✅ **不用 uni-app**：采用 React + Vite + Capacitor（见 D-013）。
-- ⬜ **UI 方向待选**：已用 AI 出图做两轮探索。第一轮 6 版被否决；**第二轮 6 版按「可爱 / 漂亮」重做**，见 `docs/ui-preview/directions2/index.html`（另有 `docs/ui-preview/README.md`）。选定后铺成完整可交互 HTML 稿。
-- ⬜ **AI 多模态 provider**：由用户通过配置文件自配（我方不锁定厂商）。
-- 🔴 **开发环境未就绪**：Node.js **未安装成功**（`C:\nvm4w` 为空目录），Git 已安装。见 `RUNBOOK.md` R-000 与 `RISKS.md` R-08。
+- ✅ **开发环境**：Node v26.7.0 + pnpm 12 就绪（`RUNBOOK.md` R-000）。
+- ⬜ **AI 多模态 provider**：由用户通过配置文件自配（我方不锁定厂商），M16 识图能力开工前需要。

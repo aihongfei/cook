@@ -5,7 +5,7 @@ import { Ingredient, SeedRecipe } from './recipe.types'
 export const HOWTOCOOK_REPOSITORY = 'https://github.com/Anduin2017/HowToCook'
 export const HOWTOCOOK_COMMIT = '3dfa950f6daf0a5b311fc46619f1b559bac980c4'
 
-const toolsPattern = /^(?:电饭煲|电饭锅|炒锅|平底锅|煮锅|锅|锅铲|炒菜勺|菜刀|刀|砧板|案板|碗|盘|漏勺|滤网|烤箱|微波炉|空气炸锅|蒸锅|蒸箱|高压锅|压力锅|保鲜膜|烘焙纸|锡纸|电子秤|量杯|打蛋器|搅拌器|料理机|擀面杖|筷子)(?:$|[（(：:\s\d])/u
+const toolsPattern = /^(?:(?:电饭煲|电饭锅|炒锅|平底锅|煮锅|砂锅|铁锅|锅|锅铲|炒菜勺|菜刀|刀|砧板|案板|盆|碗|小碗|大碗|盘|漏勺|滤网|烤箱|微波炉|空气炸锅|蒸锅|蒸箱|高压锅|压力锅|保鲜膜|烘焙纸|锡纸|电子秤|量杯|打蛋器|搅拌器|料理机|擀面杖|筷子)(?:$|[（(：:\s\d]|若干)|直径[^，。]*的盆)/u
 
 function readable(text: string): string {
   return text.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/`/g, '').replace(/\*\*|__/g, '').trim()
@@ -72,24 +72,28 @@ export function parseHowToCook(markdown: string, sourcePath: string, commit = HO
   const notes: string[] = []
   const steps: string[] = []
   let sectionKind = 'notes'
+  let kindLevel = 0
   for (const section of parsed) {
     const title = section.title
-    if (/原料|食材|材料|配料|工具|厨具/.test(title)) sectionKind = /^(?:工具|厨具|器具)$/.test(title) ? 'tools' : 'ingredients'
-    else if (/计算|用量|数量|份量|分量/.test(title)) sectionKind = 'quantities'
-    else if (/操作|步骤|制作方法|烹饪方法|做法$/.test(title) && !title.endsWith('的做法')) sectionKind = 'steps'
-    else if (/附加|注意|备注|小贴士/.test(title)) sectionKind = 'notes'
-    else if (title === name + '的做法' || title === '介绍') sectionKind = 'notes'
+    if (section.level <= kindLevel || sectionKind === 'notes') {
+      kindLevel = section.level
+      if (/原料|食材|材料|配料|工具|厨具/.test(title)) sectionKind = /^(?:工具|厨具|器具)$/.test(title) ? 'tools' : 'ingredients'
+      else if (/计算|用量|数量|份量|分量/.test(title)) sectionKind = 'quantities'
+      else if (/操作|步骤|制作方法|烹饪方法|做法$/.test(title) && !title.endsWith('的做法')) sectionKind = 'steps'
+      else sectionKind = 'notes'
+    }
     // Retain headings too: they explain units, serving counts and step subgroups.
     const content = section.lines.join('\n').trim()
     if (!content) continue
     if (sectionKind === 'steps') {
+      if (section.level > kindLevel) steps.push(`【${title}】`)
       for (const block of blocks(section.lines)) steps.push(stripBullet(block))
     } else {
       notes.push(`【${title}】\n${content}`)
       if (sectionKind === 'ingredients' || sectionKind === 'tools') {
         for (const line of section.lines.filter(l => /^\s*[-*+]\s+/.test(l))) {
           const value = ingredientLine(line)
-          if (sectionKind === 'tools' || toolsPattern.test(value.name)) tools.push(readable(stripBullet(line)))
+          if (sectionKind === 'tools' || toolsPattern.test(value.name) || toolsPattern.test(readable(stripBullet(line)))) tools.push(readable(stripBullet(line)))
           else if (!ingredients.some(i => i.name === value.name)) ingredients.push(value)
         }
       } else if (sectionKind === 'quantities') {
