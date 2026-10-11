@@ -11,8 +11,8 @@ export default function TodayMeals() {
   return (
     <section className="card today-meals">
       <div className="today-meals__head">
-        <b>今日安排</b>
-        <span className="today-meals__more">最终菜单和做饭进度 ›</span>
+        <b>今日安排 · 示例</b>
+        <span className="today-meals__more">菜单功能待开放</span>
       </div>
       {todayMeals.map((m) => (
         <div key={m.key} className="today-meals__row">

@@ -12,7 +12,11 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "fetch:recipes": "ts-node src/scripts/fetch-recipes.ts",
+    "seed:recipes": "ts-node src/scripts/seed-recipes.ts",
+    "test": "tsc -p tsconfig.test.json && node --test --test-concurrency=1 .test-build/tests/*.test.js",
+    "test:http": "node scripts/verify-recipes-http.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^12.1.2",

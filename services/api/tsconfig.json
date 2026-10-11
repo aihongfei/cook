@@ -3,6 +3,7 @@
     "module": "commonjs",
     "target": "ES2023",
     "lib": ["ES2023"],
+    "types": ["node"],
     "moduleResolution": "node",
     "declaration": false,
     "removeComments": true,

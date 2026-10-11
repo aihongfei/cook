@@ -252,6 +252,56 @@
   border-radius: 999px;
 }
 
+/* 浏览入口 */
+.dish-card__link {
+  display: block;
+  height: 100%;
+}
+
+.dish-card__link:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: -3px;
+}
+
+.dish-card__name {
+  min-height: 36px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.dish-card__meta {
+  flex-wrap: wrap;
+}
+
+.dish-card__calories {
+  margin-top: 7px;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.dish-card__browse {
+  display: block;
+  margin-top: 10px;
+  padding: 6px;
+  font-size: 12px;
+  color: #c4652a;
+  text-align: center;
+  border: 1px solid #de9057;
+  border-radius: 999px;
+}
+
+.search__submit {
+  padding: 0 5px;
+  color: var(--color-brand);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.kitchen-api-status {
+  padding: 12px var(--spacing-page) 0;
+}
+
 /* 时令食材横幅（整块为笔绘图片） */
 .seasonal {
   margin: 16px var(--spacing-page);

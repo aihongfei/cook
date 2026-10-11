@@ -45,7 +45,7 @@
 
 - **React 18 + TypeScript + Vite**，Tailwind CSS，Zustand（状态），React Router。
 - **移动端优先**：375px 基准、安全区适配、底部 Tab + 手势。
-- **打包**：**Capacitor** → Android / iOS（移动端，主目标）；**Electron** → 桌面（可选，二期）。
+- **打包**：**Capacitor → Android**（唯一首版目标）；iOS 与 Electron 桌面端暂缓，见 D-002。
 - **不做微信小程序**（首版）：定位 App。若后续确认小程序可免费上架，再作为 P2 单独评估（见 `DECISIONS.md` D-010）。
 - 说明：Electron **不能**做移动端，故不作为移动端方案（见 `DECISIONS.md` D-002）。
 

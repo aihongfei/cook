@@ -1,5 +1,3 @@
-// Prisma schema（M0 仅最小可用骨架）
-// 业务模型（User / Family / Recipe / Order / Inventory…）在 M1、M2 随之补全。
 // 开发期 SQLite，生产切 PostgreSQL（见 docs/context/PLAN.md 技术路线）。
 
 generator client {
@@ -17,4 +15,35 @@ model AppMeta {
   key       String   @unique
   value     String
   updatedAt DateTime @updatedAt
+}
+
+/// JSON collections retain ordered ingredients, nested step text and source notes.
+/// origin and sourceKey isolate imported records from future user-created recipes.
+model Recipe {
+  id                String   @id
+  name              String
+  image             String?
+  category          String
+  cuisine           String
+  aliases           Json
+  tags              Json
+  calories          Float?
+  caloriesEstimated Boolean  @default(false)
+  spiciness         Int      @default(0)
+  ingredients       Json
+  steps             Json
+  notes             Json
+  tools             Json
+  videoUrl          String?
+  source            Json
+  origin            String   @default("user")
+  sourceKey         String?  @unique
+  sourcePath        String?
+  rawMarkdown       String?
+  searchText        String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([category, cuisine])
+  @@index([origin])
 }

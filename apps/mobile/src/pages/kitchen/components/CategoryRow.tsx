@@ -1,24 +1,16 @@
-import { categories } from '@/data/demo'
-
 interface CategoryRowProps {
-  activeId?: string
-  onSelect?: (id: string) => void
+  categories: string[]
+  onSelect: (category: string) => void
 }
 
-/** 分类入口：5 个独立按钮，图标是笔绘水彩方块（cat-1..5.png），标签是手写字体真实文字 */
-export default function CategoryRow({ activeId, onSelect }: CategoryRowProps) {
+/** 分类标签来自 API，沿用五个笔绘分类按钮作为中性入口。 */
+export default function CategoryRow({ categories, onSelect }: CategoryRowProps) {
   return (
     <div className="cats">
-      {categories.map((c) => (
-        <button
-          key={c.id}
-          type="button"
-          className={`cats__item${c.id === activeId ? ' is-active' : ''}`}
-          aria-pressed={c.id === activeId}
-          onClick={() => onSelect?.(c.id)}
-        >
-          <img src={c.image} alt="" />
-          <span>{c.name}</span>
+      {categories.slice(0, 5).map((category, index) => (
+        <button key={category} type="button" className="cats__item" onClick={() => onSelect(category)}>
+          <img src={`/img/cat-${index + 1}.png`} alt="" />
+          <span>{category}</span>
         </button>
       ))}
     </div>

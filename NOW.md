@@ -34,6 +34,7 @@
   - ✅ **F0-05 通用组件**：Page / SectionTitle / Chips / Pill / EmptyState + **BottomSheet（antd-mobile Popup）/ Toast·Dialog 封装 / Skeleton**；已在厨房页实际接入（"拍照识菜"打开抽屉、加菜出 Toast，实测 `hasPopup: true`）。antd-mobile Tabs 封装待补。
   - ✅ **F0-08 后端脚手架**：NestJS 12 + Prisma 6 + Swagger。`prisma migrate dev --name init` 已建库（`prisma/dev.db`）；`pnpm run build` 产出 `dist/main.js`；**接口实测** `GET http://127.0.0.1:3000/api/health` → `{"status":"ok","name":"yushan-api",...,"node":"v26.7.0"}`；文档 `/api/docs`。
   - 🔧 待办：前端目前仍是 **npm** 安装（后端已按用户要求改用 **pnpm**），需要统一到 pnpm（删 `node_modules`+`package-lock.json` 后 `pnpm install`）。
+- ✅ **代码已上 GitHub（2026-10-11）**：私有仓库 `https://github.com/aihongfei/cook`，默认分支 `main`，首次提交 **126 文件 / 12507 行 / 56.6 MB**。API 核对：可见性 PRIVATE、远端 blob 数与本地一致、敏感文件自查无输出。`参考图片/`（第三方截图）按约定排除；署名 `aihf <82986195+aihongfei@users.noreply.github.com>`（noreply 邮箱，不暴露真实地址）。操作与自查命令见 `RUNBOOK.md` R-006。
 - **验收证据**：dev server `http://127.0.0.1:5173`（当前仍在后台运行）；构建输出见上；五条路由的实测标题：家宴点菜单 / 发现 / 我的冰箱 / 我的。
 
 ## 阻塞 / 待用户确认
@@ -55,5 +56,6 @@
 - 调研：`docs/context/RESEARCH.md`
 - 方案：`docs/context/PLAN.md`
 - 功能清单：`docs/context/FEATURES.md`
-- UI 设计稿：`docs/ui-preview/`（`directions/index.html` 为六版对比入口）
+- UI 设计稿：`docs/ui-preview/`（当前选定方向实现稿 `handpainted/index.html`；`directions2/index.html` 为第二轮六版对比，`directions/index.html` 为已被否决的第一轮）
+- 代码仓库：`https://github.com/aihongfei/cook`（私有）
 - 参考原图：`参考图片/`

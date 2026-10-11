@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
+import { fetchRecipes, recipeErrorMessage, recipeListUrl, useRecipeFilters } from '@/api/recipes'
 import BottomSheet from '@/components/ui/BottomSheet'
 import Page from '@/components/ui/Page'
 import SectionTitle from '@/components/ui/SectionTitle'
-import { toastSuccess } from '@/components/ui/feedback'
-import { recommendedDishes } from '@/data/demo'
+import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
 import CategoryRow from './components/CategoryRow'
 import DishCard from './components/DishCard'
 import HeroBanner from './components/HeroBanner'
@@ -11,61 +13,52 @@ import SearchBar from './components/SearchBar'
 import SeasonalBanner from './components/SeasonalBanner'
 import TodayMeals from './components/TodayMeals'
 import './kitchen.scss'
+import '../recipes/recipes.scss'
 
-/** 厨房（首屏）：今日安排 + 分类 + 今日推荐 */
+/** 厨房：真实菜谱入口与浏览推荐；菜单安排仍待后续里程碑接入。 */
 export default function KitchenPage() {
-  const [category, setCategory] = useState<string>()
+  const navigate = useNavigate()
   const [photoSheet, setPhotoSheet] = useState(false)
+  const [familySheet, setFamilySheet] = useState(false)
+  const filters = useRecipeFilters()
+  const recommendations = useQuery({
+    queryKey: ['recipes', 'recommendations'],
+    queryFn: ({ signal }) => fetchRecipes({}, 1, signal),
+    staleTime: 60_000,
+    retry: 1,
+  })
 
   return (
     <Page>
       <HeroBanner />
-      <SearchBar onFilterClick={() => setCategory(undefined)} />
-      <CategoryRow activeId={category} onSelect={setCategory} />
+      <SearchBar onSearch={(q) => navigate(recipeListUrl({ q }))} onFilterClick={() => navigate('/recipes')} />
+      {filters.data && <CategoryRow categories={filters.data.categories} onSelect={(category) => navigate(recipeListUrl({ category }))} />}
+      {filters.isPending && <div className="kitchen-api-status"><RecipeStatus title="分类加载中…" loading /></div>}
+      {filters.isError && <div className="kitchen-api-status"><RecipeStatus title="分类暂时加载失败" onRetry={() => { void filters.refetch() }}>{recipeErrorMessage(filters.error)}</RecipeStatus></div>}
 
       <div className="quick">
-        <button type="button" className="quick__item quick__item--primary">
-          🎲 今天吃什么
-        </button>
-        <button type="button" className="quick__item">
-          👤 邀请家人一起
-        </button>
-        <button
-          type="button"
-          className="quick__item"
-          onClick={() => setPhotoSheet(true)}
-        >
-          📷 拍照识菜
-        </button>
+        <button type="button" className="quick__item quick__item--primary" onClick={() => navigate('/recipes')}>翻翻菜谱</button>
+        <button type="button" className="quick__item" onClick={() => setFamilySheet(true)}>邀请家人一起</button>
+        <button type="button" className="quick__item" onClick={() => setPhotoSheet(true)}>拍照识菜</button>
       </div>
 
       <TodayMeals />
-
-      <SectionTitle title="今日推荐" more="全部" />
-
+      <SectionTitle title="菜谱推荐" more="全部" onMoreClick={() => navigate('/recipes')} />
+      {recommendations.isPending && <div className="kitchen-api-status"><RecipeStatus title="菜谱推荐加载中…" loading /></div>}
+      {recommendations.isError && <div className="kitchen-api-status"><RecipeStatus title="推荐加载失败" onRetry={() => { void recommendations.refetch() }}>{recipeErrorMessage(recommendations.error)}</RecipeStatus></div>}
+      {recommendations.data && recommendations.data.items.length === 0 && <div className="kitchen-api-status"><RecipeStatus title="菜谱库里还没有菜谱">有菜谱后，会在这里和你见面。</RecipeStatus></div>}
       <div className="dish-row">
-        {recommendedDishes.map((dish) => (
-          <DishCard
-            key={dish.id}
-            dish={dish}
-            onAdd={(name) => toastSuccess(`已把「${name}」加入今晚菜单`)}
-          />
-        ))}
+        {recommendations.data?.items.slice(0, 6).map((dish) => <DishCard key={dish.id} dish={dish} />)}
       </div>
-
       <SeasonalBanner />
 
-      <BottomSheet
-        visible={photoSheet}
-        title="拍照识菜"
-        onClose={() => setPhotoSheet(false)}
-      >
-        <p>
-          对着一盘菜拍一张，识别菜名、配料与营养（热量 / 蛋白 / 脂肪 / 碳水），必要时还可以直接生成一份菜谱草稿。
-        </p>
-        <p>
-          这个能力排在 <b>M16（AI 能力）</b>，模型由你在设置里自行配置（见「我的 → AI 模型配置」）。
-        </p>
+      <BottomSheet visible={photoSheet} title="拍照识菜" onClose={() => setPhotoSheet(false)}>
+        <p>拍照识菜正在筹备。现在可以搜索菜名、食材或口味，看看菜谱里的做法。</p>
+        <button className="recipe-button" type="button" onClick={() => navigate('/recipes')}>去看菜谱</button>
+      </BottomSheet>
+      <BottomSheet visible={familySheet} title="一家人的厨房" onClose={() => setFamilySheet(false)}>
+        <p>邀请家人的功能正在筹备。先挑几道喜欢的菜，一起商量今天吃什么吧。</p>
+        <button className="recipe-button" type="button" onClick={() => navigate('/recipes')}>去挑菜谱</button>
       </BottomSheet>
     </Page>
   )

@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { LeafSprig } from '@/components/icons/TabIcons'
 import { tabs } from '@/config/tabs'
 import './TabLayout.scss'
@@ -8,6 +8,8 @@ import './TabLayout.scss'
  * 页面本身的边距/留白由各页面自己负责（用 <Page> 组件统一）。
  */
 export default function TabLayout() {
+  const { pathname } = useLocation()
+  const isRecipePage = pathname === '/recipes' || pathname.startsWith('/recipes/')
   return (
     <div className="tab-layout">
       <main className="tab-layout__body">
@@ -19,7 +21,8 @@ export default function TabLayout() {
           <NavLink
             key={path}
             to={path}
-            className={({ isActive }) => `tab-bar__item${isActive ? ' is-active' : ''}`}
+            aria-current={path === '/kitchen' && isRecipePage ? 'page' : undefined}
+            className={({ isActive }) => `tab-bar__item${isActive || (path === '/kitchen' && isRecipePage) ? ' is-active' : ''}`}
           >
             <Icon width={23} height={23} />
             <span>{label}</span>
