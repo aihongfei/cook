@@ -67,3 +67,15 @@
 - **证据**：M1 期间改进了 `howtocook.parser.ts` 的工具识别（把「直径 30cm 以上的盆」「砂锅（没有的话，用铁锅也行）」「小碗若干」从配料改判为工具），但 `seeds/howtocook.json` 仍是旧解析结果，导致 3 条菜谱的配料里出现"直径=30cm 以上的盆"这类脏数据；单测 `all pinned recipes reparse exactly` 直接命中。
 - **影响**：种子文件与解析器不一致时，页面会展示错位的配料/工具，且不同时间导入的库内容不同。
 - **保护措施**：① 单测逐条比对「重新解析结果 == 种子文件」，漂移即失败；② 改解析规则后必须重新生成 `seeds/howtocook.json` 并重跑 `seed:recipes`（步骤见 `RUNBOOK.md` R-003）；③ 导入为幂等 upsert，修正后可安全重灌。
+
+## R-11 国内安卓推送通道 🟡 待方案（2026-10-11）
+
+- **背景**：Capacitor 提供官方 **Local Notifications**（本机定时通知，离线可用）与 **Push Notifications**（走 FCM/APNs）两类能力；本项目 M10 需要"菜单安排、饭已做好、快过期提醒"等通知。
+- **风险**：**FCM 在国产 ROM 上不可靠**（无 GMS 或后台策略限制），家人端可能收不到或严重延迟；纯本地通知无法覆盖"别人点了菜要提醒我"这类远端事件。
+- **保护措施**：① 计时器、快过期这类**本机可判定**的场景优先用 Local Notifications（不依赖推送通道，Android 13+ 需运行时申请 `POST_NOTIFICATIONS` 权限）；② 远端提醒在 M10 开工前先定通道方案（厂商通道 / 聚合推送服务 / 或退化为应用内红点 + 轮询），再动手实现；③ 首版不把"实时推送"作为验收硬指标。
+
+## R-12 WebView 与 Android 系统要求（打包阶段）🟢 已核实文档（2026-10-11）
+
+- **事实**：Capacitor 8 要求 **Android Studio ≥ 2025.2.1**、**Android SDK Platform API ≥ 24**（最新稳定为 Android 16 / API 36）；**JDK 由 Android Studio 自动安装**，无需单独准备。
+- **影响**：M14 打包前需装 Android Studio（体积较大），并准备签名 keystore（密钥不入库）。
+- **保护措施**：装环境前把下载体积与磁盘占用报给用户确认；打包与签名步骤在动手时写入 `RUNBOOK.md`。
