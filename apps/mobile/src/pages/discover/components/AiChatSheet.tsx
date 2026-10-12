@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { DotLoading } from 'antd-mobile'
 import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
-import { StreamError, streamAiChat, useAiStatus, type ChatTurn, type MenuProposal } from '@/api/ai'
+import { StreamError, streamAiChat, useAiPrompts, useAiStatus, type ChatTurn, type MenuProposal } from '@/api/ai'
 import { useAddOrderItem } from '@/api/orders'
 import { toast } from '@/components/ui/toast'
 import { pickExamples } from '../ai-prompts'
@@ -24,7 +24,8 @@ import '../../shared.scss'
  * ② 把建议渲染成卡片，**用户点了"加入菜单"才真写库**（走与手点同一条 `/orders/items`）。
  * 所以卡片上给的是"加入菜单/先不用"两个按钮，而不是让模型直接改菜单。
  *
- * 示例问题每次抽一批（见 ai-prompts）：同一组问题看第二遍就没人在读了。
+ * 示例问题由 AI 按这家人的情况现生成（用户 2026-10-12：「内置的这些不够用」），
+ * 写死的那份只作兜底：没配、还没生成好、生成失败时照旧能用（见 ai-prompts）。
  */
 
 interface AiChatSheetProps {
@@ -48,9 +49,19 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
   /** 已经点过确认的那几条（按 recipeId+餐次记），点过就置灰，避免重复加 */
   const [added, setAdded] = useState<string[]>([])
   const addItem = useAddOrderItem()
+  // 示例问题：优先用 AI 按这个家现生成的那批（与「AI 帮你想」共用一次请求，见 api/ai）。
+  // `enabled` 等 status 回来再开——没配时不该白发一次注定 503 的请求；失败静默退回写死的那份
+  const aiPrompts = useAiPrompts(status.data?.configured === true)
   // 用函数形式初始化：每次打开（调用方 key 重挂载）抽一批新的，且**不在渲染里现抽**
   // （在渲染里抽的话每轮渲染都换一批，用户刚要点的那个会自己跑掉）
-  const [examples, setExamples] = useState(pickExamples)
+  const [examples, setExamples] = useState(() => pickExamples())
+  // AI 那批到手后重抽一次（打开头几秒必然是兜底那批；不重抽的话 AI 生成的就白花了）。
+  // 与 AiSuggestSheet 那处同一写法、同一理由（见那边对 react(set-state-in-effect) 的说明）
+  const aiBatch = aiPrompts.data?.examples
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    if (aiBatch && aiBatch.length > 0) setExamples(pickExamples(aiBatch))
+  }, [aiBatch])
   const abortRef = useRef<AbortController | null>(null)
   const threadRef = useRef<HTMLDivElement>(null)
 
@@ -152,8 +163,9 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
                       {item}
                     </button>
                   ))}
-                  {/* 「换一批」而不铺满整池：铺满会把输入框挤到屏幕外，而这个入口本来就要打字 */}
-                  <button type="button" className="ai__hint ai__hint--more" onClick={() => setExamples(pickExamples())}>
+                  {/* 「换一批」而不铺满整池：铺满会把输入框挤到屏幕外，而这个入口本来就要打字。
+                      它**不重新调模型**——就在已经拿到的那批里抽 */}
+                  <button type="button" className="ai__hint ai__hint--more" onClick={() => setExamples(pickExamples(aiBatch))}>
                     换一批 ↻
                   </button>
                 </div>

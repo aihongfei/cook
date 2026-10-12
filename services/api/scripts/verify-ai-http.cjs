@@ -149,6 +149,8 @@ async function main() {
   check('未登录请求推荐 → 401', anonSuggest.status === 401, `${anonSuggest.status}`)
   const anonChat = await callWithRetry('POST', '/ai/chat', { body: { messages: [{ role: 'user', content: '你好' }] } })
   check('未登录问 AI → 401', anonChat.status === 401, `${anonChat.status}`)
+  const anonPrompts = await callWithRetry('POST', '/ai/prompts', { body: {} })
+  check('未登录要快问/示例 → 401', anonPrompts.status === 401, `${anonPrompts.status}`)
 
   const mama = await register('AI验收妈妈')
   await callWithRetry('POST', '/family', { token: mama.token, body: { name: 'AI 验收家' } })
@@ -163,6 +165,12 @@ async function main() {
     )
     const chat = await callWithRetry('POST', '/ai/chat', { token: mama.token, body: { messages: [{ role: 'user', content: '今晚吃什么' }] } })
     check('没配 AI 时问 AI → 503 同一套话术', chat.status === 503 && /AI_API_BASE|配置/.test(chat.body?.message ?? ''), `${chat.status}`)
+    const prompts = await callWithRetry('POST', '/ai/prompts', { token: mama.token, body: {} })
+    check(
+      '没配 AI 时要快问/示例 → 503 同一套话术（前端据此静默回退写死的那份）',
+      prompts.status === 503 && /AI_API_BASE|配置/.test(prompts.body?.message ?? ''),
+      `${prompts.status} ${prompts.body?.message ?? ''}`,
+    )
 
     // ---------- 输入闸门：与"配没配"无关，写错了就该 400 ----------
     // （这条同时锁住一个顺序：先验输入再验配置。反过来的话，没配时非法输入会得到 503，
@@ -289,6 +297,34 @@ async function main() {
         `${added.status} ${added.body?.message ?? ''}`,
       )
     }
+
+    // ---------- 快问与示例问题（用户 2026-10-12：「内置的这些不够用」）----------
+    // 这一段要**同时**对本地 stub 与真网关成立（脚本两边都用），所以断言只能写**关系**，
+    // 不能写死具体句子——第一版写死了"必须包含『清淡点』"，真网关跑出来 21/23 假红：
+    // 它写的是"一个人吃，简单点""下班累，想快手"（更好，只是与 stub 不同）。
+    // 清洗那一条也一样：stub 故意回脏数据（重复/超长/非字符串），真网关的回包本来就是干净的，
+    // 所以判据是"**结果**是干净的"（无重复、都是短字符串），而不是"有没有清洗动作"。
+    const prompts = await callWithRetry('POST', '/ai/prompts', { token: mama.token, body: {} })
+    const hints = prompts.body?.hints ?? []
+    const examples = prompts.body?.examples ?? []
+    const clean = (list, max) =>
+      list.every((item) => typeof item === 'string' && item.length > 0 && item.length <= max)
+      && new Set(list).size === list.length
+    check(
+      '快问/示例按家庭现生成，且结果是干净的（无重复、无超长、全是非空短句）',
+      prompts.status === 200 && clean(hints, 12) && clean(examples, 20),
+      `${prompts.status} hints=${JSON.stringify(hints).slice(0, 160)}`,
+    )
+    check(
+      '清洗后仍够一屏（不够时宁可判失败，也不能给半批——半批会和写死的那份混在一排里）',
+      hints.length >= 5 && examples.length >= 3,
+      `hints=${hints.length} examples=${examples.length}`,
+    )
+    check(
+      '两批各归自己的字段（串了的话界面上会出现"肉怎么去腥"跟"清淡点"混在一排）',
+      hints.every((h) => !examples.includes(h)),
+      `重叠=${JSON.stringify(hints.filter((h) => examples.includes(h)))}`,
+    )
   }
 
   for (const item of results) {

@@ -97,6 +97,85 @@ export const AI_HINT_MAX = 200
 export const AI_MESSAGE_MAX = 1000
 export const AI_MESSAGES_MAX = 10
 
+/**
+ * 快问与示例问题（用户 2026-10-12：「这块也要使用ai吧，内置的这些不够用」）。
+ *
+ * 原先这两组是前端写死的一小撮（`apps/mobile/.../ai-prompts.ts`），全国家庭看到的都一样。
+ * 现在由模型**照着这家人**写一批（最近常吃什么、几口人、什么季节），前端拿它当池子抽；
+ * 写死的那份**降级为兜底**：没配 AI、还在生成、生成失败时照旧能用。
+ *
+ * 一次要多于一次显示的量（一次显示 5 条快问 / 3 条示例）：前端的「换一批」是在这批里抽，
+ * 不重新调模型——那按钮点一下要等十几秒的话，等于没了。
+ */
+export const PROMPTS_SCHEMA = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'prompts',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        hints: { type: 'array', items: { type: 'string' } },
+        examples: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['hints', 'examples'],
+      additionalProperties: false,
+    },
+  },
+} as const
+
+/** 收回来的上限（多余的丢掉，不往界面上堆） */
+export const PROMPTS_HINTS_MAX = 18
+export const PROMPTS_EXAMPLES_MAX = 12
+/**
+ * 低于这个数就当这批没用：一次要显示 5 条快问 / 3 条示例，
+ * 不够一屏的话剩下的位置只能空着或混进写死的那批——两种都比如实说"这次没生成好"更糟。
+ */
+export const PROMPTS_HINTS_MIN = 5
+export const PROMPTS_EXAMPLES_MIN = 3
+/** 一条快问/示例的长度上限：它们是**标签**，超了会在格子里折成两行（超长整条丢掉，不截断——截断会断在半句上） */
+export const HINT_TEXT_MAX = 12
+export const EXAMPLE_TEXT_MAX = 20
+
+export interface AiPrompts {
+  hints: string[]
+  examples: string[]
+}
+
+/**
+ * 解析并**清洗**模型给的快问/示例。
+ *
+ * 与推荐那条路同一个原则：**模型的输出是不可信输入**。这里要做的事——
+ * 非字符串、空串、超长、换行（会把标签撑成两行）、重复（同一个问题出现两次很显眼）全部丢掉；
+ * 清洗后不够一屏（见 PROMPTS_*_MIN）就判失败，让前端继续用写死的那份。
+ */
+export function parsePrompts(text: string): AiPrompts {
+  const parsed = extractJsonObject(text)
+  if (!parsed) throw new AiReplyError('AI 的回答不是有效的提示词结果')
+  const hints = sanitizePrompts(parsed.hints, PROMPTS_HINTS_MAX, HINT_TEXT_MAX)
+  const examples = sanitizePrompts(parsed.examples, PROMPTS_EXAMPLES_MAX, EXAMPLE_TEXT_MAX)
+  if (hints.length < PROMPTS_HINTS_MIN || examples.length < PROMPTS_EXAMPLES_MIN) {
+    throw new AiReplyError('AI 给的提示词不够用')
+  }
+  return { hints, examples }
+}
+
+function sanitizePrompts(raw: unknown, maxItems: number, maxLength: number): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    // 换行与连续空格压成单个空格：这是标签，不是段落
+    const value = item.replace(/\s+/g, ' ').trim()
+    if (!value || value.length > maxLength || seen.has(value)) continue
+    seen.add(value)
+    out.push(value)
+    if (out.length >= maxItems) break
+  }
+  return out
+}
+
 export interface CandidateDish {
   id: string
   name: string
@@ -188,6 +267,28 @@ export function parsePicks(text: string, candidates: CandidateDish[]): Suggested
     if (picks.length >= SUGGEST_PICKS_MAX) break
   }
   return picks
+}
+
+/**
+ * 从模型的回包里抠出一个 JSON 对象（快问/示例那条路用它）。
+ *
+ * 与 `extractJsonArray` 同一套路：常见形状是 ```json ... ``` 包裹、前后带说明文字。
+ * 先剥代码块，再依次试整体解析、第一个 `{` 到最后一个 `}`——
+ * 模型经常在 JSON 前后写一句"好的，这是你要的内容："，那不剥掉就永远解析不了。
+ */
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const cleaned = text.replace(/```(?:json)?/gi, '').trim()
+  const candidates = [cleaned, cleaned.slice(cleaned.indexOf('{'), cleaned.lastIndexOf('}') + 1)]
+  for (const raw of candidates) {
+    if (!raw.startsWith('{')) continue
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
+    } catch {
+      // 继续试下一种切法
+    }
+  }
+  return null
 }
 
 /**

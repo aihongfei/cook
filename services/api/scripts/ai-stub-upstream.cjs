@@ -70,9 +70,21 @@ const server = http.createServer((req, res) => {
     // STUB_ECHO_JSON_OBJECT=1 模拟**老 json_object 模式的故障**：模型把该参数原样当正文回。
     // 这不是虚构——实测真实网关（DeepSeek）就是这个行为，所以客户端只能用 json_schema（见 D-026）。
     const echoObject = parsed.response_format?.type === 'json_object' && process.env.STUB_ECHO_JSON_OBJECT === '1'
+
+    // ---------- 快问/示例问题（用户 2026-10-12：「内置的这些不够用」）----------
+    // 提示词要的是 {"hints":[...],"examples":[...]}。stub 故意回**一份脏数据**：
+    // 一条重复的、一条超长的、一条非字符串的 —— 服务端必须清洗掉它们并且仍然凑够一屏，
+    // 这样"模型的回包要核对"这条在本地就验到了（不然只能靠真额度碰运气）。
+    const askedForPrompts = /"hints"/.test(system)
+    const promptsAnswer = JSON.stringify({
+      hints: ['清淡点', '想吃肉', '想吃肉', '孩子也能吃', '快手菜', '想喝汤', 42, '这是一条故意超长的快问超过十二个字'],
+      examples: ['肉怎么去腥', '肉怎么去腥', '鱼怎么煎不破皮', null, '鸡蛋能放多久'],
+    })
+
     const content = echoObject
       ? JSON.stringify(parsed.response_format)
-      : askedForPicks ? picksAnswer : '今晚可以煮个青菜豆腐汤，配一盘蒜蓉西兰花，清爽又省事。'
+      : askedForPrompts ? promptsAnswer
+        : askedForPicks ? picksAnswer : '今晚可以煮个青菜豆腐汤，配一盘蒜蓉西兰花，清爽又省事。'
 
     // ---------- 工具循环（D-026 第三次补充）----------
     // 服务端把工具声明发过来时，脚本按"真实模型会怎么走"来演。判据看 role=tool 的消息数：

@@ -47,6 +47,22 @@ export class AiController {
   }
 
   /**
+   * 快问与示例问题（用户 2026-10-12：「这块也要使用ai吧，内置的这些不够用」）。
+   *
+   * 同样限流 10 次/分：这也是一次真实的上游调用。前端**只在抽屉打开时拉一次**并缓存
+   * （`staleTime` 半小时），所以正常使用不会反复触发——它生成的是"这个家的画像"，
+   * 不是每句话都要变的东西。
+   */
+  @Post('prompts')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '按家庭情况生成快问/示例问题（写死的那份只作兜底）' })
+  async prompts(@CurrentUserId() userId: string, @Req() request: Request) {
+    return this.ai.prompts(userId, abortSignal(request))
+  }
+
+  /**
    * 问 AI（流式）：SSE 逐段回，前端边收边上屏（D-026）。
    *
    * 顺序上有一个**必须**的讲究：先把生成器推进到第一段、拿到它，才写响应头。

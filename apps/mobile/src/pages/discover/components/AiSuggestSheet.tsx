@@ -4,7 +4,7 @@ import { DotLoading } from 'antd-mobile'
 import BottomSheet, { type BottomSheetHandle } from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
 import { toast } from '@/components/ui/toast'
-import { useAiSuggest, useAiStatus, type SuggestedPick } from '@/api/ai'
+import { useAiPrompts, useAiSuggest, useAiStatus, type SuggestedPick } from '@/api/ai'
 import { useAddOrderItem, useOrderOptions } from '@/api/orders'
 import { useFamily } from '@/api/family'
 import { nextMealDefaults } from '@/pages/order/next-meal'
@@ -18,11 +18,13 @@ import '../../shared.scss'
  * 推荐里的菜名与 id 都由后端按库里数据回填（模型编造的 id 会被丢掉），
  * 所以这里可以放心把 pick 当"库里存在的菜"用。
  *
- * 三个刻意的设计：
+ * 四个刻意的设计：
  * - **未配置时明说去哪配**，不给假的推荐撑场面（假数据会让用户以为 AI 在工作）；
  * - **推荐结果给"点这道"**，而不是只让用户看一眼——看完再自己翻菜单找那道菜，
  *   等于白推荐（这是他为什么来用 AI，而不是去菜谱库翻）；
- * - **快问每次抽一批**（见 ai-prompts）：同一组示例看第三遍就成了墙纸，换着出才有引导作用。
+ * - **快问由 AI 按这家人的情况现生成**（用户 2026-10-12：「内置的这些不够用」），
+ *   写死的那份只作兜底：没配、还没生成好、生成失败时照旧能用（见 ai-prompts）；
+ * - **「换一批」不再调模型**，就在拿到的那批里抽——点一下等十几秒的话，那按钮等于没了。
  */
 
 /** 等结果时的阶段提示（模型要 11～40 秒，明说在干什么比一个转圈更有耐心） */
@@ -39,17 +41,41 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
   const options = useOrderOptions()
   const suggest = useAiSuggest()
   const addItem = useAddOrderItem()
+  // 快问：优先用 AI 按这个家现生成的那批（见 api/ai 的 useAiPrompts）。
+  // `enabled` 等 status 回来再开——没配 AI 时不该白发一次注定 503 的请求。
+  // 失败不重试也不报错：这只是入口的引导语，退回写死的那份就行（用户不该为它看见错误）
+  const aiPrompts = useAiPrompts(status.data?.configured === true)
   const [hint, setHint] = useState('')
   const [picks, setPicks] = useState<SuggestedPick[] | null>(null)
   const [tip, setTip] = useState(0)
-  // 快问在打开时抽定（调用方用 key 重挂载，每次打开都是一批新的）。
-  // 用 `useState(函数)` 而不是 `useState(pickHints())`：后者每次渲染都白抽一轮随机数
-  // （值用不上，但白抽了）。**注意**两者在界面上的行为一样——反证验过，写成后者测试照样绿；
-  // 真正会让按钮自己跳的是"不进 state、渲染时现抽"，那种写法反证会红（见 ai-sheets.test）。
-  const [quickHints, setQuickHints] = useState(pickHints)
+  /*
+   * 快问在打开时抽定（调用方用 key 重挂载，每次打开都是一批新的）。
+   * 用 `useState(函数)` 而不是 `useState(pickHints())`：后者每次渲染都白抽一轮随机数
+   * （值用不上，但白抽了）。**注意**两者在界面上的行为一样——反证验过，写成后者测试照样绿；
+   * 真正会让按钮自己跳的是"不进 state、渲染时现抽"，那种写法反证会红（见 ai-sheets.test）。
+   */
+  const [quickHints, setQuickHints] = useState(() => pickHints())
   // 收起走抽屉自己的退场动画（见 BottomSheet 里那段 ⚠️）：直接调 onClose 会让抽屉"啪"地消失
   const sheet = useRef<BottomSheetHandle>(null)
   const closeSheet = () => (sheet.current ? sheet.current.close() : onClose())
+
+  /*
+   * AI 那批到手就**重抽一次**。
+   *
+   * 为什么要这一步：抽屉一打开就发请求，用户看到的头几秒必然是兜底那批；不做这一步的话
+   * 他会一直看着兜底版本，AI 生成的等于白花。抽完就定住——不能每轮渲染都重抽，
+   * 那样用户刚要点的那个标签会自己跑掉（见上面 useState 的说明）。
+   *
+   * lint 的 react(set-state-in-effect) 会被点上：规则的本意是"别用 effect 派生状态"，
+   * 而这里的值来自**异步到达的外部数据**（先兜底、后真货），没有"渲染期纯算出来"的写法
+   * ——用 useMemo 的话 React 允许丢弃缓存重算，标签会偶尔自己变（正是要避免的那个毛病）。
+   * 与 BottomSheet 里那处同一处理：就地豁免并写明理由。
+   */
+  const aiBatch = aiPrompts.data?.hints
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    if (aiBatch && aiBatch.length > 0) setQuickHints(pickHints(aiBatch))
+  }, [aiBatch])
 
   // 等结果时轮播阶段提示。复位写在**发起请求的事件里**（见 ask）而不是这里：
   // 在 effect 里 setState 会多一轮渲染，也会被 react-hooks 的 set-state-in-effect 拦下
@@ -117,12 +143,13 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
                   {item}
                 </button>
               ))}
-              {/* 「换一批」而不是把池子铺满：铺满会盖住输入框（这个入口不只是点标签，还要能自己说） */}
+              {/* 「换一批」而不是把池子铺满：铺满会盖住输入框（这个入口不只是点标签，还要能自己说）。
+                  它**不重新调模型**——就在已经拿到的那批里抽；点一下要等十几秒的话等于没了 */}
               <button
                 type="button"
                 className="ai__hint ai__hint--more"
                 disabled={suggest.isPending}
-                onClick={() => setQuickHints(pickHints())}
+                onClick={() => setQuickHints(pickHints(aiBatch))}
               >
                 换一批 ↻
               </button>

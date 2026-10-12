@@ -25,6 +25,19 @@ export interface AiStatus {
   model: string | null
 }
 
+/**
+ * 快问与示例问题（用户 2026-10-12：「这块也要使用ai吧，内置的这些不够用」）。
+ *
+ * 后端按**这家人的实际情况**（几口人、最近常点什么、什么季节）现写两批短句；
+ * `ai-prompts.ts` 里写死的那份**降级为兜底**——没配 AI、还在生成、生成失败时照旧能用。
+ */
+export interface AiPrompts {
+  /** 「AI 帮你想」的快问（点一下等于替我打了这句话） */
+  hints: string[]
+  /** 「问 AI」的示例问题（示范这个入口能问多细） */
+  examples: string[]
+}
+
 export interface SuggestedPick {
   recipeId: string
   name: string
@@ -70,6 +83,26 @@ export function useAiStatus() {
     queryFn: fetchAiStatus,
     // 配置是服务端环境变量决定的，一次会话里不会变；不用反复问
     staleTime: 5 * 60_000,
+  })
+}
+
+/**
+ * 快问/示例问题（按家庭现生成）。**只在 AI 已配置且真的要用时请求**（`enabled`），
+ * 失败也不重试——它只是入口处的引导语，拿不到就用写死的那份，不该让用户看见错误提示。
+ *
+ * `staleTime` 给半小时：它生成的是"这个家的画像"，不是每句话都要变的东西；
+ * 抽屉每次打开都打一次上游既慢又白花额度。
+ */
+export function useAiPrompts(enabled: boolean) {
+  return useQuery({
+    queryKey: ['ai', 'prompts'],
+    queryFn: async () => {
+      const { data } = await apiClient.post<AiPrompts>('/ai/prompts', {}, { timeout: AI_TIMEOUT_MS })
+      return data
+    },
+    enabled,
+    staleTime: 30 * 60_000,
+    retry: false,
   })
 }
 

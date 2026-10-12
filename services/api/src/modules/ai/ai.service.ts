@@ -2,8 +2,9 @@ import { HttpException, HttpStatus, Injectable, ServiceUnavailableException } fr
 import { PrismaService } from '../recipes/prisma.service'
 import { AiUpstreamError, chatJson, chatStreamEvents, type StreamEvent, type WireMessage } from './ai.client'
 import {
-  AI_HINT_MAX, SUGGEST_CANDIDATES, AiReplyError, formatCandidates, parseChatMessages, parseHint, parsePicks, readAiConfig,
-  type AiConfig, type CandidateDish, type ChatMessage, type SuggestedPick,
+  AI_HINT_MAX, EXAMPLE_TEXT_MAX, HINT_TEXT_MAX, PROMPTS_EXAMPLES_MAX, PROMPTS_HINTS_MAX, SUGGEST_CANDIDATES, AiReplyError,
+  formatCandidates, parseChatMessages, parseHint, parsePicks, parsePrompts, readAiConfig,
+  type AiConfig, type AiPrompts, type CandidateDish, type ChatMessage, type SuggestedPick,
 } from './ai.rules'
 import {
   AI_TOOLS, PROPOSALS_MAX, SEARCH_RESULTS_MAX, TOOL_PROPOSE_MENU_ITEMS, TOOL_READ_PLAN, TOOL_ROUNDS_MAX, TOOL_SEARCH_DISHES,
@@ -93,6 +94,88 @@ export class AiService {
     )
 
     return { picks, hint, candidates: candidates.length }
+  }
+
+  /**
+   * 快问与示例问题（用户 2026-10-12：「这块也要使用ai吧，内置的这些不够用」）。
+   *
+   * 前端那份写死的池子全国一个样，看两遍就成了墙纸。这里按**这家人的实际情况**现写一批
+   * （最近常点什么、几口人、什么季节），前端拿它当池子抽，「换一批」不用再调模型。
+   *
+   * 三个刻意的取舍：
+   * - **没有输入参数**：这不是"用户问了什么"，而是"这个家是什么样"——参数化只会让界面
+   *   多一个要填的东西，而它本来就没有用户输入；
+   * - **人数/季节也塞进上下文**：模型写"两个人在家随便吃点"比"推荐一道清淡的菜"像人话，
+   *   而这需要它知道家里几口人；
+   * - **清洗后不够一屏就判失败**（见 parsePrompts）：半批提示词混着写死的那些出，
+   *   用户看到的是两套语气的标签混在一排里。
+   */
+  async prompts(userId: string, signal?: AbortSignal): Promise<AiPrompts> {
+    const config = this.requireConfig()
+    const context = await this.promptsContext(userId)
+
+    const systemPrompt = [
+      '你是这个家庭的厨房助手。任务：为两个入口各写一批**能直接点的短句**。',
+      '① hints（快问）——「AI 帮你想」里的快捷按钮，用户点一下就等于说了这句话。'
+        + '写他**想吃什么、家里什么情况**（如"清淡点""孩子也能吃""冰箱有剩青菜"），'
+        + `${HINT_TEXT_MAX} 字以内，像家里人随口说的，不是"请推荐一道清淡的菜"这种书面语。`,
+      `② examples（示例问题）——「问 AI」里示范"这个入口能问多细"的问题（如"鱼怎么煎不破皮"），`
+        + `${EXAMPLE_TEXT_MAX} 字以内，要是真下厨时卡住的那种具体问题。`,
+      `各写 ${PROMPTS_HINTS_MAX} 条与 ${PROMPTS_EXAMPLES_MAX} 条：一次只显示一部分，用户点「换一批」要能换出新的。`,
+      '不要写"推荐一道菜"这种空话（那是按钮已经说清的事）；两批内部都别重复；'
+        + '不要出现具体品牌；不要客套话。',
+      '',
+      '这家人的情况：',
+      context,
+      '',
+      '按 JSON 回：{"hints": ["..."], "examples": ["..."]}',
+    ].filter(Boolean).join('\n')
+
+    // temperature 给高一点：这几组句子要的是**每次不一样**，太保守时换个家也还是那几句
+    return this.ask(
+      config,
+      {
+        systemPrompt,
+        messages: [{ role: 'user', content: '按上面的要求写一批。' }],
+        json: true,
+        temperature: 0.95,
+        signal,
+      },
+      (text) => parsePrompts(text),
+    )
+  }
+
+  /**
+   * 生成提示词要用的家庭情况：几口人、最近常吃什么、现在什么季节。
+   *
+   * 与 `familyContext`（问答用）分开：那边要的是"这两天的安排"（避免推荐重复的菜），
+   * 这边要的是**这个家的画像**（口味倾向、食量、时令），两者混在一起会让模型抓错重点。
+   */
+  private async promptsContext(userId: string): Promise<string> {
+    const membership = await this.prisma.familyMember.findUnique({
+      where: { userId },
+      include: { family: { include: { members: true } } },
+    })
+    if (!membership) return '（还没有加入家庭，按普通三口之家写）'
+
+    const now = new Date()
+    // 最近 14 天点过的菜：比"这两天的安排"更能代表这一家的口味（安排可能是给客人备的）
+    const since = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() - 14))
+    const recent = await this.prisma.orderItem.findMany({
+      where: { mealOrder: { familyId: membership.familyId }, createdAt: { gte: since } },
+      select: { recipeName: true },
+      orderBy: { createdAt: 'desc' },
+      take: 60,
+    })
+    // 去重保序：同一道菜点过五次也只提一次，不然上下文里全是同一道菜
+    const dishes = [...new Set(recent.map((item) => item.recipeName))].slice(0, 12)
+
+    const month = now.getMonth() + 1
+    return [
+      `家里 ${membership.family.members.length} 口人。`,
+      dishes.length ? `最近两周点过：${dishes.join('、')}。` : '最近两周还没在应用里点过菜。',
+      `现在是 ${month} 月（${seasonOf(month)}）。`,
+    ].join('\n')
   }
 
   /** 问 AI：带家庭上下文的自由问答（消息历史由前端带上，服务端不存） */
@@ -486,4 +569,12 @@ function readProposalIds(rawArguments: string): string[] {
   } catch {
     return []
   }
+}
+
+/** 月份 → 季节（给模型看的人话；它据此写"天冷了想喝汤"这类贴时令的句子） */
+function seasonOf(month: number): string {
+  if (month >= 3 && month <= 5) return '春'
+  if (month >= 6 && month <= 8) return '夏'
+  if (month >= 9 && month <= 11) return '秋'
+  return '冬'
 }

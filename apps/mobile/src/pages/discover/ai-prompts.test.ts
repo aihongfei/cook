@@ -63,3 +63,40 @@ it('池子比一次显示的多（否则"换一批"永远换不出新东西）',
   expect(HINT_POOL.length).toBeGreaterThan(HINT_COUNT * 2)
   expect(EXAMPLE_POOL.length).toBeGreaterThan(EXAMPLE_COUNT * 2)
 })
+
+// ---------- AI 现生成的那批（用户 2026-10-12：「内置的这些不够用」） ----------
+
+it('给了 AI 那批就从它里面抽（写死的那份只是兜底）', () => {
+  const hints = ['甲甲', '甲乙', '甲丙', '甲丁', '甲戊', '甲己']
+  const picked = pickHints(hints)
+  expect(picked).toHaveLength(HINT_COUNT)
+  for (const item of picked) expect(hints).toContain(item)
+  // 兜底池里的句子一个都不该出现——混着出说明没真用上 AI 那批
+  for (const item of picked) expect(HINT_POOL).not.toContain(item)
+})
+
+it('AI 那批不够一屏时退回兜底（界面不该出现半排空白）', () => {
+  // 后端保证"不够一屏会判失败"，但界面这一层不该依赖对方的前提：
+  // 真出现半批的话，抽出来只有两三个标签、剩下的位置空着，比用兜底难看
+  const short = ['甲甲', '甲乙']
+  const picked = pickHints(short)
+  expect(picked).toHaveLength(HINT_COUNT)
+  for (const item of picked) expect(HINT_POOL).toContain(item)
+})
+
+it('示例问题同理：AI 那批优先，不够就退回兜底', () => {
+  const examples = ['甲甲问题', '甲乙问题', '甲丙问题']
+  const picked = pickExamples(examples)
+  expect(picked).toHaveLength(EXAMPLE_COUNT)
+  for (const item of picked) expect(examples).toContain(item)
+
+  const short = pickExamples(['只有一个'])
+  expect(short).toHaveLength(EXAMPLE_COUNT)
+  for (const item of short) expect(EXAMPLE_POOL).toContain(item)
+})
+
+it('没给 AI 那批（undefined / 空数组）时与以前完全一样', () => {
+  expect(pickHints(undefined)).toHaveLength(HINT_COUNT)
+  expect(pickHints([])).toHaveLength(HINT_COUNT)
+  expect(pickExamples(undefined)).toHaveLength(EXAMPLE_COUNT)
+})

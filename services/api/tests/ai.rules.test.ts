@@ -7,12 +7,18 @@ import {
   AI_TIMEOUT_DEFAULT_MS,
   AI_TIMEOUT_MAX_MS,
   AiReplyError,
+  EXAMPLE_TEXT_MAX,
+  HINT_TEXT_MAX,
   PICKS_SCHEMA,
+  PROMPTS_EXAMPLES_MAX,
+  PROMPTS_HINTS_MAX,
+  PROMPTS_HINTS_MIN,
   SUGGEST_PICKS_MAX,
   formatCandidates,
   parseChatMessages,
   parseHint,
   parsePicks,
+  parsePrompts,
   readAiConfig,
   type CandidateDish,
 } from '../src/modules/ai/ai.rules'
@@ -149,4 +155,93 @@ test('推荐结果：理由截断到 120 字（模型偶尔话很多，卡片放
   assert.equal(picks[0].reason.length, 120)
   // 理由缺失也要能用（只有 id 是必需的）
   assert.equal(parsePicks(JSON.stringify([{ id: 'r1' }]), candidates)[0].reason, '')
+})
+
+// ---------- 快问与示例问题（用户 2026-10-12：「这块也要使用ai吧，内置的这些不够用」） ----------
+
+function promptsPayload(hints: unknown[], examples: unknown[]): string {
+  return JSON.stringify({ hints, examples })
+}
+
+test('提示词：正常回包能解析出来，且按上限收敛', () => {
+  const hints = Array.from({ length: PROMPTS_HINTS_MAX + 4 }, (_, i) => `快问${i}`)
+  const examples = Array.from({ length: PROMPTS_EXAMPLES_MAX + 4 }, (_, i) => `示例问题${i}`)
+  const parsed = parsePrompts(promptsPayload(hints, examples))
+  assert.equal(parsed.hints.length, PROMPTS_HINTS_MAX, '多余的丢掉，不往界面上堆')
+  assert.equal(parsed.examples.length, PROMPTS_EXAMPLES_MAX)
+})
+
+test('提示词：清洗脏数据——非字符串、空串、超长、换行、重复统统丢掉', () => {
+  // 干净的要够一屏（5 条快问 / 3 条示例），否则会先被"不够用"那条拦下，
+  // 这个用例就验不到清洗本身了（第一版就是这么写的，实测红在这里）
+  const parsed = parsePrompts(promptsPayload(
+    [
+      42, '', '   ', '超长的一条快问超过十二个字就不该出现',
+      '清淡点', '两个人在家', '两个人在家',  // 重复的只留一条
+      '想喝\n汤',                            // 换行会被撑成两行
+      '快手菜', '想吃肉', '要有蔬菜', '来点辣的',
+    ],
+    [
+      null, '这一条示例问题实在是太长了远远超过二十个字的上限',
+      '肉怎么去腥', '鱼怎么煎不破皮', '肉怎么去腥',  // 重复
+      '鸡蛋能放多久', '排骨炖多久才烂',
+    ],
+  ))
+  assert.deepEqual(
+    parsed.hints,
+    ['清淡点', '两个人在家', '想喝 汤', '快手菜', '想吃肉', '要有蔬菜', '来点辣的'],
+  )
+  assert.deepEqual(
+    parsed.examples,
+    ['肉怎么去腥', '鱼怎么煎不破皮', '鸡蛋能放多久', '排骨炖多久才烂'],
+  )
+})
+
+test('提示词：换行与连续空格压成单个空格（标签不能折行）', () => {
+  const parsed = parsePrompts(promptsPayload(
+    ['想吃   点  酸的', '有客人来', '清淡点', '快手菜', '想喝汤'],
+    ['豆腐  买多了  怎么存', '肉怎么去腥', '鸡蛋能放多久'],
+  ))
+  assert.equal(parsed.hints[0], '想吃 点 酸的')
+  assert.equal(parsed.examples[0], '豆腐 买多了 怎么存')
+})
+
+test('提示词：不够一屏就判失败（半批混着写死的那份出，语气会打架）', () => {
+  // 快问要 5 条才够；给 4 条应当失败，而不是"凑合着用"
+  assert.throws(
+    () => parsePrompts(promptsPayload(['a1', 'a2', 'a3', 'a4'], ['bb1', 'bb2', 'bb3'])),
+    AiReplyError,
+  )
+  assert.throws(
+    () => parsePrompts(promptsPayload(['a1', 'a2', 'a3', 'a4', 'a5'], ['bb1', 'bb2'])),
+    AiReplyError,
+  )
+  // 刚好够就放行（边界不能误伤）
+  const ok = parsePrompts(promptsPayload(['a1', 'a2', 'a3', 'a4', 'a5'], ['bb1', 'bb2', 'bb3']))
+  assert.equal(ok.hints.length, PROMPTS_HINTS_MIN)
+})
+
+test('提示词：不是 JSON、数组套错字段时都判失败（交给前端回退写死的那份）', () => {
+  assert.throws(() => parsePrompts('好的，我写了几条：'), AiReplyError)
+  assert.throws(() => parsePrompts('["清淡点","想吃肉"]'), AiReplyError, '整体是数组不是对象')
+  assert.throws(() => parsePrompts('{"items":["a","b","c","d","e"]}'), AiReplyError, '字段名不对')
+})
+
+test('提示词：```json 包裹与前后带话都能认（模型常见的两种写法）', () => {
+  const body = promptsPayload(['a1', 'a2', 'a3', 'a4', 'a5'], ['bb1', 'bb2', 'bb3'])
+  const fenced = parsePrompts('```json\n' + body + '\n```')
+  assert.equal(fenced.hints.length, 5)
+  const chatty = parsePrompts('好的，这是你要的内容：\n' + body + '\n需要我调整吗？')
+  assert.equal(chatty.examples.length, 3)
+})
+
+test('提示词：长度上限是"整条丢掉"而不是截断（截断会断在半句上）', () => {
+  const long = '好'.repeat(HINT_TEXT_MAX + 1)
+  const parsed = parsePrompts(promptsPayload(
+    ['a1', 'a2', 'a3', 'a4', 'a5', long],
+    ['b'.repeat(EXAMPLE_TEXT_MAX + 1), 'bb1', 'bb2', 'bb3'],
+  ))
+  assert.equal(parsed.hints.includes(long), false)
+  assert.equal(parsed.hints.length, 5)
+  assert.equal(parsed.examples.length, 3)
 })

@@ -7,6 +7,7 @@ import { apiClient } from '@/api/client'
 import type { ChatTurn, SuggestedPick } from '@/api/ai'
 import { toast } from '@/components/ui/toast'
 import { useAuth } from '@/stores/auth'
+import { HINT_POOL } from '../ai-prompts'
 import AiChatSheet from './AiChatSheet'
 import AiSuggestSheet from './AiSuggestSheet'
 
@@ -44,16 +45,24 @@ const OPTIONS = {
   ],
 }
 
+/** AI 现生成的快问/示例（用户 2026-10-12：「内置的这些不够用」）：刻意与兜底池完全不同，便于断言 */
+const AI_HINTS = ['甲家的甲菜', '甲家的乙菜', '甲家的丙菜', '甲家的丁菜', '甲家的戊菜', '甲家的己菜']
+const AI_EXAMPLES = ['甲家的甲问题', '甲家的乙问题', '甲家的丙问题']
+
 function mockApi({
   configured = true,
   picks = [{ recipeId: 'r1', name: '番茄炒蛋', reason: '快手' }] as SuggestedPick[],
   candidates = picks.length,
   suggestFails = false,
+  prompts = null as { hints: string[]; examples: string[] } | null,
+  promptsFail = false,
 }: {
   configured?: boolean
   picks?: SuggestedPick[]
   candidates?: number
   suggestFails?: boolean
+  prompts?: { hints: string[]; examples: string[] } | null
+  promptsFail?: boolean
 } = {}) {
   const get = vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
     if (url === '/ai/status') return Promise.resolve({ data: { configured, model: configured ? 'm' : null } } as never)
@@ -62,6 +71,11 @@ function mockApi({
     throw new Error(`未预期的请求：${url}`)
   })
   const post = vi.spyOn(apiClient, 'post').mockImplementation((url: string) => {
+    if (url === '/ai/prompts') {
+      // 失败要**静默回退**（它是入口的引导语，拿不到就用写死的那份，不该让用户看见错误）
+      if (promptsFail) return Promise.reject({ response: { status: 502, data: { message: 'AI 没答好' } } })
+      return Promise.resolve({ data: prompts ?? { hints: [], examples: [] } } as never)
+    }
     if (url === '/ai/suggest') {
       if (suggestFails) return Promise.reject({ response: { status: 502, data: { message: 'AI 的回答不是有效的推荐结果，再点一次试试' } } })
       return Promise.resolve({ data: { picks, hint: '', candidates } } as never)
@@ -189,26 +203,90 @@ it('推荐落地的菜点得动，而且带着日期与餐次（少一个后端�
   }
 })
 
-it('「换一批」真的换掉那一组（且不发任何请求：换示例是本地动作，不该花额度）', async () => {
-  const { post } = mockApi()
-  // 把随机数**钉死成两段**（前 5 次不洗牌、后 5 次每次换到末尾），这样"换没换"是确定的。
+it('「换一批」真的换掉那一组（且**不重新调模型**：那是本地换，点一下等十几秒等于没了）', async () => {
+  const { post } = mockApi({ prompts: { hints: AI_HINTS, examples: AI_EXAMPLES } })
+
+  renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+  // **先等 AI 那批到手**：抽屉一打开就会拉一次 /ai/prompts，没落地就取基线的话，
+  // 它会在"基线之后、断言之前"补上——我第一次就是这么写的，报"期望 0 实际 1"。
+  await waitFor(() =>
+    expect(
+      [...document.querySelectorAll<HTMLButtonElement>('.ai__hint:not(.ai__hint--more)')].every((b) =>
+        AI_HINTS.includes(b.textContent ?? ''),
+      ),
+    ).toBe(true),
+  )
+  const before = [...document.querySelectorAll<HTMLButtonElement>('.ai__hint:not(.ai__hint--more)')].map((b) => b.textContent)
+  const callsBefore = post.mock.calls.filter(([url]) => url === '/ai/prompts').length
+  expect(callsBefore).toBe(1)
+
+  // 把随机数**钉死成两段**（前几次不洗牌、之后每次换到末尾），"换没换"才是确定的。
   // 不钉死的话只能断言"长度一样"——那个断言在 onClick 被写成空函数时**照样通过**（反证验过）
   let calls = 0
   vi.spyOn(Math, 'random').mockImplementation(() => {
     calls += 1
     return calls <= 5 ? 0 : 0.999
   })
-
-  renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
-  await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
-  const before = [...document.querySelectorAll<HTMLButtonElement>('.ai__hint:not(.ai__hint--more)')].map((b) => b.textContent)
-
   fireEvent.click(screen.getByText(/换一批/))
   const after = [...document.querySelectorAll<HTMLButtonElement>('.ai__hint:not(.ai__hint--more)')].map((b) => b.textContent)
 
   expect(after).toHaveLength(before.length)
   expect(after).not.toEqual(before)
-  expect(post).not.toHaveBeenCalled()
+  // 换一批只在**已拿到的那批里**抽：请求数必须还是 1（多一次就是又打了上游）
+  expect(post.mock.calls.filter(([url]) => url === '/ai/prompts')).toHaveLength(1)
+})
+
+// ---------- 快问/示例由 AI 现生成（用户 2026-10-12：「内置的这些不够用」） ----------
+
+it('AI 给的快问会被用上（不再是写死的那批）', async () => {
+  mockApi({ prompts: { hints: AI_HINTS, examples: AI_EXAMPLES } })
+  renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+
+  // AI 那批到手后重抽：界面上出现的应当是模型写的那几句
+  await waitFor(() =>
+    expect(
+      [...document.querySelectorAll<HTMLButtonElement>('.ai__hint:not(.ai__hint--more)')].some((b) =>
+        AI_HINTS.includes(b.textContent ?? ''),
+      ),
+    ).toBe(true),
+  )
+  // 兜底池里那些不该再出现（只有 5 个位置，混着出说明没替换掉）
+  const texts = [...document.querySelectorAll<HTMLButtonElement>('.ai__hint:not(.ai__hint--more)')].map((b) => b.textContent ?? '')
+  expect(texts.every((text) => AI_HINTS.includes(text))).toBe(true)
+})
+
+it('AI 生成失败时静默回退写死的那份：不给用户看错误，入口照样能用', async () => {
+  mockApi({ promptsFail: true })
+  renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+
+  await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
+  const texts = [...document.querySelectorAll<HTMLButtonElement>('.ai__hint:not(.ai__hint--more)')].map((b) => b.textContent ?? '')
+  expect(texts).toHaveLength(5)
+  // 每一个都来自兜底池（这是"静默回退"的实质：池子里的句子照旧在）
+  for (const text of texts) expect(HINT_POOL).toContain(text)
+  // 而且不该出现任何错误提示
+  expect(screen.queryByText(/失败|出错|打不开/)).toBeNull()
+})
+
+it('没配 AI 时不请求生成快问（少一次注定 503 的往返）', async () => {
+  const { post } = mockApi({ configured: false })
+  renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+
+  expect(await screen.findByText(/还没接上 AI/)).toBeTruthy()
+  expect(post.mock.calls.filter(([url]) => url === '/ai/prompts')).toHaveLength(0)
+})
+
+it('「问 AI」的示例问题也走 AI 那批（两个入口共用一次生成）', async () => {
+  const { post } = mockApi({ prompts: { hints: AI_HINTS, examples: AI_EXAMPLES } })
+  renderSheet(<AiChatSheet visible onClose={() => {}} />)
+
+  await waitFor(() =>
+    expect(
+      [...document.querySelectorAll<HTMLButtonElement>('.ai__hint')].some((b) => AI_EXAMPLES.includes(b.textContent ?? '')),
+    ).toBe(true),
+  )
+  // 两个抽屉各挂一次，但同一个 queryKey 缓存住：所以「问 AI」这边不该再打一次
+  expect(post.mock.calls.filter(([url]) => url === '/ai/prompts').length).toBeLessThanOrEqual(1)
 })
 
 it('推荐为空时说实话（不给"正在想"的假象），并指路去菜谱小书', async () => {
