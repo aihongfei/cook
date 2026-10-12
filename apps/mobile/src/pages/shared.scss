@@ -344,19 +344,35 @@
   text-overflow: ellipsis;
 }
 
-/* 问 AI 是另一种问题（"豆腐怎么存"），给小字入口而不是第三个大按钮 */
+/* 问 AI 是另一种问题（"豆腐怎么存"），给小字入口而不是第三个大按钮。
+   整行右对齐；只有「点这里问 AI →」是可点的——前半句是说明，说明不该看起来能点。 */
 .today__ask {
-  display: block;
-  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px;
   margin-top: 9px;
-  padding: 4px 0 0;
+  padding-top: 5px;
+  font-size: 11px;
+  line-height: 1.5;
+  border-top: 1px dashed rgb(160 110 70 / 26%);
+}
+
+.today__ask-text {
+  color: #a2714a;
+}
+
+/* 动作词加重（更深 + 加粗 + 下划线），让人一眼看出"这几个字能点" */
+.today__ask-link {
+  padding: 0;
   font: inherit;
   font-size: 11px;
-  color: #8a5a34;
-  text-align: left;
+  font-weight: 600;
+  color: #8a4a1e;
+  text-decoration: underline;
+  text-underline-offset: 3px;
   background: none;
   border: 0;
-  border-top: 1px dashed rgb(160 110 70 / 26%);
 }
 
 /* 用户卡 */

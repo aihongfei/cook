@@ -5,6 +5,7 @@ import { useCheckInWall } from '@/api/checkins'
 import { useFamily } from '@/api/family'
 import CheckInPhoto from '@/components/ui/CheckInPhoto'
 import EmptyState from '@/components/ui/EmptyState'
+import { readBackLink } from '@/pages/back-link'
 import Page from '@/components/ui/Page'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
 import CheckInUploadSheet from './components/CheckInUploadSheet'
@@ -19,12 +20,6 @@ import './checkins.scss'
  * 返回目标跟着**来源**走，不写死：从「我的」进来要回「我的」，从点单卡那张成品照进来要回点菜单。
  * （原先写死"返回厨房"，从"我的"进来的人点返回会莫名其妙落到厨房——用户报的正是这个。）
  */
-const WALL_ENTRIES: Record<string, string> = {
-  '/mine': '返回我的',
-  '/order': '返回点菜单',
-  '/kitchen': '返回厨房',
-}
-
 export default function CheckInPage() {
   const location = useLocation()
   const family = useFamily()
@@ -38,8 +33,7 @@ export default function CheckInPage() {
   }
 
   // 没带来源（直接输地址/刷新丢了 state）时按主要入口「我的」兜底
-  const requestedFrom = location.state?.from
-  const from = typeof requestedFrom === 'string' && requestedFrom in WALL_ENTRIES ? requestedFrom : '/mine'
+  const back = readBackLink(location.state, '/mine')
 
   const wall = useCheckInWall(scope, { enabled: Boolean(family.data) })
 
@@ -51,7 +45,7 @@ export default function CheckInPage() {
   return (
     <Page>
       <div className="pscreen">
-        <Link className="page-back" to={from}>← {WALL_ENTRIES[from]}</Link>
+        <Link className="page-back" to={back.to}>← {back.label}</Link>
         <div className="ptitle">家庭打卡墙</div>
         <div className="psub">做好一道菜就拍一张，攒着看特别有成就感</div>
 

@@ -124,3 +124,17 @@ it('两个 AI 入口都还在（合并成一块之后位置变了，别改丢）
   fireEvent.click(suggest)
   expect(await screen.findByText(/说说想吃什么/)).toBeTruthy()
 })
+
+it('问 AI 那行只有后半句可点：前半句是说明，不该看着像按钮', async () => {
+  mockRecipes(12)
+  renderDiscover()
+
+  const hint = await screen.findByText('下厨上的问题想问问人？')
+  // 说明是纯文本；改回整行一个 button 的话这条会红——那正是用户报的问题
+  expect(hint.tagName).toBe('SPAN')
+  expect(hint.closest('button')).toBeNull()
+
+  // 点它确实打开问答抽屉（不是只有样式像链接）
+  fireEvent.click(screen.getByRole('button', { name: '点这里问 AI →' }))
+  expect(await screen.findByText(/拿不准的都能问/)).toBeTruthy()
+})

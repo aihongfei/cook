@@ -208,11 +208,13 @@ it('返回入口跟着来源走：从「我的」进来就回我的，不写死�
   expect(screen.queryByRole('link', { name: '← 返回厨房' })).toBeNull()
 })
 
-it('从点单卡的成品照进来就回点菜单', async () => {
+it('从点单卡的成品照进来就回订单页', async () => {
   mockGet({ family: familyFixture() })
   renderWall('/order')
 
-  const back = await screen.findByRole('link', { name: '← 返回点菜单' })
+  // 文案统一取底部 Tab 的名字（共享的 back-link 模块按 tab.label 生成）：
+  // 用户看着底栏那个「订单」点返回，按钮上就不该写另一种叫法
+  const back = await screen.findByRole('link', { name: '← 返回订单' })
   expect(back.getAttribute('href')).toBe('/order')
 })
 

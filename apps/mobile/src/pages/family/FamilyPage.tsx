@@ -17,6 +17,7 @@ import {
 } from '@/api/family'
 import { useMe } from '@/api/auth'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import { readBackLink } from '@/pages/back-link'
 import Page from '@/components/ui/Page'
 import { toast } from '@/components/ui/toast'
 import SectionTitle from '@/components/ui/SectionTitle'
@@ -31,11 +32,6 @@ const ROLE_HINT: Record<FamilyRole, string> = {
 }
 
 /** 能跳来家庭页的两个地方；其它来源（含直接输地址）一律回「我的」 */
-const FAMILY_ENTRIES: Record<string, string> = {
-  '/mine': '返回我的',
-  '/kitchen': '返回厨房',
-}
-
 /** 家庭与成员（F2-05/06/07/09） */
 export default function FamilyPage() {
   const navigate = useNavigate()
@@ -70,12 +66,10 @@ export default function FamilyPage() {
   const data = family.data
   const memberLimit = options.data?.memberLimit ?? data?.memberLimit ?? 10
   // 家庭页不在底部 Tab 里，没有返回入口用户就只能改地址栏回去，所以按来源给一个
-  const requestedFrom = location.state?.from
-  const from =
-    typeof requestedFrom === 'string' && requestedFrom in FAMILY_ENTRIES ? requestedFrom : '/mine'
+  const backLink = readBackLink(location.state, '/mine')
   const back = (
-    <Link className="page-back" to={from}>
-      ← {FAMILY_ENTRIES[from]}
+    <Link className="page-back" to={backLink.to}>
+      ← {backLink.label}
     </Link>
   )
 

@@ -73,10 +73,14 @@ export default function DiscoverPage() {
             </button>
           </div>
 
-          {/* 问答是另一种问题（"豆腐怎么存"而不是"今晚吃什么"），给小字入口而不是第三个大按钮 */}
-          <button type="button" className="today__ask" onClick={() => setSheet('chat')}>
-            下厨上的问题想问问人？点这里问 AI →
-          </button>
+          {/* 问答是另一种问题（"豆腐怎么存"而不是"今晚吃什么"），给小字入口而不是第三个大按钮。
+              只有后半句可点：前面是说明（说明不该看起来能点），后面的动作词才是入口。 */}
+          <div className="today__ask">
+            <span className="today__ask-text">下厨上的问题想问问人？</span>
+            <button type="button" className="today__ask-link" onClick={() => setSheet('chat')}>
+              点这里问 AI →
+            </button>
+          </div>
         </section>
 
         <div className="stats">
