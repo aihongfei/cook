@@ -5,10 +5,12 @@ import { AuthResult, AuthService, PublicUser } from './auth.service'
 import { ALLOWED_AVATARS, ACCOUNT_MAX, PASSWORD_MAX, PASSWORD_MIN } from './account.rules'
 import { CurrentUserId, JwtAuthGuard } from './jwt-auth.guard'
 
-interface RegisterBody { account?: string; password?: string; nickname?: string; avatar?: string }
+interface RegisterBody { account?: string; password?: string; nickname?: string; avatar?: string; email?: string }
 interface LoginBody { account?: string; password?: string }
 interface RefreshBody { refreshToken?: string }
-interface ProfileBody { nickname?: string; avatar?: string }
+interface ProfileBody { nickname?: string; avatar?: string; email?: string | null }
+interface ForgotBody { email?: string }
+interface ResetBody { token?: string; password?: string }
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== 'string' || !value) throw new BadRequestException(`${field}不能为空`)
@@ -28,6 +30,7 @@ export class AuthController {
       password: requireString(body?.password, '密码'),
       nickname: typeof body?.nickname === 'string' ? body.nickname : undefined,
       avatar: typeof body?.avatar === 'string' ? body.avatar : undefined,
+      email: typeof body?.email === 'string' ? body.email : undefined,
     })
   }
 
@@ -67,12 +70,31 @@ export class AuthController {
 
   @Patch('me')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: '改昵称与头像（F2-03）' })
+  @ApiOperation({ summary: '改昵称、头像与邮箱（邮箱用于找回密码，F2-03/04）' })
   async updateProfile(@CurrentUserId() userId: string, @Body() body: ProfileBody): Promise<PublicUser> {
     return this.auth.updateProfile(userId, {
       nickname: typeof body?.nickname === 'string' ? body.nickname : undefined,
       avatar: typeof body?.avatar === 'string' ? body.avatar : undefined,
+      // 明确传 null 才是"解绑邮箱"，字段缺席表示"不改这一项"
+      email: body?.email === null ? null : typeof body?.email === 'string' ? body.email : undefined,
     })
+  }
+
+  @Post('password/forgot')
+  @HttpCode(200)
+  // 限流：防止拿这个接口试探"某邮箱有没有注册过"（F2-04）
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: '申请找回密码：给绑定邮箱发一次性重置链接（F2-04）' })
+  async forgotPassword(@Body() body: ForgotBody): Promise<{ sent: boolean; devResetUrl?: string }> {
+    return this.auth.requestPasswordReset(requireString(body?.email, '邮箱'))
+  }
+
+  @Post('password/reset')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: '用重置令牌设置新密码（F2-04，会吊销所有旧会话）' })
+  async resetPassword(@Body() body: ResetBody): Promise<{ ok: true }> {
+    return this.auth.resetPassword(requireString(body?.token, '重置令牌'), requireString(body?.password, '新密码'))
   }
 
   @Get('options')

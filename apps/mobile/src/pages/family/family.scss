@@ -1,0 +1,338 @@
+/* 家庭与成员页（F2-05/06/07）：沿用 shared.scss 的 .pscreen / .ptitle / .rows / .row / .btn-ghost */
+
+.family-lead {
+  margin: 0 var(--spacing-page) 14px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-ink-2);
+}
+
+.family-loading {
+  margin: 0 var(--spacing-page);
+  font-size: 13px;
+  color: var(--color-ink-2);
+}
+
+.family-error {
+  margin: 10px var(--spacing-page) 0;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: var(--color-brick);
+  background: var(--color-peach);
+  border-radius: 12px;
+}
+
+/* ---- 未加入家庭：两张卡 ---- */
+
+.family-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 var(--spacing-page) 12px;
+  padding: 15px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.family-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.family-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.family-field > span {
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+
+.family-field input {
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-ink);
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 12px;
+  outline: none;
+}
+
+.family-field input:focus {
+  border-color: var(--color-focus-line);
+  box-shadow: var(--shadow-focus);
+}
+
+/* 邀请码要一字一顿地念给家里人，字距拉开、字号放大更好认 */
+.family-field__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 20px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+}
+
+.family-primary {
+  padding: 12px;
+  font-size: 14px;
+  color: var(--color-paper);
+  cursor: pointer;
+  background: var(--color-brand);
+  border: 0;
+  border-radius: 13px;
+}
+
+.family-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ---- 已加入家庭：家庭头 + 邀请码 ---- */
+
+.family-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 var(--spacing-page) 12px;
+  padding: 15px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.family-head__name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.family-head__meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+
+.family-rename {
+  display: flex;
+  gap: 8px;
+  margin: 0 var(--spacing-page) 12px;
+}
+
+.family-rename input {
+  flex: 1;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 12px;
+  outline: none;
+}
+
+.family-rename .family-primary {
+  padding: 10px 16px;
+}
+
+.family-invite {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 var(--spacing-page) 12px;
+  padding: 14px 15px;
+  background: var(--color-cream-2);
+  border: 1.5px dashed var(--color-focus-line);
+  border-radius: var(--radius-card);
+}
+
+.family-invite__label {
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+
+.family-invite__code {
+  margin-top: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--color-brand-deep, var(--color-brand));
+  letter-spacing: 0.3em;
+}
+
+.family-invite__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.family-hint {
+  margin: 0 var(--spacing-page) 10px;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+
+.family-hint--block {
+  padding: 11px 13px;
+  line-height: 1.6;
+  background: var(--color-cream-2);
+  border-radius: 12px;
+}
+
+/* ---- 成员行 ---- */
+
+.family-member__me {
+  padding: 1px 6px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--color-brand);
+  background: var(--color-peach);
+  border-radius: 8px;
+}
+
+.family-member__ops {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.family-member__ops select {
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--color-ink);
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 10px;
+  outline: none;
+}
+
+.family-member__remove {
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--color-brick);
+  cursor: pointer;
+  background: transparent;
+  border: 1.5px solid var(--color-focus-line);
+  border-radius: 10px;
+}
+
+.family-member__remove:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---- 共享开关 ---- */
+
+.family-shared {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 var(--spacing-page);
+  padding: 14px 15px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.family-shared__title {
+  font-size: 14.5px;
+  color: var(--color-ink);
+}
+
+.family-shared__sub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+
+.family-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 48px;
+  height: 28px;
+  cursor: pointer;
+  background: var(--color-line);
+  border: 0;
+  border-radius: 999px;
+  transition: background 0.18s ease;
+}
+
+.family-switch.is-on {
+  background: var(--color-brand);
+}
+
+.family-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.family-switch__dot {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  background: var(--color-paper);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgb(90 60 40 / 25%);
+  transition: transform 0.18s ease;
+}
+
+.family-switch.is-on .family-switch__dot {
+  transform: translateX(20px);
+}
+
+/* ---- 退出 / 解散 ---- */
+
+.family-leave {
+  display: block;
+  width: calc(100% - var(--spacing-page) * 2);
+  padding: 13px;
+  margin: 22px var(--spacing-page) 0;
+  font-size: 14px;
+  color: var(--color-brick);
+  cursor: pointer;
+  background: transparent;
+  border: 1.5px solid var(--color-focus-line);
+  border-radius: 14px;
+}
+
+.family-confirm {
+  margin: 12px var(--spacing-page) 0;
+  padding: 14px;
+  background: var(--color-paper);
+  border: 1.5px solid var(--color-focus-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.family-confirm p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-ink);
+}
+
+.family-confirm__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.family-confirm__actions .family-leave {
+  width: auto;
+  padding: 9px 16px;
+  margin: 0;
+  font-size: 13px;
+}

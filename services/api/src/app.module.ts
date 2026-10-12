@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config'
 import { APP_GUARD } from '@nestjs/core'
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler'
 import { AuthModule } from './modules/auth/auth.module'
+import { FamilyModule } from './modules/family/family.module'
 import { HealthModule } from './modules/health/health.module'
 import { RecipesModule } from './modules/recipes/recipes.module'
 
@@ -21,6 +22,7 @@ import { RecipesModule } from './modules/recipes/recipes.module'
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
     HealthModule,
     AuthModule,
+    FamilyModule,
     RecipesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

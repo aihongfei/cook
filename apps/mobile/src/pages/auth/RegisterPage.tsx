@@ -21,6 +21,7 @@ export default function RegisterPage() {
   const [confirm, setConfirm] = useState('')
   const [nickname, setNickname] = useState('')
   const [avatar, setAvatar] = useState(FALLBACK_AVATARS[0])
+  const [email, setEmail] = useState('')
   const [error, setError] = useState('')
 
   if (token) return <Navigate to="/kitchen" replace />
@@ -33,7 +34,14 @@ export default function RegisterPage() {
       return
     }
     register.mutate(
-      { account: account.trim(), password, nickname: nickname.trim() || undefined, avatar },
+      {
+        account: account.trim(),
+        password,
+        nickname: nickname.trim() || undefined,
+        avatar,
+        // 选填：填了才能用邮箱找回密码（F2-04）；不填也不拦着注册
+        email: email.trim() || undefined,
+      },
       {
         onSuccess: () => navigate('/kitchen', { replace: true }),
         onError: (err) => setError(apiErrorMessage(err)),
@@ -92,6 +100,18 @@ export default function RegisterPage() {
             placeholder="比如：妈妈 / 老爸 / 小厨"
             value={nickname}
             onChange={(event) => setNickname(event.target.value)}
+          />
+        </label>
+
+        <label className="auth__field">
+          <span>邮箱（选填，忘了密码时用）</span>
+          <input
+            name="email"
+            type="email"
+            autoComplete="email"
+            placeholder="mama@example.com"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
           />
         </label>
 

@@ -445,3 +445,53 @@ gh api "repos/aihongfei/cook/git/trees/main?recursive=1" --jq ".tree[].path" | f
 ```
 
 **实测结果（2026-10-11）**：建仓推送成功；远端 126 blob 与本地一致；可见性 PRIVATE；敏感文件自查无输出。
+
+---
+
+## R-012 家庭与成员接口（✅ 已验证，2026-10-12）
+
+**前置**：`JWT_SECRET` 已配置（见 R-010）；家庭相关的写操作都需要登录。
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/family` | 我的家庭（含成员列表、我的角色与能力）；**没加入返回 `null`** | 登录 |
+| POST | `/family` | 创建家庭，创建者即掌勺人；已在家庭里 → 409 | 登录 |
+| POST | `/family/join` | 凭六位邀请码加入（小写/空格自动归一）；**限流 10 次/分** | 登录 |
+| PATCH | `/family` | 改家庭名与共享开关 | `family.edit` |
+| POST | `/family/invite/reset` | 重置邀请码（旧码立即失效） | `invite.reset` |
+| PATCH | `/family/members/:userId` | 改角色；**设为掌勺人即转让**，原掌勺人降为帮厨 | `member.manage` |
+| DELETE | `/family/members/:userId` | 移出成员（不能移出自己） | `member.manage` |
+| POST | `/family/leave` | 退出家庭；掌勺人只剩自己时即**解散** | 登录 |
+| GET | `/family/options` | 三个角色与各自能力（**免登录**，前端不硬编码权限） | — |
+
+```bash
+pnpm --dir services/api run test:http:family   # 47 项，真实请求
+```
+
+**实测结果**：**47/47 通过**（脚本 `services/api/scripts/verify-family-http.cjs`），连跑两次均通过。覆盖：未加入时返回 null、创建/重复创建 409、邀请码不存在 404、小写+空格输入可加入、成员按角色排序、**吃货改家庭名/重置邀请码/自我升权一律 403（后端强制，不是只藏按钮）**、非法角色 400、转让后原掌勺人自动降为帮厨且全家庭只有一个掌勺人、**能力随角色实时生效（不用重新登录）**、重置后旧邀请码失效、移出成员、掌勺人有人时退出 409、只剩自己时退出即解散（级联清除成员关系）、找回密码全流程（见 R-013）。
+
+> **限流窗口**：加入家庭是 10 次/分且按 IP 计数，脚本自带"等窗口重试"（与 R-010 同一套做法），所以连跑不会误报。
+
+---
+
+## R-013 找回密码（邮箱 + 一次性令牌）（✅ 已验证，2026-10-12）
+
+```bash
+# 1. 先在「我的 → 编辑资料」里绑定邮箱（或注册时填）
+# 2. 申请重置
+curl -s -X POST http://127.0.0.1:3000/api/auth/password/forgot \
+  -H 'content-type: application/json' -d '{"email":"mama@example.com"}'
+```
+
+**两种发信模式**（`MAIL_TRANSPORT`，见 `RISKS.md` R-16）：
+
+| 模式 | 行为 | 用途 |
+| --- | --- | --- |
+| `console`（默认） | 邮件内容写进 `docker compose logs api`，且响应里带 `devResetUrl` | **仅开发期**；本机联调不用配邮箱服务 |
+| `smtp` | 用 `MAIL_SMTP_*` 真发信，响应**不含**链接 | 上线前必须切到这个（并实测收到信） |
+
+```bash
+docker compose logs api | grep "console 邮件"   # console 模式下看重置链接
+```
+
+**安全口径（已在验收里断言）**：① 邮箱没绑过账号也返回同样的 200（不泄漏"这个邮箱注册过没有"）；② 令牌**一次性**、1 小时有效、库里只存 sha256；③ 重设成功后**吊销该账号全部旧会话**（改密前的刷新令牌立即 401）；④ 申请接口限流 5 次/分。

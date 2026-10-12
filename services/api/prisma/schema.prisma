@@ -21,17 +21,73 @@ model AppMeta {
 /// 密码只存 scrypt 派生结果，格式 `scrypt$N$r$p$salt$hash`（自描述，便于日后换参数或算法）。
 /// 口味/忌口档案（M8）与家庭成员关系（F2-05）后续都挂在这个 id 上。
 model User {
-  id           String         @id @default(cuid())
-  account      String         @unique @db.VarChar(64)
-  nickname     String         @db.VarChar(32)
+  id             String          @id @default(cuid())
+  account        String          @unique @db.VarChar(64)
+  nickname       String          @db.VarChar(32)
   /// emoji 头像（与手绘风一致，见 apps/mobile 的 me__avatar）
-  avatar       String         @default("🐰") @db.VarChar(16)
-  passwordHash String         @db.VarChar(255)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  refreshTokens RefreshToken[]
+  avatar         String          @default("🐰") @db.VarChar(16)
+  passwordHash   String          @db.VarChar(255)
+  /// 找回密码用的邮箱。首版**不做验证**（不要求收信确认），只作为重置链接的收件地址。
+  email          String?         @unique @db.VarChar(160)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  refreshTokens  RefreshToken[]
+  passwordResets PasswordReset[]
+  /// 首版一个账号同时只属于一个家庭（DB 层用唯一约束兜住，见 FamilyMember）
+  membership     FamilyMember?
 
   @@index([createdAt])
+}
+
+/// 一次性密码重置令牌：只存 sha256 摘要，用掉即标记 usedAt（不能重复使用）。
+model PasswordReset {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique @db.VarChar(64)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// 家庭：一人创建，其他人凭六位邀请码加入（D-021）。
+model Family {
+  id         String         @id @default(cuid())
+  name       String         @db.VarChar(32)
+  /// 六位邀请码，字符集去掉了易混的 I/O/0/1；长期有效，掌勺人可重置（重置即旧码失效）
+  inviteCode String         @unique @db.VarChar(8)
+  /// 家庭级共享开关（F2-07）：关掉后家庭成员之间不互相可见（M3 起由各功能读取）
+  shared     Boolean        @default(true)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  members    FamilyMember[]
+
+  @@index([createdAt])
+}
+
+/// 家庭成员：角色三档（掌勺人/帮厨/吃货），能力由角色决定，不做按人覆盖（D-021）。
+model FamilyMember {
+  id       String     @id @default(cuid())
+  familyId String
+  family   Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  userId   String     @unique
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     FamilyRole @default(EATER)
+  joinedAt DateTime   @default(now())
+
+  @@index([familyId])
+}
+
+enum FamilyRole {
+  /// 掌勺人：家庭管理员，唯一（转让即换人）
+  OWNER
+  /// 帮厨：能改菜单、能确认做好、能点菜
+  COOK
+  /// 吃货：只能点菜
+  EATER
 }
 
 /// 刷新令牌：只存 sha256 摘要（泄库也无法直接使用），支持过期与吊销（退出登录即吊销）。
@@ -51,39 +107,39 @@ model RefreshToken {
 /// JSON collections retain ordered ingredients, nested step text and source notes.
 /// origin and sourceKey isolate imported records from future user-created recipes.
 model Recipe {
-  id                String   @id
+  id                String    @id
   name              String
   // image 始终是**源站的原始图片地址**，由导入器维护；
   // 自托管副本的信息写在下面 image* 三个字段里（由 mirror-images 脚本维护）。
   // 分开存的原因：① 保留溯源与"重新下载"能力；② 避免重新导入时把镜像地址误判成"内容变了"而覆盖。
-  image             String?  @db.VarChar(512)
+  image             String?   @db.VarChar(512)
   // 自托管对象在存储桶里的 key（按内容 sha256 命名，同一张图被多道菜引用时只存一份）
-  imageKey          String?  @db.VarChar(512)
+  imageKey          String?   @db.VarChar(512)
   // 图片字节的 sha256：跨次运行去重，判断是否已备份过
-  imageHash         String?  @db.VarChar(64)
+  imageHash         String?   @db.VarChar(64)
   imageStoredAt     DateTime?
   category          String
   cuisine           String
   aliases           Json
   tags              Json
   calories          Float?
-  caloriesEstimated Boolean  @default(false)
-  spiciness         Int      @default(0)
+  caloriesEstimated Boolean   @default(false)
+  spiciness         Int       @default(0)
   ingredients       Json
   steps             Json
   notes             Json
   tools             Json
-  videoUrl          String?  @db.VarChar(512)
+  videoUrl          String?   @db.VarChar(512)
   source            Json
-  origin            String   @default("user")
-  sourceKey         String?  @unique
-  sourcePath        String?  @db.VarChar(512)
+  origin            String    @default("user")
+  sourceKey         String?   @unique
+  sourcePath        String?   @db.VarChar(512)
   // 以下两个字段会存长文本：MySQL 下 Prisma 默认映射为 VARCHAR(191)，
   // 不加 @db.Text 会在导入时抛 "Data too long"（searchText 拼了名称/别名/配料/标签，必然超长）
-  rawMarkdown       String?  @db.Text
-  searchText        String   @db.Text
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  rawMarkdown       String?   @db.Text
+  searchText        String    @db.Text
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([category, cuisine])
   @@index([origin])

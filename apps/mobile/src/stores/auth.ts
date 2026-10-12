@@ -7,6 +7,8 @@ export interface AuthUser {
   account: string
   nickname: string
   avatar: string
+  /** 找回密码用的邮箱；未绑定为 null（F2-04） */
+  email: string | null
   createdAt: string
 }
 

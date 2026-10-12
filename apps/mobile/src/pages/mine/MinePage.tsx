@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { logout, useAuthOptions, useMe, useUpdateProfile } from '@/api/auth'
+import { useFamily } from '@/api/family'
 import Page from '@/components/ui/Page'
 import SectionTitle from '@/components/ui/SectionTitle'
 import { useAuth } from '@/stores/auth'
@@ -10,7 +11,6 @@ import './mine.scss'
 
 const preferenceRows = [
   { icon: '🌶️', title: '口味、忌口与过敏', sub: '归属于这个账号（M8 接入）' },
-  { icon: '👨‍👩‍👧', title: '家庭共享与成员', sub: '创建或加入家庭（M2 后续）' },
   { icon: '🔔', title: '家庭消息提醒', sub: '菜单安排与饭已做好通知' },
 ]
 
@@ -26,12 +26,14 @@ export default function MinePage() {
   const me = useMe()
   const options = useAuthOptions()
   const updateProfile = useUpdateProfile()
+  const family = useFamily()
 
   // 先用本地缓存的账号信息渲染，接口回来后自动替换（避免进页面就闪一下"读取中"）
   const user = me.data ?? storedUser
   const [editing, setEditing] = useState(false)
   const [nickname, setNickname] = useState('')
   const [avatar, setAvatar] = useState('🐰')
+  const [email, setEmail] = useState('')
   const [notice, setNotice] = useState('')
   const [signingOut, setSigningOut] = useState(false)
 
@@ -40,15 +42,22 @@ export default function MinePage() {
     if (editing && user) {
       setNickname(user.nickname)
       setAvatar(user.avatar)
+      setEmail(user.email ?? '')
     }
   }, [editing, user])
 
   const avatars = options.data?.avatars?.length ? options.data.avatars : [user?.avatar ?? '🐰']
+  const familySub = family.isPending
+    ? '正在读取…'
+    : family.data
+      ? `${family.data.name} · ${family.data.memberCount} 位成员`
+      : '还没建家：创建或用邀请码加入'
 
   const save = () => {
     setNotice('')
     updateProfile.mutate(
-      { nickname: nickname.trim(), avatar },
+      // 邮箱留空 = 解绑（传 null），填了就走后端的格式与查重校验
+      { nickname: nickname.trim(), avatar, email: email.trim() ? email.trim() : null },
       {
         onSuccess: () => {
           setEditing(false)
@@ -76,6 +85,7 @@ export default function MinePage() {
           <div style={{ flex: 1 }}>
             <div className="me__name">{user?.nickname ?? '正在读取…'}</div>
             <div className="me__id">账号：{user?.account ?? '—'}</div>
+            <div className="me__id">{user?.email ? `邮箱：${user.email}` : '未绑邮箱（忘记密码时用）'}</div>
           </div>
           <button type="button" className="btn-ghost" onClick={() => setEditing((value) => !value)}>
             {editing ? '取消' : '编辑资料'}
@@ -105,6 +115,16 @@ export default function MinePage() {
                 ))}
               </div>
             </fieldset>
+            <label className="mine-edit__field">
+              <span>邮箱（忘了密码时用；不填也行）</span>
+              <input
+                name="email"
+                type="email"
+                placeholder="mama@example.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
             <button type="button" className="mine-edit__save" disabled={updateProfile.isPending} onClick={save}>
               {updateProfile.isPending ? '保存中…' : '保存'}
             </button>
@@ -116,6 +136,14 @@ export default function MinePage() {
         <SectionTitle title="我的设置" />
 
         <div className="rows" style={{ marginTop: 0 }}>
+          <div className="row" role="button" tabIndex={0} onClick={() => navigate('/family')} onKeyDown={(event) => { if (event.key === 'Enter') navigate('/family') }}>
+            <div className="row__icon">👨‍👩‍👧</div>
+            <div className="row__main">
+              家庭共享与成员
+              <div className="row__sub">{familySub}</div>
+            </div>
+            <span className="row__arrow">›</span>
+          </div>
           {preferenceRows.map((row) => (
             <div className="row" key={row.title}>
               <div className="row__icon">{row.icon}</div>

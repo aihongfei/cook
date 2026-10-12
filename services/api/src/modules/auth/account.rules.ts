@@ -54,3 +54,23 @@ export const ALLOWED_AVATARS = ['🐰', '🍳', '🐱', '🐻', '🐼', '🦊', 
 export function validateAvatar(avatar: string): string | null {
   return (ALLOWED_AVATARS as readonly string[]).includes(avatar) ? null : '头像不在可选范围内'
 }
+
+export const EMAIL_MAX = 160
+
+/**
+ * 邮箱（F2-04 找回密码的收件地址）。
+ * 首版**不做收信验证**，所以这里只做形状校验：能收到信的最低要求是格式正确。
+ * 不用"完美"的 RFC 正则——邮箱格式的完整正则既长又容易误杀，实用即可。
+ */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase()
+}
+
+export function validateEmail(email: string): string | null {
+  const value = normalizeEmail(email)
+  if (!value) return '邮箱不能为空'
+  if (value.length > EMAIL_MAX) return `邮箱最多 ${EMAIL_MAX} 个字符`
+  if (!/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(value)) return '邮箱格式不对'
+  return null
+}
+

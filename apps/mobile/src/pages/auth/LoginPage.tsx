@@ -77,6 +77,9 @@ export default function LoginPage() {
         <p className="auth__switch">
           还没有账号？<Link to="/register">注册一个</Link>
         </p>
+        <p className="auth__switch">
+          <Link to="/forgot">忘了密码</Link>
+        </p>
         <p className="auth__hint">首版不做短信与第三方登录，只有账号 + 密码（D-008）</p>
       </form>
     </div>

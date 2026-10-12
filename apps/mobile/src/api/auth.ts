@@ -16,6 +16,8 @@ export interface RegisterInput {
   password: string
   nickname?: string
   avatar?: string
+  /** 选填：填了就用于日后找回密码（F2-04） */
+  email?: string
 }
 
 export interface AuthOptions {
@@ -52,9 +54,33 @@ export async function fetchMe(): Promise<AuthUser> {
   return data
 }
 
-export async function updateProfile(input: { nickname?: string; avatar?: string }): Promise<AuthUser> {
+export async function updateProfile(input: { nickname?: string; avatar?: string; email?: string | null }): Promise<AuthUser> {
   const { data } = await apiClient.patch<AuthUser>('/auth/me', input)
   return data
+}
+
+export interface ForgotResult {
+  sent: boolean
+  /** 仅开发期（MAIL_TRANSPORT=console）返回，方便本机联调；真发信时后端不会带这个字段 */
+  devResetUrl?: string
+}
+
+export async function requestPasswordReset(email: string): Promise<ForgotResult> {
+  const { data } = await apiClient.post<ForgotResult>('/auth/password/forgot', { email })
+  return data
+}
+
+export async function resetPassword(input: { token: string; password: string }): Promise<{ ok: true }> {
+  const { data } = await apiClient.post<{ ok: true }>('/auth/password/reset', input)
+  return data
+}
+
+export function useRequestPasswordReset() {
+  return useMutation({ mutationFn: requestPasswordReset })
+}
+
+export function useResetPassword() {
+  return useMutation({ mutationFn: resetPassword })
 }
 
 export async function fetchAuthOptions(): Promise<AuthOptions> {

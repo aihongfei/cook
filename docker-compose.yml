@@ -33,6 +33,15 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-cook}
       MYSQL_USER: ${MYSQL_USER:-cook}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 里设置 MYSQL_PASSWORD}
+      # 找回密码的发信通道（F2-04）：console=只写日志（开发期），smtp=真发信。
+      # **部署到公网前必须改成 smtp**，否则重置链接会由接口返回（见 RISKS R-16）。
+      MAIL_TRANSPORT: ${MAIL_TRANSPORT:-console}
+      MAIL_SMTP_HOST: ${MAIL_SMTP_HOST:-}
+      MAIL_SMTP_PORT: ${MAIL_SMTP_PORT:-465}
+      MAIL_SMTP_USER: ${MAIL_SMTP_USER:-}
+      MAIL_SMTP_PASSWORD: ${MAIL_SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://127.0.0.1:5173}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - mysql-data:/var/lib/mysql
