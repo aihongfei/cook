@@ -23,7 +23,7 @@ export default function RecipeDetailPage() {
   return (
     <Page>
       <div className="recipes-page recipe-detail">
-        <Link className="recipe-back" to={from}>← {from === '/kitchen' ? '返回厨房' : '返回菜谱小书'}</Link>
+        <Link className="page-back" to={from}>← {from === '/kitchen' ? '返回厨房' : '返回菜谱小书'}</Link>
         {query.isPending && <RecipeStatus title="正在翻开这道菜谱…" loading />}
         {query.isError && !recipe && <RecipeStatus title="这道菜谱暂时打不开" onRetry={() => { void query.refetch() }}>{recipeErrorMessage(query.error)}</RecipeStatus>}
         {query.isRefetchError && recipe && <RecipeStatus title="菜谱更新失败，暂时保留上次内容" onRetry={() => { void query.refetch() }}>{recipeErrorMessage(query.error)}</RecipeStatus>}

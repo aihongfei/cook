@@ -14,15 +14,17 @@ import FamilyPage from './FamilyPage'
 
 const clients: QueryClient[] = []
 
-function renderFamily() {
+function renderFamily(entry: string | { pathname: string; state?: unknown } = '/family') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={['/family']}>
+      <MemoryRouter initialEntries={[entry as never]}>
         <Routes>
           <Route path="/family" element={<FamilyPage />} />
           <Route path="/login" element={<h1>登录</h1>} />
+          <Route path="/mine" element={<h1>我的页</h1>} />
+          <Route path="/kitchen" element={<h1>厨房页</h1>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -185,6 +187,29 @@ it('切换共享开关会调用接口并在成功后更新文案', async () => {
   expect(await screen.findByText('已关闭家庭共享')).toBeTruthy()
   // 缓存被最新家庭替换后，开关状态跟着变
   await waitFor(() => expect(screen.getByRole('switch', { name: '家庭共享开关' }).getAttribute('aria-checked')).toBe('false'))
+})
+
+it('返回入口按来源显示：从厨房进来就回厨房', async () => {
+  mockGet({ family: familyFixture() })
+  renderFamily({ pathname: '/family', state: { from: '/kitchen' } })
+
+  const back = await screen.findByRole('link', { name: '← 返回厨房' })
+  expect(back.getAttribute('href')).toBe('/kitchen')
+})
+
+it('返回入口默认回"我的"（直接输地址进来时也走得回去）', async () => {
+  mockGet({ family: familyFixture() })
+  renderFamily()
+
+  const back = await screen.findByRole('link', { name: '← 返回我的' })
+  expect(back.getAttribute('href')).toBe('/mine')
+})
+
+it('来源不在白名单时不乱跳，仍回"我的"', async () => {
+  mockGet({ family: familyFixture() })
+  renderFamily({ pathname: '/family', state: { from: 'https://evil.example.com' } })
+
+  expect((await screen.findByRole('link', { name: '← 返回我的' })).getAttribute('href')).toBe('/mine')
 })
 
 it('can() 只看后端下发的能力清单（前端不自己推角色）', () => {

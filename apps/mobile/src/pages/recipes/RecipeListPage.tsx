@@ -70,7 +70,7 @@ export default function RecipeListPage() {
     <Page>
       <div className="recipes-page">
         <header className="recipes-heading">
-          <Link to="/kitchen" className="recipe-back">← 厨房</Link>
+          <Link to="/kitchen" className="page-back">← 厨房</Link>
           <h1>菜谱小书</h1>
           <p>一菜一味，把日子煮得暖暖的</p>
         </header>

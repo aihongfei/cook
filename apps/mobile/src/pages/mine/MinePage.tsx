@@ -138,7 +138,7 @@ export default function MinePage() {
         <SectionTitle title="我的设置" />
 
         <div className="rows" style={{ marginTop: 0 }}>
-          <div className="row" role="button" tabIndex={0} onClick={() => navigate('/family')} onKeyDown={(event) => { if (event.key === 'Enter') navigate('/family') }}>
+          <div className="row" role="button" tabIndex={0} onClick={() => navigate('/family', { state: { from: '/mine' } })} onKeyDown={(event) => { if (event.key === 'Enter') navigate('/family', { state: { from: '/mine' } }) }}>
             <div className="row__icon">👨‍👩‍👧</div>
             <div className="row__main">
               家庭共享与成员

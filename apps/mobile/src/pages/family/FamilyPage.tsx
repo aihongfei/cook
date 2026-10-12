@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import {
   CAPABILITY, can, useCreateFamily, useFamily, useFamilyOptions, useJoinFamily, useLeaveFamily,
@@ -18,9 +18,16 @@ const ROLE_HINT: Record<FamilyRole, string> = {
   EATER: '吃货 · 只能点菜',
 }
 
+/** 能跳来家庭页的两个地方；其它来源（含直接输地址）一律回「我的」 */
+const FAMILY_ENTRIES: Record<string, string> = {
+  '/mine': '返回我的',
+  '/kitchen': '返回厨房',
+}
+
 /** 家庭与成员（F2-05/06/07/09） */
 export default function FamilyPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const token = useAuth((state) => state.token)
   const me = useMe()
   const family = useFamily()
@@ -43,6 +50,14 @@ export default function FamilyPage() {
 
   const data = family.data
   const memberLimit = options.data?.memberLimit ?? data?.memberLimit ?? 10
+  // 家庭页不在底部 Tab 里，没有返回入口用户就只能改地址栏回去，所以按来源给一个
+  const requestedFrom = location.state?.from
+  const from = typeof requestedFrom === 'string' && requestedFrom in FAMILY_ENTRIES ? requestedFrom : '/mine'
+  const back = (
+    <Link className="page-back" to={from} style={{ paddingInline: 'var(--spacing-page)' }}>
+      ← {FAMILY_ENTRIES[from]}
+    </Link>
+  )
 
   useEffect(() => {
     if (!token) navigate('/login', { replace: true })
@@ -70,6 +85,7 @@ export default function FamilyPage() {
     return (
       <Page>
         <div className="pscreen">
+          {back}
           <div className="ptitle">家庭</div>
           <p className="family-loading">正在读取家庭信息…</p>
         </div>
@@ -82,6 +98,7 @@ export default function FamilyPage() {
     return (
       <Page>
         <div className="pscreen">
+          {back}
           <div className="ptitle">家庭</div>
           <p className="family-lead">
             建一个家，把家里人拉进来：菜单、点菜、冰箱都跟着这个家庭走。
@@ -144,6 +161,7 @@ export default function FamilyPage() {
   return (
     <Page>
       <div className="pscreen">
+        {back}
         <div className="ptitle">家庭</div>
 
         <div className="family-head">

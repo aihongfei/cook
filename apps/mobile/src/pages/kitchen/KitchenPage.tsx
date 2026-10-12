@@ -58,7 +58,7 @@ export default function KitchenPage() {
       </BottomSheet>
       <BottomSheet visible={familySheet} title="一家人的厨房" onClose={() => setFamilySheet(false)}>
         <p>家里人用同一个家庭才看得到彼此的菜单与点单。建个家，把邀请码发给他们就行。</p>
-        <button className="recipe-button" type="button" onClick={() => navigate('/family')}>去建家 / 加入家庭</button>
+        <button className="recipe-button" type="button" onClick={() => navigate('/family', { state: { from: '/kitchen' } })}>去建家 / 加入家庭</button>
       </BottomSheet>
     </Page>
   )
