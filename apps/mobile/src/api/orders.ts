@@ -96,6 +96,8 @@ export interface MealProgressRow {
   dinerCount: number | null
   mealKey: string
   photoCount: number
+  /** 这一餐还收不收新菜（备菜计划的「加菜」按它决定出不出现）。由后端按状态机算，前端不复刻 */
+  canAdd: boolean
 }
 
 export interface TodayBoard {
@@ -106,7 +108,7 @@ export interface TodayBoard {
 /** 本周菜单里的一天（M4 / F4-02）：午晚两餐固定两行，没安排的也占位 */
 export interface PlanDay {
   date: string
-  /** 今天/明天/后天；更远的日子是星期 */
+  /** 今天/明天/后天；更远的日子是星期（备菜计划看满 7 天） */
   label: string
   weekday: string
   meals: MealProgressRow[]
@@ -121,7 +123,7 @@ export interface PlanBoard {
 export interface OrderOptions {
   meals: { value: MealSlot; label: string }[]
   statuses: { value: OrderStatus; label: string }[]
-  /** 点菜能选的日子：今天/明天/后天（由后端下发，前端不硬编码） */
+  /** 点菜能选的日子：今天起 7 天（由后端下发，前端不硬编码） */
   dayOptions: { value: string; label: string }[]
 }
 

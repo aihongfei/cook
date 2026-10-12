@@ -89,7 +89,9 @@ export default function OrderDishSheet({
       ) : (
         <>
           {presetTarget && (
-            <p className="order-sheet__hint">从「本周菜单」来的：默认放进{presetTarget.label}，也可以改。</p>
+            // 不写"从某某页面来的"：带着目标进来的入口不止一个（本周菜单 F4-02、备菜计划 F4-03），
+            // 写死一个入口名，从另一个入口来的人会以为系统记错了页面
+            <p className="order-sheet__hint">已按你选的那一餐默认：{presetTarget.label}，也可以改。</p>
           )}
           <div className="order-sheet__group">
             <span className="order-sheet__label">哪一天</span>

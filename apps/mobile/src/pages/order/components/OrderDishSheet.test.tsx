@@ -203,9 +203,9 @@ it('后端拒绝时把话术显示出来（如这餐已安排、备注超长）'
   expect(await screen.findByText('这餐已经「已安排」了，想加菜先取消这餐')).toBeTruthy()
 })
 
-// ---------- 从本周菜单来（F4-02）：preset 预设 ----------
+// ---------- 带着某一餐的目标进来（F4-02 本周菜单 / F4-03 备菜计划）：preset 预设 ----------
 
-it('本周菜单带的 preset 会预选到那一餐（哪怕当前时间默认是别的餐次）', async () => {
+it('带进来的那一餐会预选（哪怕当前时间默认是别的餐次）', async () => {
   // 上午 10 点，默认下一餐是"今天晚餐"；preset 指定明天午餐，必须盖过默认值
   vi.setSystemTime(new Date('2026-10-12T10:00:00'))
   mockGet(familyFixture())
@@ -214,8 +214,9 @@ it('本周菜单带的 preset 会预选到那一餐（哪怕当前时间默认�
   expect(await screen.findByRole('button', { name: '明天' })).toBeTruthy()
   expect(screen.getByRole('button', { name: '明天' }).getAttribute('aria-pressed')).toBe('true')
   expect(screen.getByRole('button', { name: '午餐' }).getAttribute('aria-pressed')).toBe('true')
-  // 说明从哪来，别让人以为默认值错了
-  expect(screen.getByText(/从「本周菜单」来的/)).toBeTruthy()
+  // 说明默认值是怎么来的，别让人以为系统记错了；但**不写"从某某页面来的"**——
+  // 带目标进来的入口不止一个（本周菜单、备菜计划），写死一个入口名，从另一个来的就会觉得点错了
+  expect(screen.getByText(/已按你选的那一餐默认：明天午餐/)).toBeTruthy()
 })
 
 it('preset 的日期已过期（不在当下可选范围）时，回落到"下一餐"默认，不预选一个提交必被拒的日期', async () => {
@@ -228,7 +229,7 @@ it('preset 的日期已过期（不在当下可选范围）时，回落到"下�
   // 过期的那天不在选项里，预选必须落回默认（上午 10 点 → 今天晚餐）
   expect(screen.getByRole('button', { name: '今天' }).getAttribute('aria-pressed')).toBe('true')
   expect(screen.getByRole('button', { name: '晚餐' }).getAttribute('aria-pressed')).toBe('true')
-  expect(screen.queryByText(/从「本周菜单」来的/)).toBeNull()
+  expect(screen.queryByText(/已按你选的那一餐默认/)).toBeNull()
 
   // 而且提交出去的日期是当下有效的那个（不是过期日期）
   const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { mealKey: 'x', date: '2026-10-12', mealLabel: '晚餐' } as unknown as MealCard } as never)

@@ -903,3 +903,60 @@ pnpm --dir apps/mobile run lint                # 6 条警告（与改动前一�
 
 1. `useState(visible)`（旧的"一上来就已经开着"）→ `expected 0 to be greater than 50`（起始位移是 0 = 没有滑动）；
 2. `close()` 里立刻回调 `onClose`（旧的"没有退场"）→ `expected "vi.fn()" to not be called at all, but actually been called 1 times`。
+
+---
+
+## R-022 备菜计划（F4-03）：7 天窗口与逐餐加菜（D-028）（✅ 已验证，2026-10-12）
+
+**改了哪些地方**：点菜窗口 3 → 7 天（`orders.rules` 的 `ORDER_DAY_SPAN`，与 `PLAN_DAYS_MAX` 对齐）；`MealProgressRow` 加 `canAdd`（后端按 `canAddItem` 算）；新增备菜页 `/prep` 与发现页「备菜计划 →」入口；`OrderDishSheet` 的预选提示改成不写死入口名。
+
+### 怎么验
+
+```bash
+# 单测（不需要 MySQL 与真模型）
+pnpm --dir services/api test                    # 104/104
+pnpm --dir apps/mobile test                     # 206/206
+pnpm --dir apps/mobile exec tsc --noEmit        # exit=0
+
+# 接口（真请求，需要 docker compose 的 api）
+docker compose up -d --build api
+pnpm --dir services/api run test:http:orders    # 91/91
+pnpm --dir services/api run test:http:ai        # 19/19（stub，覆盖 AI 侧对日期的收敛）
+```
+
+### 实测结果（2026-10-12）
+
+| 项 | 结果 |
+| --- | --- |
+| `GET /orders/options` | 7 天：今天/明天/后天/周四/周五/周六/周日（第 4 天起用星期） |
+| 点第 7 天 | **201**（`2026-10-18-DINNER` 写进去了）；点第 8 天 400，提示「只能点从今天到周日这 7 天内的菜」 |
+| `GET /orders/plan?days=7` | 7 天 × 午晚 = **14 行**，第 4～7 天都在 |
+| 每行的 `canAdd` | 收集中/空着的 13 行 = `true`；已做好那 1 行 = `false`（终态） |
+| 共享关闭时 | 吃货看到的是**收窄后的空行**（菜名/状态/人数/张数全空），但 `canAdd` 仍是 `true`——他不能看到别人点的菜，但仍然能加自己想吃的那道 |
+| 浏览器（390×844） | 发现页卡头两个出口都在；`/prep` 7 张卡 14 行；点第 13 行（周日午餐）的「加菜」→ 菜谱小书 → 详情「想吃这道」→ 抽屉已默认选中**周日 + 午餐**、提示「已按你选的那一餐默认：周日午餐」→ 提交 → toast「已加入周日午餐」、抽屉正常退场（`.adm-popup-body` 与 `.adm-mask` 都清零、`body.overflow` 复原）→ 库里 `2026-10-18 LUNCH` 确实多了 `【桂圆银耳羹】` |
+
+> 验收期间在开发库你那个验收家庭里加了 4 餐（今天晚餐、后天午餐、周五晚餐、周日午餐）。不想要的话在点菜页删掉即可。
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| 接口验收里两条 `canAdd` 断言红 | 我**把断言的前提写死了**（假设"今天午餐一定是 DONE"），而那一格实际状态取决于本脚本前面的流转与库里已有数据 | 改成断言**关系**：`state === 'settled'` 的那些行必须 `canAdd === false`、其余必须 `true`。写死具体格子等于把"这条规则"绑到了某个数据快照上 |
+| 验收脚本 `SyntaxError: Identifier 'lastDay' has already been declared` | 我在同一次编辑里新增的变量与前文重名 | 重命名（`seventhDay` / `prepSeventhDay`），`node --check` 过一遍再跑 |
+| 预选提示说「从「本周菜单」来的」，但从备菜计划来也这么说 | 那句话是只有一个入口时写的 | 改成「已按你选的那一餐默认：X」，并补了一条测试（同时防"从另一个入口来觉得系统记错页面"） |
+| 截图连续三次 `surface preparation timed out` | 标签页表面卡住（换页、改视口都不解），**不是页面本身的问题** | 新开一个标签页就能截（同一 URL）；旧标签页关闭 |
+
+### 回归测试
+
+**后端 `tests/orders.rules.test.ts`（改 3 条）**：7 天窗口的值与标签、第 7 天可点且第 8 天不可点、越界提示语跟着窗口生成（`这 7 天`）、`ORDER_DAY_SPAN === PLAN_DAYS_MAX`、凌晨时区用例的窗口改成 7 个日期。
+
+**后端 `scripts/verify-orders-http.cjs`（+6 条）**：7 天口径、第 7 天 201 / 第 8 天 400 与提示语、`/orders/plan?days=7` 的 14 行、`canAdd` 三态关系、第 4～7 天的标签与日期。
+
+**前端 `PrepPage.test.tsx`（新增 6 条）**：看的是 7 天（参数 + 7 张卡 + 14 行 + 第 4 天起也在）、每行「加菜」带对日期餐次（点开验路由 state）、终态行不给按钮且状态戳仍在、空行文案、汇总数字、没家庭时不请求接口。
+
+**前端 `WeekPlan.test.tsx`（+1 条）**、**`OrderDishSheet.test.tsx`（改 2 条）**：卡头两个出口的 href、预选提示不再写死入口名。
+
+**反证 2 组都验过会红**：
+
+1. 后端 `canAdd` 一律写 `true` → `❌ 已做好/已取消的餐 canAdd=false`（90/91）；
+2. 前端备菜页把 `meal.canAdd` 改成恒真 → `expected [ …(14) ] to have a length of 12 but got 14` 与 `expected [] to have a length of 2`；把 `days: 7` 改成 3 → `expected 3 to be 7`。

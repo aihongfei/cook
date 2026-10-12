@@ -16,6 +16,8 @@ import { tabs } from '@/config/tabs'
  */
 const EXTRA_ENTRIES: Record<string, string> = {
   '/recipes': '返回菜谱小书',
+  // 备菜计划是独立子页（不在底部 Tab 里），从它点「加菜」进了菜谱小书之后，返回要能回到它
+  '/prep': '返回备菜计划',
 }
 
 /** 路径 → 返回按钮文案；**只含已放行的入口**（查表就等于校验） */

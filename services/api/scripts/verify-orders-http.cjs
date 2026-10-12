@@ -118,12 +118,13 @@ async function main() {
     options.status === 200
       && options.body?.meals?.length === 2
       && options.body?.statuses?.length === 5
-      && (options.body?.dayOptions ?? []).length === 3,
+      && (options.body?.dayOptions ?? []).length === 7,
     `${options.status} meals=${options.body?.meals?.length} statuses=${options.body?.statuses?.length} days=${options.body?.dayOptions?.length}`,
   )
   check(
-    '可选日期是今天/明天/后天（本周菜单要能安排后天，不能再点昨天与更远的）',
-    (options.body?.dayOptions ?? []).map(d => d.value).join(',') === `${TODAY},${TOMORROW},${DAY_AFTER}`,
+    '可选日期是今天起 7 天（备菜计划每一行都要能安排，不能再点昨天）',
+    (options.body?.dayOptions ?? []).map(d => d.value).join(',')
+      === Array.from({ length: 7 }, (_, index) => plusDaysKey(index)).join(','),
     JSON.stringify(options.body?.dayOptions),
   )
 
@@ -404,16 +405,19 @@ async function main() {
 
   await callWithRetry('PATCH', '/family', { token: mama.token, body: { shared: true } })
 
-  // ---------- 日期边界（本周菜单把窗口从今天/明天扩到含后天，D-025） ----------
+  // ---------- 日期边界（备菜计划把窗口从 3 天扩到 7 天，F4-03） ----------
   const farAway = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: '2027-01-01', meal: 'LUNCH' } })
-  check('点远期的菜 → 400（窗口之外，更远的安排归 F4-03 备菜计划）', farAway.status === 400, `${farAway.status} ${farAway.body?.message ?? ''}`)
+  check('点远期的菜 → 400（窗口之外）', farAway.status === 400, `${farAway.status} ${farAway.body?.message ?? ''}`)
 
   const yesterday = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(-1), meal: 'LUNCH' } })
   check('点昨天 → 400（过期的一天不能补）', yesterday.status === 400, `${yesterday.status} ${yesterday.body?.message ?? ''}`)
 
-  const fourthDay = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(3), meal: 'LUNCH' } })
-  check('点第 4 天 → 400（窗口是今天/明天/后天三格）', fourthDay.status === 400, `${fourthDay.status} ${fourthDay.body?.message ?? ''}`)
-  check('越界提示语跟着窗口生成（不是写死的"今天或明天"）', /今天\/明天\/后天/.test(fourthDay.body?.message ?? ''), `${fourthDay.body?.message ?? ''}`)
+  const seventhDay = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(6), meal: 'LUNCH' } })
+  check('点第 7 天 → 201（备菜计划最后一行也要能安排：看得见的都能点）', seventhDay.status === 201 || seventhDay.status === 200, `${seventhDay.status} ${seventhDay.body?.message ?? ''}`)
+
+  const eighthDay = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(7), meal: 'LUNCH' } })
+  check('点第 8 天 → 400（窗口是今天起 7 格）', eighthDay.status === 400, `${eighthDay.status} ${eighthDay.body?.message ?? ''}`)
+  check('越界提示语跟着窗口生成（说的是"这 7 天"，不是写死的"今天或明天"）', /这 7 天/.test(eighthDay.body?.message ?? ''), `${eighthDay.body?.message ?? ''}`)
 
   const badMeal = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: TODAY, meal: 'BREAKFAST' } })
   check('非法餐次 → 400', badMeal.status === 400, `${badMeal.status}`)
@@ -631,6 +635,53 @@ async function main() {
       && planDays5.body.days.slice(3).every(d => /^周[日一二三四五六]$/.test(d.label)),
     `${planDays5.status} labels=${JSON.stringify((planDays5.body?.days ?? []).map(d => d.label))}`,
   )
+
+  // ---------- 备菜计划（M4 / F4-03） ----------
+  const prepBoard = await callWithRetry('GET', '/orders/plan?days=7', { token: mama.token })
+  check(
+    '备菜计划拿到 7 天 × 午晚 = 14 行（这一页要"排满一周"）',
+    prepBoard.status === 200
+      && prepBoard.body?.days?.length === 7
+      && prepBoard.body.days.every(d => (d.meals ?? []).length === 2),
+    `${prepBoard.status} days=${prepBoard.body?.days?.length} rows=${(prepBoard.body?.days ?? []).reduce((n, d) => n + (d.meals?.length ?? 0), 0)}`,
+  )
+  check(
+    '7 天的窗口里第 4～7 天都在这（不是只有前三天，后面四天根本没有行）',
+    prepBoard.body?.days?.slice(3).every(d => /^周[日一二三四五六]$/.test(d.label) && /^\d{4}-\d{2}-\d{2}$/.test(d.date)),
+    JSON.stringify((prepBoard.body?.days ?? []).map(d => `${d.date}(${d.label})`)),
+  )
+  // 今天午餐在前面被推成过「已做好/已取消」（终态是 DONE 或 CANCELED），所以那一格的 canAdd 必须是 false；
+  // 空行与"收集中"的行必须是 true——「加菜」按钮出不出现由这个字段决定，前端不复刻状态机。
+  // 不写死"今天午餐=DONE"：这一格到哪一步取决于本脚本前面的流转与库里已有数据，
+  // 写死的是**关系**（settled ⟺ 不能加），那才是这条规则本身。
+  const prepRows = (prepBoard.body?.days ?? []).flatMap(d => (d.meals ?? []).map(m => ({ date: d.date, ...m })))
+  check(
+    '每一行都带 canAdd（「加菜」按钮按它决定出不出现）',
+    prepRows.every(r => typeof r.canAdd === 'boolean'),
+    JSON.stringify(prepRows.slice(0, 3).map(r => `${r.date}-${r.meal}:${r.canAdd}`)),
+  )
+  check(
+    '收集中/空着的餐 canAdd=true（备菜时"这道后天中午也来一份"是最常做的事）',
+    prepRows.filter(r => r.state !== 'settled').every(r => r.canAdd === true),
+    JSON.stringify(prepRows.filter(r => r.state !== 'settled').map(r => `${r.date}-${r.meal}:${r.canAdd}`)),
+  )
+  check(
+    '已做好/已取消的餐 canAdd=false（加不进去，给按钮等于让人白点一次）',
+    prepRows.some(r => r.state === 'settled')
+      && prepRows.filter(r => r.state === 'settled').every(r => r.canAdd === false),
+    JSON.stringify(prepRows.filter(r => r.state === 'settled').map(r => `${r.date}-${r.meal}:${r.status}:${r.canAdd}`)),
+  )
+
+  const prepSeventhDay = await callWithRetry('POST', '/orders/items', {
+    token: mama.token,
+    body: { recipeId: dishB.id, mealDate: plusDaysKey(6), meal: 'DINNER' },
+  })
+  check(
+    '备菜计划最后一天（第 7 天）真的能点进去（不然那一行的「加菜」是死路）',
+    [200, 201].includes(prepSeventhDay.status) && prepSeventhDay.body?.mealKey === `${plusDaysKey(6)}-DINNER`,
+    `${prepSeventhDay.status} ${prepSeventhDay.body?.mealKey ?? prepSeventhDay.body?.message ?? ''}`,
+  )
+
   const planDaysBad = await callWithRetry('GET', '/orders/plan?days=8', { token: mama.token })
   check('days 超上限（>7）→ 400', planDaysBad.status === 400, `${planDaysBad.status} ${planDaysBad.body?.message ?? ''}`)
   const planBad = await callWithRetry('GET', '/orders/plan?days=abc', { token: mama.token })

@@ -38,7 +38,7 @@ function row(overrides: Partial<TodayBoard['rows'][number]> = {}): TodayBoard['r
   return {
     meal: 'LUNCH', label: '午餐', state: 'open', status: 'PENDING', statusLabel: '待确认',
     dishes: ['番茄炒蛋'], dishCount: 1, ordererCount: 1, dinerCount: null,
-    mealKey: '2026-10-12-LUNCH', photoCount: 0,
+    mealKey: '2026-10-12-LUNCH', photoCount: 0, canAdd: true,
     ...overrides,
   }
 }

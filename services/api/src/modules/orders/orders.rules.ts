@@ -53,12 +53,16 @@ export const TRANSITION_CAPABILITY: Record<OrderStatus, string> = {
 const NEEDS_CONFIRM: OrderStatus[] = ['CANCELED']
 
 /**
- * 点菜可选范围：今天、明天、后天（M4 / F4-02 把 D-022 的 2 天扩到 3 天）。
+ * 点菜可选范围：今天起 7 天（D-022 的 2 天 → D-025 的 3 天 → F4-03 的 7 天）。
  *
- * 扩这一格是因为「本周菜单」要能安排后天——不然那一行的「去安排」是条死路
- * （点不进后天，只能看着它空着）。再往后的日子归 F4-03 备菜计划（未来 7 天）。
+ * 一路扩下来的原因都是同一类：**界面能看到的日子，必须能直接点进去安排**。
+ * F4-02 本周菜单要看后天，就从 2 天扩到 3 天；F4-03 备菜计划要看满一周并"每日加菜"，
+ * 于是扩到 7 天——不然备菜页第 4～7 天那几行的「加菜」是条死路（点进去只能选最近三天）。
+ *
+ * 窗口上限刻意与 PLAN_DAYS_MAX 对齐：能看的范围和能安排的范围**必须一致**，
+ * 否则又会出现"看得见、安排不了"的行。
  */
-export const ORDER_DAY_SPAN = 3
+export const ORDER_DAY_SPAN = 7
 
 export const ORDER_STATUSES: OrderStatus[] = ['PENDING', 'PLANNED', 'COOKING', 'DONE', 'CANCELED']
 export const MEAL_SLOTS: MealSlot[] = ['LUNCH', 'DINNER']
@@ -154,6 +158,13 @@ export interface MealProgressRow {
   mealKey: string
   /** 该餐的成品照张数（M9 / F9-08） */
   photoCount: number
+  /**
+   * 这一餐现在还收不收新菜（备菜计划的「加菜」按它决定按钮出不出现）。
+   *
+   * 由后端算好而不是让前端看着 `status` 自己判断：**状态机只有一份**（见 canAddItem），
+   * 前端复刻一遍迟早会与后端分叉——分叉的表现是"加菜按钮点下去拿到 400"，用户只会觉得坏了。
+   */
+  canAdd: boolean
 }
 
 /** 菜单安排视图里的一天（M4 / F4-02）：午晚两餐固定两行，没安排的也占位 */
@@ -221,7 +232,7 @@ export function parseMealKey(raw: string): { mealDate: Date; meal: MealSlot } {
   return { mealDate: dateOnly(matched[1]), meal: matched[2] as MealSlot }
 }
 
-/** 点菜允许的日期：今天/明天/后天，其它一律拒（本周菜单按 3 天安排，见 D-025） */
+/** 点菜允许的日期：今天起 7 天（备菜计划按一周安排，见 ORDER_DAY_SPAN） */
 export function parseMealDate(raw: unknown, now: Date = new Date()): Date {
   if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     throw new BadRequestException('日期格式不对（应为 YYYY-MM-DD）')
@@ -229,8 +240,9 @@ export function parseMealDate(raw: unknown, now: Date = new Date()): Date {
   const options = dayOptions(now)
   const allowed = new Set(options.map(option => option.value))
   if (!allowed.has(raw)) {
-    // 文案跟着窗口走：改了 ORDER_DAY_SPAN，提示语不用改也不会说错
-    throw new BadRequestException(`只能点${options.map(option => option.label).join('/')}的菜`)
+    // 文案跟着窗口走：改了 ORDER_DAY_SPAN，提示语不用改也不会说错。
+    // 第一段（今天/明天/后天）说清楚，后面 4 天只报范围——7 个标签全列出来是行废话
+    throw new BadRequestException(`只能点从今天到${options[options.length - 1].label}这 ${options.length} 天内的菜`)
   }
   return dateOnly(raw)
 }

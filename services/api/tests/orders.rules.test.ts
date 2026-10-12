@@ -119,26 +119,31 @@ test('取消过的餐还能重新点菜，并复活成待确认', () => {
 
 const now = new Date('2026-10-12T09:30:00.000Z')
 
-test('可点日期是今天/明天/后天，第四天点不了（本周菜单要能安排后天）', () => {
+test('可点日期是今天起 7 天（本周菜单要安排后天、备菜计划要看满一周）', () => {
   assert.deepEqual(dayOptions(now), [
     { value: '2026-10-12', label: '今天' },
     { value: '2026-10-13', label: '明天' },
     { value: '2026-10-14', label: '后天' },
+    { value: '2026-10-15', label: '周四' },
+    { value: '2026-10-16', label: '周五' },
+    { value: '2026-10-17', label: '周六' },
+    { value: '2026-10-18', label: '周日' },
   ])
   assert.equal(dateKey(parseMealDate('2026-10-12', now)), '2026-10-12')
-  assert.equal(dateKey(parseMealDate('2026-10-13', now)), '2026-10-13')
-  assert.equal(dateKey(parseMealDate('2026-10-14', now)), '2026-10-14', '后天要能点了——不然本周菜单那行的「去安排」是死路')
-  // 昨天/大后天都不行（更远的安排归 F4-03 备菜计划）
-  assert.throws(() => parseMealDate('2026-10-15', now), BadRequestException)
+  assert.equal(dateKey(parseMealDate('2026-10-14', now)), '2026-10-14', '后天要能点——不然本周菜单那行的「去安排」是死路')
+  assert.equal(dateKey(parseMealDate('2026-10-18', now)), '2026-10-18', '第 7 天也要能点——备菜计划每一行都要能安排')
+  // 昨天与第 8 天不行：**能看的范围与能安排的范围一致**（备菜页看几天就必须能安排几天）
+  assert.throws(() => parseMealDate('2026-10-19', now), BadRequestException)
   assert.throws(() => parseMealDate('2026-10-11', now), BadRequestException)
   assert.throws(() => parseMealDate('10/12', now), BadRequestException)
   assert.throws(() => parseMealDate(undefined, now), BadRequestException)
 })
 
 test('可选日期窗口跟着 ORDER_DAY_SPAN 走，提示语不会说错', () => {
-  assert.equal(ORDER_DAY_SPAN, 3)
+  assert.equal(ORDER_DAY_SPAN, 7)
+  assert.equal(ORDER_DAY_SPAN, PLAN_DAYS_MAX, '能安排的窗口与能看的窗口是同一个数，否则又会出现"看得见安排不了"的行')
   // 越界时的文案由窗口自己生成：写成常量字符串的话，改了窗口就会和实际范围对不上
-  assert.throws(() => parseMealDate('2026-10-16', now), /今天\/明天\/后天/)
+  assert.throws(() => parseMealDate('2026-11-01', now), /只能点从今天到周日这 7 天内的菜/)
 })
 
 test('dayWindow 给的是「哪一天」标量 + 星期，且不返回 Date（避免拿本地午夜去查库）', () => {
@@ -235,7 +240,9 @@ test('「今天」按服务器本地日历算，不用 UTC（北京时间凌晨�
 
     // 可选日期也要跟着本地日历走
     const options = dayOptions(earlyMorning)
-    assert.deepEqual(options.map(o => o.value), ['2026-10-13', '2026-10-14', '2026-10-15'])
+    assert.deepEqual(options.map(o => o.value), [
+      '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19',
+    ])
     assert.equal(parseMealDate('2026-10-13', earlyMorning) instanceof Date, true, '凌晨仍能点"今天"')
     assert.throws(() => parseMealDate('2026-10-12', earlyMorning), BadRequestException, '不能再点"昨天"')
 

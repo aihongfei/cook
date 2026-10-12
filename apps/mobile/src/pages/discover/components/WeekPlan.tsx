@@ -92,9 +92,15 @@ export default function WeekPlan() {
     <section className="card weekplan">
       <div className="weekplan__head">
         <span className="weekplan__title">本周菜单</span>
-        <Link className="weekplan__more" to="/order" state={{ from: location.pathname }}>
-          去点菜单 →
-        </Link>
+        <span className="weekplan__links">
+          {/* 排满一周、逐餐加菜的入口（F4-03）。这张卡只看 3 天，更远的要到备菜计划去排 */}
+          <Link className="weekplan__more" to="/prep" state={{ from: location.pathname }}>
+            备菜计划 →
+          </Link>
+          <Link className="weekplan__more" to="/order" state={{ from: location.pathname }}>
+            去点菜单 →
+          </Link>
+        </span>
       </div>
 
       {board.isPending && (

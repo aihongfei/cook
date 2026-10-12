@@ -113,11 +113,10 @@ export interface MenuProposal {
 const MEAL_VALUES: MealSlot[] = ['LUNCH', 'DINNER']
 
 /**
- * 把模型给的日期收敛到"今天起 N 天"里。
+ * 把模型给的日期收敛到点菜窗口（今天起 `ORDER_DAY_SPAN` 天）里。
  *
  * 为什么要收敛而不是照单全收：模型会写出 `2026-13-45`、去年的日期、或干脆不写。
- * 点菜窗口本来就是"今天/明天/后天"（`ORDER_DAY_SPAN`），超出窗口的建议即使提给用户，
- * 点下去也会被接口拒（400），不如在会合处就对齐到最近的可选日期。
+ * 超出窗口的建议即使提给用户，点下去也会被接口拒（400），不如在会合处就对齐到最近的可选日期。
  */
 export function clampMealDate(raw: unknown, todayKey: string, span = ORDER_DAY_SPAN): string {
   const allowed = allowedDates(todayKey, span)
@@ -187,7 +186,8 @@ export function readProposals(
 
 /** 「今天晚餐」「明天午餐」「10-15 晚餐」——按钮上要给用户看的人话 */
 export function describeWhen(mealDate: string, todayKey: string, meal: MealSlot): string {
-  const dates = allowedDates(todayKey, 7)
+  // 用与点菜窗口同一个数（而不是写死 7）：改了窗口这里不会说错话
+  const dates = allowedDates(todayKey, ORDER_DAY_SPAN)
   const offset = dates.indexOf(mealDate)
   const day = offset === 0 ? '今天' : offset === 1 ? '明天' : offset === 2 ? '后天' : mealDate.slice(5)
   return `${day}${MEAL_LABEL[meal]}`

@@ -334,7 +334,10 @@ export class OrdersService {
       dinerCount: row?.dinerCount ?? null,
     }
     if (!row) {
-      return { ...base, state: 'none', status: null, statusLabel: emptyLabel, dishes: [], dishCount: 0, ordererCount: 0, photoCount: 0 }
+      return {
+        ...base, state: 'none', status: null, statusLabel: emptyLabel,
+        dishes: [], dishCount: 0, ordererCount: 0, photoCount: 0, canAdd: true,
+      }
     }
     const card = this.cardFromRow(row, viewerId, role, shared)
     // 共享关闭时吃货看不到别人点的菜，那一餐对他就是"没有内容"。
@@ -353,6 +356,10 @@ export class OrdersService {
       dishCount: hiddenFromMe ? 0 : card.dishCount,
       ordererCount: hiddenFromMe ? 0 : card.ordererCount,
       photoCount: hiddenFromMe ? 0 : card.photoCount,
+      // 「加菜」按钮出不出现：**按真实状态算，不跟着 hiddenFromMe 走**——他看不到别人点的菜，
+      // 不代表他不能往这一餐里加自己想吃的那道（加菜走 order.create，人人都有）。
+      // 跟着隐藏逻辑走的话，共享一关这个人连菜都点不了了。
+      canAdd: canAddItem(row.status),
     }
   }
 

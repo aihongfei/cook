@@ -46,7 +46,7 @@ const FAMILY = {
 function mealRow(overrides: Partial<PlanBoard['days'][number]['meals'][number]> = {}) {
   return {
     meal: 'LUNCH' as const, label: '午餐', state: 'none' as const, status: null, statusLabel: '还没安排',
-    dishes: [], dishCount: 0, ordererCount: 0, dinerCount: null, mealKey: '2026-10-12-LUNCH', photoCount: 0,
+    dishes: [], dishCount: 0, ordererCount: 0, dinerCount: null, mealKey: '2026-10-12-LUNCH', photoCount: 0, canAdd: true,
     ...overrides,
   }
 }
@@ -163,4 +163,16 @@ it('接口失败时给可重试的提示，不是一片空白', async () => {
   renderWeekPlan()
 
   expect(await screen.findByText('最近几天的安排暂时打不开')).toBeTruthy()
+})
+
+// 备菜计划入口（F4-03）：这张卡只看 3 天，排满一周得进备菜计划。
+// 盯的是"两个入口都在、且各自指向对的地方"——只剩一个的话，要么排不了整周、
+// 要么点了没反应（去点菜单也重要：改状态在那）。
+it('卡头给两个出口：备菜计划（排满一周）与去点菜单（改状态）', async () => {
+  mockGet()
+  renderWeekPlan()
+
+  const prep = await screen.findByRole('link', { name: /备菜计划/ })
+  expect(prep.getAttribute('href')).toBe('/prep')
+  expect(screen.getByRole('link', { name: /去点菜单/ }).getAttribute('href')).toBe('/order')
 })

@@ -1,0 +1,144 @@
+/* 备菜计划（M4 / F4-03）：7 天 × 午晚两餐。样式沿用 shared.scss 的 .card / .btn-ghost / .stamp */
+
+.prep__tip {
+  padding: 15px;
+}
+
+.prep__tip-text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.prep__link {
+  display: block;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--color-brand);
+}
+
+.prep__status {
+  padding: 12px 15px;
+}
+
+.prep__scope {
+  margin: 12px var(--spacing-page) 0;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-3);
+  background: var(--color-cream-2);
+  border-radius: 8px;
+}
+
+.prep__summary {
+  margin: 12px var(--spacing-page) 0;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+/* 一天一张卡：日头一行 + 午/晚两行。每天独立成卡（而不是一周一张长卡）：
+   备菜时常要"今天就补一道"，卡片边界让"这一天的安排"看起来是一个整体 */
+.prep__day {
+  padding: 12px 15px;
+}
+
+.prep__day-head {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding-bottom: 6px;
+}
+
+.prep__badge {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  color: #8a6a2f;
+  background: var(--color-cream-2);
+  border-radius: 8px;
+}
+
+.prep__day-label {
+  font-size: 12.5px;
+  color: #6e3a1c;
+}
+
+.prep__weekday {
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.prep__date {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.prep__row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.prep__row + .prep__row {
+  border-top: 1px dashed var(--color-line);
+}
+
+.prep__meal {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+.prep__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.prep__dishes {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #4a3225;
+}
+
+.prep__dishes--link {
+  text-decoration: none;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.prep__dishes--empty {
+  color: var(--color-ink-3);
+}
+
+.prep__meta {
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+/* 「加菜」是链接样式的按钮：别被压窄换行（同 btn-ghost 的顾虑） */
+.prep__add {
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+
+/* 不能加菜的那一格：占住位置，让两行的按钮在同一条竖线上（不然右侧会参差不齐） */
+.prep__locked {
+  flex: 0 0 auto;
+  width: 46px;
+  font-size: 11px;
+  color: var(--color-ink-3);
+  text-align: right;
+}
