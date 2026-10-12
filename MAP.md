@@ -27,14 +27,15 @@ cook/
 │     ├─ src/
 │     │  ├─ api/             # client.ts（axios 实例 + token 注入 + 401 单飞续期 + 统一错误文案）、
 │     │  │                   # recipes.ts（菜谱接口与查询 hooks）、auth.ts（注册登录/找回密码）、
-│     │  │                   # family.ts（家庭接口与能力判定 can()）
+│     │  │                   # family.ts（家庭接口与能力判定 can()）、orders.ts（点单接口与卡片合并）
 │     │  ├─ components/      # icons/（SVG 图标）、ui/（Page/SectionTitle/Chips/Pill/EmptyState/FilterTabs/BottomSheet/
 │     │  │                   # toast.tsx 轻提示 + Toaster、ConfirmDialog.tsx 二次确认模态框、Skeleton）
 │     │  ├─ config/          # tabs.ts（底部 5 Tab 定义）
-│     │  ├─ data/            # demo.ts（M0 占位数据；今日安排仍标注为示例）
+│     │  ├─ data/            # demo.ts（M0 占位数据；订单示例已删除——点菜单在 M3 改用真实接口）
 │     │  ├─ layouts/         # TabLayout（外壳 + 底部导航）
 │     │  ├─ pages/           # kitchen/ recipes/（列表 + 详情）/ auth/（登录、注册、忘记密码、重设密码、auth.scss）
-│     │  │                   # / family/（家庭与成员 + family.scss）/ order/ discover/ fridge/ mine/ + shared.scss
+│     │  │                   # / family/（家庭与成员 + family.scss）/ order/（点菜单 + components/OrderDishSheet
+│     │  │                   # 点菜抽屉 + order.scss）/ discover/ fridge/ mine/ + shared.scss
 │     │  ├─ router/          # index.tsx（路由表）、RequireAuth.tsx（未登录跳 /login 并记住来源页）
 │     │  ├─ stores/          # recipe-filters.ts（仅品类/菜系偏好）、auth.ts（token/refreshToken/user，persist）
 │     │  ├─ styles/          # tailwind.css（@theme static token）、index.scss（字体 + 基础 + 聚焦态）
@@ -44,11 +45,13 @@ cook/
 │  └─ api/                   # ✅ 后端（NestJS 12 + Prisma 6 + MySQL 8），容器化
 │     ├─ Dockerfile          # 多阶段构建（node:24-alpine）
 │     ├─ docker-entrypoint.sh# 启动时 prisma migrate deploy → node dist/main
-│     ├─ prisma/             # schema.prisma（Recipe / User / RefreshToken / Family / FamilyMember / PasswordReset）
-│     │                      # + migrations/（init、recipe_image_mirror、auth_users、family_and_password_reset）
+│     ├─ prisma/             # schema.prisma（Recipe / User / RefreshToken / Family / FamilyMember / PasswordReset
+│     │                      # / MealOrder / OrderItem）
+│     │                      # + migrations/（init、recipe_image_mirror、auth_users、family_and_password_reset、meal_orders）
 │     ├─ seeds/              # howtocook.json（28 道种子）——已弃用为数据来源，保留为历史实现
-│     ├─ scripts/            # verify-recipes-http.cjs、verify-auth-http.cjs、verify-family-http.cjs（HTTP 验收脚本）
-│     ├─ tests/              # node:test：解析器 / 导入幂等 / 查询与校验 / 密码哈希与账号规则
+│     ├─ scripts/            # verify-recipes-http.cjs、verify-auth-http.cjs、verify-family-http.cjs、
+│     │                      # verify-orders-http.cjs（HTTP 验收脚本）
+│     ├─ tests/              # node:test：解析器 / 导入幂等 / 查询与校验 / 密码哈希与账号规则 / 点单规则
 │     ├─ src/
 │     │  ├─ main.ts          # HOST/PORT 可配置（容器内 0.0.0.0）
 │     │  ├─ app.module.ts    # 全局限流守卫（Throttler）+ 各业务模块
@@ -57,6 +60,8 @@ cook/
 │     │  │                   # password.service.ts（scrypt 哈希与校验）/ account.rules.ts（账号·密码·邮箱·头像白名单）
 │     │  ├─ modules/family/  # 家庭与成员：controller / service /
 │     │  │                   # family.roles.ts（角色→能力表、邀请码生成与归一）
+│     │  ├─ modules/orders/  # 点单：controller / service /
+│     │  │                   # orders.rules.ts（状态机、流转权限、日期范围、卡片合并——纯规则，可单测）
 │     │  ├─ modules/mail/    # 发信通道（可插拔）：console（开发，写日志）/ smtp（真发信）
 │     │  ├─ modules/recipes/ # 菜谱：controller / query / provider（可插拔）/ howtocook 解析器 / importer
 │     │  │  └─ sources/      # 外部数据源适配器：recipe-source.ts（归一规则）、jisu / uapis / jumdata.source.ts

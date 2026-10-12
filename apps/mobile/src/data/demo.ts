@@ -30,18 +30,7 @@ export interface Meal {
   statusText: string
 }
 
-export interface OrderRecord {
-  id: string
-  date: string
-  meal: string
-  orderers: string
-  dishes: string[]
-  total: string
-  note?: string
-  submittedAt: string
-  status: 'confirmed' | 'scheduled' | 'cooking' | 'done'
-  statusText: string
-}
+/** 注意：点单页（/order）在 M3 已换成真实接口（api/orders.ts），订单示例数据与 OrderRecord 已删除。 */
 
 /** 分类（图标为笔绘水彩方块，顺序与 cat-1..5 对应） */
 export const categories: Category[] = [
@@ -54,7 +43,13 @@ export const categories: Category[] = [
 
 /** 今日三餐 */
 export const todayMeals: Meal[] = [
-  { key: 'breakfast', name: '早餐', dishes: ['小米南瓜粥', '水煮蛋'], status: 'done', statusText: '已完成' },
+  {
+    key: 'breakfast',
+    name: '早餐',
+    dishes: ['小米南瓜粥', '水煮蛋'],
+    status: 'done',
+    statusText: '已完成',
+  },
   {
     key: 'lunch',
     name: '午餐',
@@ -104,39 +99,3 @@ export const recommendedDishes: Dish[] = [
     note: '爸爸爱吃',
   },
 ]
-
-/** 家庭点菜单 */
-export const orderRecords: OrderRecord[] = [
-  {
-    id: 'o1',
-    date: '10 / 10',
-    meal: '晚餐',
-    orderers: '爸爸 · 小满 点的',
-    dishes: ['番茄炒蛋', '红烧排骨', '凉拌黄瓜', '家常米饭'],
-    total: '共 4 道 · 4 人吃',
-    note: '小满那份不要辣',
-    submittedAt: '2026-10-10 10:20 提交',
-    status: 'done',
-    statusText: '已做好',
-  },
-  {
-    id: 'o2',
-    date: '10 / 11',
-    meal: '午餐',
-    orderers: '妈妈 点的',
-    dishes: ['清炒菜心', '香菇炖鸡'],
-    total: '共 2 道 · 3 人吃',
-    submittedAt: '2026-10-11 08:05 提交',
-    status: 'confirmed',
-    statusText: '待确认',
-  },
-]
-
-/** 家庭点单状态筛选 */
-export const orderFilters = [
-  { id: 'all', label: '全部', count: 2 },
-  { id: 'confirmed', label: '待确认', count: 1 },
-  { id: 'scheduled', label: '已安排', count: 0 },
-  { id: 'cooking', label: '准备中', count: 0 },
-  { id: 'done', label: '已做好', count: 1 },
-] as const

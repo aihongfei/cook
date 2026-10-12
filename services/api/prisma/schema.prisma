@@ -35,6 +35,8 @@ model User {
   passwordResets PasswordReset[]
   /// 首版一个账号同时只属于一个家庭（DB 层用唯一约束兜住，见 FamilyMember）
   membership     FamilyMember?
+  /// 这个账号点过的菜（M3）
+  orderItems     OrderItem[]
 
   @@index([createdAt])
 }
@@ -64,6 +66,8 @@ model Family {
   createdAt  DateTime       @default(now())
   updatedAt  DateTime       @updatedAt
   members    FamilyMember[]
+  /// 这一家的点单（M3）
+  mealOrders MealOrder[]
 
   @@index([createdAt])
 }
@@ -107,40 +111,101 @@ model RefreshToken {
 /// JSON collections retain ordered ingredients, nested step text and source notes.
 /// origin and sourceKey isolate imported records from future user-created recipes.
 model Recipe {
-  id                String    @id
+  id                String      @id
   name              String
   // image 始终是**源站的原始图片地址**，由导入器维护；
   // 自托管副本的信息写在下面 image* 三个字段里（由 mirror-images 脚本维护）。
   // 分开存的原因：① 保留溯源与"重新下载"能力；② 避免重新导入时把镜像地址误判成"内容变了"而覆盖。
-  image             String?   @db.VarChar(512)
+  image             String?     @db.VarChar(512)
   // 自托管对象在存储桶里的 key（按内容 sha256 命名，同一张图被多道菜引用时只存一份）
-  imageKey          String?   @db.VarChar(512)
+  imageKey          String?     @db.VarChar(512)
   // 图片字节的 sha256：跨次运行去重，判断是否已备份过
-  imageHash         String?   @db.VarChar(64)
+  imageHash         String?     @db.VarChar(64)
   imageStoredAt     DateTime?
   category          String
   cuisine           String
   aliases           Json
   tags              Json
   calories          Float?
-  caloriesEstimated Boolean   @default(false)
-  spiciness         Int       @default(0)
+  caloriesEstimated Boolean     @default(false)
+  spiciness         Int         @default(0)
   ingredients       Json
   steps             Json
   notes             Json
   tools             Json
-  videoUrl          String?   @db.VarChar(512)
+  videoUrl          String?     @db.VarChar(512)
   source            Json
-  origin            String    @default("user")
-  sourceKey         String?   @unique
-  sourcePath        String?   @db.VarChar(512)
+  origin            String      @default("user")
+  sourceKey         String?     @unique
+  sourcePath        String?     @db.VarChar(512)
   // 以下两个字段会存长文本：MySQL 下 Prisma 默认映射为 VARCHAR(191)，
   // 不加 @db.Text 会在导入时抛 "Data too long"（searchText 拼了名称/别名/配料/标签，必然超长）
-  rawMarkdown       String?   @db.Text
-  searchText        String    @db.Text
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  rawMarkdown       String?     @db.Text
+  searchText        String      @db.Text
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  /// 被点过的菜（M3；菜谱删除时点单记录保留，见 OrderItem）
+  orderItems        OrderItem[]
 
   @@index([category, cuisine])
   @@index([origin])
+}
+
+/// 一餐（F3-01/02/04）：**按「家庭 + 日期 + 餐次」聚合**，家人各自往里点菜，状态是整餐的（D-022）。
+/// 一张卡 = 一个 MealOrder；mealKey 是它的稳定标识（家庭内唯一），前端用它做路由与流转。
+model MealOrder {
+  id        String      @id @default(cuid())
+  familyId  String
+  family    Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  /// 就餐日期（只取日期部分，本地时区由写入方归一）
+  mealDate  DateTime    @db.Date
+  meal      MealSlot
+  status    OrderStatus @default(PENDING)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  items     OrderItem[]
+
+  /// 同一餐只有一条：并发的两次点菜不会各建一餐
+  @@unique([familyId, mealDate, meal])
+  /// 列表按日期倒序 + 餐次排序取，加索引
+  @@index([familyId, mealDate])
+}
+
+/// 点单里的一道菜（F3-05 备注随菜走）。同一个人可以把同一道菜点多次（份数）、不同人可各点各的。
+model OrderItem {
+  id          String    @id @default(cuid())
+  mealOrderId String
+  mealOrder   MealOrder @relation(fields: [mealOrderId], references: [id], onDelete: Cascade)
+  /// 点菜人
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 关联菜谱（菜谱被删时保留点单记录，所以可空 + 冗余菜名）
+  recipeId    String?
+  recipe      Recipe?   @relation(fields: [recipeId], references: [id], onDelete: SetNull)
+  /// 冗余菜名与图片：菜谱日后改名/删图不影响历史点单卡（也避免列表查询为了显示再连一次菜谱表）
+  recipeName  String    @db.VarChar(120)
+  recipeImage String?   @db.VarChar(512)
+  /// 这一份的备注，如"小满那份不要辣"
+  note        String?   @db.VarChar(120)
+  createdAt   DateTime  @default(now())
+
+  @@index([mealOrderId])
+  @@index([userId])
+}
+
+enum MealSlot {
+  /// 午餐
+  LUNCH
+  /// 晚餐
+  DINNER
+}
+
+/// 点单状态机（D-022）：待确认 → 已安排 → 准备中 → 已做好；CANCELED 是终态。
+/// 不允许跳级、不允许从终态回退——要重做就「再点一次」新建一餐。
+enum OrderStatus {
+  PENDING
+  PLANNED
+  COOKING
+  DONE
+  CANCELED
 }

@@ -1,0 +1,192 @@
+/* 点菜单（M3 / F3-01~F3-05）：卡片主体沿用 shared.scss 的 .order-card，这里只加本轮新增的部分 */
+
+/* 还没加入家庭时的引导（点菜是家庭内的协作，一个人点没意义） */
+.order-empty {
+  margin: 18px var(--spacing-page) 0;
+  padding: 16px;
+  text-align: center;
+  background: var(--color-paper);
+  border: 1px dashed #d9c4a4;
+  border-radius: var(--radius-card);
+}
+
+.order-empty p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--color-ink-2);
+}
+
+/* 加载/出错状态也吃页面栏距（RecipeStatus 自己没有外边距） */
+.order-status {
+  margin: 14px var(--spacing-page) 0;
+}
+
+/* 已取消的戳：褪色处理，别再吸引注意力 */
+.stamp--canceled {
+  color: var(--color-ink-3);
+  background: rgb(120 100 80 / 10%);
+  border-color: #cbb69c;
+}
+
+/* 已安排：琥珀色（"定了"但还没动手） */
+.stamp--planned {
+  color: #8a6a2f;
+  background: rgb(245 217 139 / 30%);
+  border-color: #d8a25c;
+}
+
+/* 准备中：砖红（正在灶上，最需要被看见的一档） */
+.stamp--cooking {
+  color: var(--color-brick);
+  background: rgb(178 74 52 / 12%);
+  border-color: #c8806a;
+}
+
+/* 一道菜一行：菜名 + 备注 + 撤回入口 */
+.order-card__dish {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  padding: 5px 0;
+}
+
+.order-card__dish + .order-card__dish {
+  border-top: 1px dashed #eadbc2;
+}
+
+.order-card__dish-name {
+  font-size: 13px;
+  color: #4a3225;
+}
+
+/* 份数：同一道菜多人点时的「×2」，比菜名重一点才看得出来 */
+.order-card__count {
+  margin-left: 3px;
+  font-size: 11.5px;
+  color: #b4571f;
+}
+
+/* 备注跟着菜走（F3-05）：昵称 + 内容，缩进显示 */
+.order-card__dish-note {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.order-card__withdraw {
+  padding: 2px 8px;
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid #d9c4a4;
+  border-radius: 999px;
+}
+
+.order-card__withdraw:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 流转按钮：正常推进用品牌色，取消用描边砖红（危险但不抢戏） */
+.order-card__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 11px;
+}
+
+.order-card__action {
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  background: transparent;
+  border: 1.5px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.order-card__action.is-primary {
+  color: var(--color-paper);
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+.order-card__action--danger {
+  color: var(--color-brick);
+  border-color: var(--color-focus-line);
+}
+
+.order-card__action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 「想吃这道」（菜谱详情页的点菜入口） */
+.recipe-detail__order {
+  margin-top: 14px;
+}
+
+/* 点菜抽屉（OrderDishSheet）：日期/餐次两排胶囊 + 备注输入 */
+.order-sheet__hint {
+  margin: 0;
+}
+
+.order-sheet__group {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.order-sheet__label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+
+.order-sheet__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.order-sheet__choice {
+  flex: 0 0 auto;
+  padding: 7px 15px;
+  font-size: 13px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  background: var(--color-cream-2);
+  border: 1.5px solid transparent;
+  border-radius: 999px;
+}
+
+.order-sheet__choice.is-active {
+  color: var(--color-paper);
+  background: var(--color-brand);
+}
+
+.order-sheet__note {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink);
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 12px;
+  outline: none;
+}
+
+.order-sheet__note:focus {
+  border-color: var(--color-focus-line);
+  box-shadow: var(--shadow-focus);
+}
+
+.order-sheet__submit {
+  width: 100%;
+  margin-top: 4px;
+}

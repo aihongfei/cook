@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler'
 import { AuthModule } from './modules/auth/auth.module'
 import { FamilyModule } from './modules/family/family.module'
 import { HealthModule } from './modules/health/health.module'
+import { OrdersModule } from './modules/orders/orders.module'
 import { RecipesModule } from './modules/recipes/recipes.module'
 
 /**
@@ -23,6 +24,7 @@ import { RecipesModule } from './modules/recipes/recipes.module'
     HealthModule,
     AuthModule,
     FamilyModule,
+    OrdersModule,
     RecipesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
