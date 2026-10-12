@@ -39,6 +39,8 @@ model User {
   orderItems     OrderItem[]
   /// 这个账号的打卡照片（M9 / F9-07）
   checkIns       CheckIn[]
+  /// 这个账号组过的常用组合（M4 / F4-04）
+  combos         Combo[]
 
   @@index([createdAt])
 }
@@ -72,6 +74,8 @@ model Family {
   mealOrders MealOrder[]
   /// 这一家的打卡照片（M9 / F9-03）
   checkIns   CheckIn[]
+  /// 这一家的常用组合（M4 / F4-04）
+  combos     Combo[]
 
   @@index([createdAt])
 }
@@ -150,6 +154,8 @@ model Recipe {
   updatedAt         DateTime    @updatedAt
   /// 被点过的菜（M3；菜谱删除时点单记录保留，见 OrderItem）
   orderItems        OrderItem[]
+  /// 被收进常用组合的引用（M4 / F4-04；菜谱删除时那一组里的这条也跟着删）
+  comboItems        ComboItem[]
 
   @@index([category, cuisine])
   @@index([origin])
@@ -248,4 +254,49 @@ model CheckIn {
   @@index([familyId, checkDate])
   @@index([userId, checkDate])
   @@index([mealOrderId])
+}
+
+/// 常用组合（M4 / F4-04）：把常一起点的一组菜存成一个"套餐"，一键整组加进某一餐。
+///
+/// 为什么要有：家庭点菜是**成组**发生的（"快手三菜一汤"、"周末火锅"），
+/// 每次都逐个翻菜谱再加，五六道菜就是五六次搜索+点击。存成组合之后一次点完。
+///
+/// 归属是**家庭**而不是个人：组合是家里人共用的（妈妈组的"周末硬菜"爸爸也能用），
+/// 与冰箱、菜单同一层可见性；创建者记录下来，用于"谁加的"与后续按人清理。
+model Combo {
+  id        String        @id @default(cuid())
+  familyId  String
+  family    Family        @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  /// 组这个组合的人（记录，不限制别人使用）
+  createdById String
+  createdBy User          @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  /// 组合名，如「快手三菜一汤」
+  name      String        @db.VarChar(24)
+  /// 一句话说明（可空），如「工作日的晚上」
+  note      String?       @db.VarChar(60)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  items     ComboItem[]
+
+  /// 同一家不重名：重名会让"一键加入"变成一道选择题，而组合本身就该是记得住的那几个
+  @@unique([familyId, name])
+  @@index([familyId, createdAt])
+}
+
+/// 组合里的一道菜。
+///
+/// 两道菜同一个组合里**只存一条**（`@@unique([comboId, recipeId])`）：重复加同一道菜
+/// 没有意义（点单里同一道菜多人点才叠加份数），去重放在库层比放在应用层可靠。
+model ComboItem {
+  id       String @id @default(cuid())
+  comboId  String
+  combo    Combo  @relation(fields: [comboId], references: [id], onDelete: Cascade)
+  recipeId String
+  /// 菜谱被删时**整组里的这一条也不留**（组合是"能一键加进去的菜"，菜没了这条就是空指针）
+  recipe   Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  /// 组内的展示顺序（按加入顺序）
+  position Int    @default(0)
+
+  @@unique([comboId, recipeId])
+  @@index([comboId, position])
 }

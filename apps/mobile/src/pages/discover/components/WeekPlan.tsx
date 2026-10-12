@@ -93,6 +93,10 @@ export default function WeekPlan() {
       <div className="weekplan__head">
         <span className="weekplan__title">本周菜单</span>
         <span className="weekplan__links">
+          {/* 常点的几组菜（F4-04）：一键整组加进某一餐 */}
+          <Link className="weekplan__more" to="/combos" state={{ from: location.pathname }}>
+            常用组合 →
+          </Link>
           {/* 排满一周、逐餐加菜的入口（F4-03）。这张卡只看 3 天，更远的要到备菜计划去排 */}
           <Link className="weekplan__more" to="/prep" state={{ from: location.pathname }}>
             备菜计划 →

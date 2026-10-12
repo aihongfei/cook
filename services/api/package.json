@@ -23,6 +23,7 @@
     "test:http:auth": "node scripts/verify-auth-http.cjs",
     "test:http:family": "node scripts/verify-family-http.cjs",
     "test:http:orders": "node scripts/verify-orders-http.cjs",
+    "test:http:combos": "node scripts/verify-combos-http.cjs",
     "test:http:checkins": "node scripts/verify-checkins-http.cjs",
     "test:http:ai": "node scripts/verify-ai-http.cjs"
   },

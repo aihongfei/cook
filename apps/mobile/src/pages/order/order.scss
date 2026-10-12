@@ -246,6 +246,22 @@
 }
 
 /* 就餐人数（M4 / F4-05）：一行文字按钮，不抢流转按钮的注意力 */
+.order-card__combo {
+  display: block;
+  padding: 7px 0 0;
+  font-family: inherit;
+  font-size: 12px;
+  color: #c4652a;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.order-card__combo:active {
+  opacity: 0.7;
+}
+
 .order-card__diners {
   display: block;
   width: 100%;

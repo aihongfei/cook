@@ -4,6 +4,7 @@ import { apiErrorMessage } from '@/api/client'
 import { useFamily } from '@/api/family'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import DinerCountSheet from './components/DinerCountSheet'
+import SaveComboSheet from './components/SaveComboSheet'
 import FreeDishSheet from './components/FreeDishSheet'
 import {
   useOrders,
@@ -50,6 +51,19 @@ type PendingAction =
 
 /** 要传成品照的那一餐（F9-08）：只在「已做好」的卡片上有入口 */
 
+/** 预填组合名用：把日期说成人话（今天/明天/后天，再远的用月-日） */
+function labelOfDay(date: string): string {
+  const today = new Date()
+  const keyOf = (offset: number) => {
+    const value = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset)
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
+  }
+  if (date === keyOf(0)) return '今天'
+  if (date === keyOf(1)) return '明天'
+  if (date === keyOf(2)) return '后天'
+  return date.slice(5)
+}
+
 function formatSubmittedAt(iso: string): string {
   const date = new Date(iso)
   const pad = (value: number) => String(value).padStart(2, '0')
@@ -68,6 +82,8 @@ export default function OrderPage() {
   // 「自己写一道」（F3-10）：每次打开 +1 用来给抽屉换 key（抽屉不在 effect 里清状态，靠重挂载拿回干净的一份）
   const [freeDishOpen, setFreeDishOpen] = useState(false)
   const [freeDishSeq, setFreeDishSeq] = useState(0)
+  // 正在「存成常用组合」的那一餐（M4 / F4-04）：null = 抽屉关着
+  const [comboFor, setComboFor] = useState<MealCard | null>(null)
   const openFreeDish = () => {
     setFreeDishSeq((value) => value + 1)
     setFreeDishOpen(true)
@@ -294,6 +310,14 @@ export default function OrderPage() {
               {card.nextActions.length > 0 && ' · 改'}
             </button>
 
+            {/* 存成常用组合（M4 / F4-04）：刚把这一餐配齐时"下次也照这样点"的念头最强，
+                顺手存下来成本最低（组合页只管用与删，不从那里新建）。 */}
+            {card.dishes.some((line) => line.recipeId) && (
+              <button type="button" className="order-card__combo" onClick={() => setComboFor(card)}>
+                ⭐ 存成常用组合
+              </button>
+            )}
+
             {/* 成品照（F9-08）：只有做好的那一餐才给这个入口——照片是"做出来了"的证据。
                 已传过的显示张数，并给一个"去看看"的入口（照片都在打卡墙那一餐下） */}
             {card.status === 'DONE' && (
@@ -350,6 +374,15 @@ export default function OrderPage() {
       )}
 
       {dinersFor && <DinerCountSheet card={dinersFor} onClose={() => setDinersFor(null)} />}
+
+      {comboFor && (
+        <SaveComboSheet
+          key={comboFor.mealKey}
+          dishes={comboFor.dishes.map((line) => ({ recipeId: line.recipeId, name: line.name }))}
+          defaultName={`${labelOfDay(comboFor.date)}${comboFor.mealLabel}`}
+          onClose={() => setComboFor(null)}
+        />
+      )}
 
       {/* key 每次打开都变：重挂载拿回干净的一份（抽屉不用 effect 清状态，见 FreeDishSheet） */}
       {freeDishOpen && (

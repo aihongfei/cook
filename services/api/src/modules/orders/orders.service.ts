@@ -107,6 +107,27 @@ export class OrdersService {
   }
 
   /**
+   * 这一餐现在还收不收新菜——**给"整组加入"这类一次要判定一次的调用方用**
+   * （见 combos.service：整组要么都进、要么都不进，不能加到一半才发现"已做好了"）。
+   *
+   * 判定与 `addItem` 里那段是同一份（`canAddItem` + 终态文案），
+   * 但**不写库**：它只回答"能不能"，真正的写入仍走 addItem。
+   */
+  async assertMealAcceptsItems(userId: string, mealDate: Date, meal: MealSlot): Promise<void> {
+    const { familyId } = await this.requireMember(userId)
+    const row = await this.prisma.mealOrder.findUnique({
+      where: { familyId_mealDate_meal: { familyId, mealDate, meal } },
+    })
+    // 还没有这一餐 = 当然能加（addItem 会建出来）
+    if (!row || canAddItem(row.status)) return
+    throw new ConflictException(
+      row.status === 'DONE'
+        ? '这餐已经做好了，换个餐次再点吧'
+        : `这餐已经「${STATUS_LABEL[row.status]}」了，想加菜先取消这餐`,
+    )
+  }
+
+  /**
    * 点单条目落库要用的三个字段（菜名与图片是**冗余快照**：菜谱日后被删/换图，历史点单卡仍显示得出来）。
    *
    * 自由菜品（F3-10）在这里做一件"顺手但重要"的事：**菜名与库里某道菜完全同名时挂到那道菜上**——

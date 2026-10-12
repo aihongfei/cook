@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler'
 import { AiModule } from './modules/ai/ai.module'
 import { AuthModule } from './modules/auth/auth.module'
 import { CheckInsModule } from './modules/checkins/checkins.module'
+import { CombosModule } from './modules/combos/combos.module'
 import { FamilyModule } from './modules/family/family.module'
 import { HealthModule } from './modules/health/health.module'
 import { OrdersModule } from './modules/orders/orders.module'
@@ -28,6 +29,7 @@ import { RecipesModule } from './modules/recipes/recipes.module'
     AuthModule,
     FamilyModule,
     OrdersModule,
+    CombosModule,
     CheckInsModule,
     RecipesModule,
   ],
