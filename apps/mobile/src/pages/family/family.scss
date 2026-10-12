@@ -107,10 +107,17 @@
   box-shadow: var(--shadow-card);
 }
 
+/* 与 .me__main 同理：长家庭名要能自己折行，不能把右边的按钮压窄 */
+.family-head__main {
+  flex: 1;
+  min-width: 0;
+}
+
 .family-head__name {
   font-size: 18px;
   font-weight: 600;
   color: var(--color-ink);
+  overflow-wrap: anywhere;
 }
 
 .family-head__meta {
@@ -150,6 +157,10 @@
   background: var(--color-cream-2);
   border: 1.5px dashed var(--color-focus-line);
   border-radius: var(--radius-card);
+}
+
+.family-invite__main {
+  min-width: 0;
 }
 
 .family-invite__label {
@@ -245,6 +256,10 @@
   box-shadow: var(--shadow-card);
 }
 
+.family-shared__main {
+  min-width: 0;
+}
+
 .family-shared__title {
   font-size: 14.5px;
   color: var(--color-ink);
@@ -254,6 +269,7 @@
   margin-top: 3px;
   font-size: 12px;
   color: var(--color-ink-2);
+  overflow-wrap: anywhere;
 }
 
 .family-switch {

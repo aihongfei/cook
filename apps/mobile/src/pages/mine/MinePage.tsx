@@ -82,10 +82,12 @@ export default function MinePage() {
 
         <div className="me">
           <div className="me__avatar">{user?.avatar ?? '🐰'}</div>
-          <div style={{ flex: 1 }}>
+          <div className="me__main">
             <div className="me__name">{user?.nickname ?? '正在读取…'}</div>
             <div className="me__id">账号：{user?.account ?? '—'}</div>
-            <div className="me__id">{user?.email ? `邮箱：${user.email}` : '未绑邮箱（忘记密码时用）'}</div>
+            <div className="me__id" title={user?.email ? `邮箱：${user.email}` : undefined}>
+              {user?.email ? `邮箱：${user.email}` : '未绑邮箱（忘记密码时用）'}
+            </div>
           </div>
           <button type="button" className="btn-ghost" onClick={() => setEditing((value) => !value)}>
             {editing ? '取消' : '编辑资料'}

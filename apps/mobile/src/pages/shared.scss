@@ -312,13 +312,30 @@
   border-radius: 50%;
 }
 
+/*
+ * 昵称/账号/邮箱这一块。min-width: 0 是关键：flex 子项默认 min-width: auto，
+ * 长邮箱（如 linshu1791780663819@example.com）撑住宽度后会把右边的「编辑资料」压窄成两行。
+ */
+.me__main {
+  flex: 1;
+  min-width: 0;
+}
+
 .me__name {
   font-size: 16px;
   color: #6e3a1c;
+  overflow-wrap: anywhere;
 }
 
 .me__id {
   margin-top: 3px;
   font-size: 11px;
   color: var(--color-ink-3);
+  /*
+   * 账号/邮箱都是**没有词边界的长串**：让它换行会出现"…example.co / m"这种断在半个单词上的排面，
+   * 所以这里宁可单行截断（完整值在「编辑资料」的输入框里能看到）。
+   */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

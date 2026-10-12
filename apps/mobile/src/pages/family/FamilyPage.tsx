@@ -147,7 +147,7 @@ export default function FamilyPage() {
         <div className="ptitle">家庭</div>
 
         <div className="family-head">
-          <div>
+          <div className="family-head__main">
             <div className="family-head__name">{data.name}</div>
             <div className="family-head__meta">
               {data.memberCount}/{memberLimit} 位成员 · 我是{options.data?.roles.find(r => r.value === data.myRole)?.label ?? data.myRole}
@@ -181,7 +181,7 @@ export default function FamilyPage() {
         {notice && <p className="mine-notice" role="status">{notice}</p>}
 
         <div className="family-invite">
-          <div>
+          <div className="family-invite__main">
             <div className="family-invite__label">邀请码</div>
             <div className="family-invite__code">{data.inviteCode}</div>
           </div>
@@ -251,7 +251,7 @@ export default function FamilyPage() {
         <SectionTitle title="共享设置" />
 
         <div className="family-shared">
-          <div>
+          <div className="family-shared__main">
             <div className="family-shared__title">家庭共享</div>
             <div className="family-shared__sub">
               {data.shared ? '家里人互相能看到菜单与点单' : '已关闭：各自看各自的'}

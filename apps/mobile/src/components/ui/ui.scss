@@ -143,6 +143,8 @@
 
 /* 圆角胶囊按钮（描边） */
 .btn-ghost {
+  /* 不参与压缩：它常和长文本（昵称/邮箱/家庭名）并排，被压窄就会把字挤到第二行 */
+  flex: 0 0 auto;
   padding: 6px 13px;
   font-size: 11px;
   color: #c4652a;
