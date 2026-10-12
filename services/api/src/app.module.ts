@@ -12,6 +12,7 @@ import { FavoritesModule } from './modules/favorites/favorites.module'
 import { HealthModule } from './modules/health/health.module'
 import { OrdersModule } from './modules/orders/orders.module'
 import { RecipesModule } from './modules/recipes/recipes.module'
+import { ShoppingModule } from './modules/shopping/shopping.module'
 
 /**
  * 应用根模块。
@@ -34,6 +35,7 @@ import { RecipesModule } from './modules/recipes/recipes.module'
     CombosModule,
     FavoritesModule,
     DiscoverModule,
+    ShoppingModule,
     CheckInsModule,
     RecipesModule,
   ],

@@ -12,6 +12,7 @@ import FridgePage from '@/pages/fridge/FridgePage'
 import KitchenPage from '@/pages/kitchen/KitchenPage'
 import MinePage from '@/pages/mine/MinePage'
 import PrepPage from '@/pages/prep/PrepPage'
+import ShoppingPage from '@/pages/shopping/ShoppingPage'
 import FavoritesPage from '@/pages/recipes/favorites/FavoritesPage'
 import RecipeListPage from '@/pages/recipes/RecipeListPage'
 import RecipeDetailPage from '@/pages/recipes/RecipeDetailPage'
@@ -42,6 +43,7 @@ export const router = createBrowserRouter([
       { path: 'order', element: <OrderPage /> },
       { path: 'order/history', element: <HistoryPage /> },
       { path: 'prep', element: <PrepPage /> },
+      { path: 'shopping', element: <ShoppingPage /> },
       { path: 'combos', element: <CombosPage /> },
       { path: 'discover', element: <DiscoverPage /> },
       { path: 'fridge', element: <FridgePage /> },

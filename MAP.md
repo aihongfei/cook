@@ -36,7 +36,7 @@ cook/
 │     │  ├─ data/            # demo.ts（M0 占位数据；订单示例已删除——点菜单在 M3 改用真实接口）
 │     │  ├─ layouts/         # TabLayout（外壳 + 底部导航）
 │     │  ├─ pages/           # kitchen/ recipes/（列表 + 详情）/ auth/（登录、注册、忘记密码、重设密码、auth.scss）
-│     │  │                   # / recipes/favorites/（我收藏的菜，M1 F1-09）/ family/（家庭与成员 + family.scss）/ order/（点菜单 + OrderDishSheet
+│     │  │                   # / shopping/（采购清单，M7 F7-01）/ recipes/favorites/（我收藏的菜，M1 F1-09）/ family/（家庭与成员 + family.scss）/ order/（点菜单 + OrderDishSheet
 │     │  │                   # 点菜抽屉 + order.scss）/ checkins/（家庭打卡墙 + components/CheckInUploadSheet
 │     │  │                   # 打卡上传抽屉 + checkins.scss）/ discover/ fridge/ mine/ + shared.scss
 │     │  │                   # kitchen/components/：HeroBanner / CategoryRow（配 category-icons.ts 的品类→素材查表）/
@@ -57,7 +57,7 @@ cook/
 │     ├─ seeds/              # howtocook.json（28 道种子）——已弃用为数据来源，保留为历史实现
 │     ├─ scripts/            # verify-recipes-http.cjs、verify-auth-http.cjs、verify-family-http.cjs、
 │     │                      # verify-orders-http.cjs、verify-checkins-http.cjs、verify-favorites-http.cjs、
-│     │                      # verify-discover-http.cjs（HTTP 验收脚本）
+│     │                      # verify-discover-http.cjs、verify-shopping-http.cjs（HTTP 验收脚本）
 │     ├─ tests/              # node:test：解析器 / 导入幂等 / 查询与校验 / 密码哈希与账号规则 / 点单规则
 │     ├─ src/
 │     │  ├─ main.ts          # HOST/PORT 可配置（容器内 0.0.0.0）
@@ -73,6 +73,7 @@ cook/
 │     │  │                   # 天数——纯规则）/ checkins.signature.ts（照片短链签名与校验）
 │     │  ├─ modules/favorites/# 收藏（M1 F1-09）：controller / service / favorites.rules.ts（id 校验、上限判定）
 │     │  ├─ modules/discover/ # 决策引擎（M5 F5-02）：controller / service / discover.rules.ts（按餐去重、合分排序）
+│     │  ├─ modules/shopping/ # 采购清单（M7 F7-01）：controller / service / shopping.rules.ts（用量文本合并、按名汇总）
 │     │  ├─ modules/mail/    # 发信通道（可插拔）：console（开发，写日志）/ smtp（真发信）
 │     │  ├─ modules/recipes/ # 菜谱：controller / query / provider（可插拔）/ howtocook 解析器 / importer
 │     │  │  └─ sources/      # 外部数据源适配器：recipe-source.ts（归一规则）、jisu / uapis / jumdata.source.ts

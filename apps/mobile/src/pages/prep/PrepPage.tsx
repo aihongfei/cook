@@ -115,6 +115,11 @@ export default function PrepPage() {
             {board.data && (
               <p className="prep__summary">
                 {days.length} 天共 {days.length * 2} 餐，还有 {emptyMeals} 餐空着。
+                {/* 采购清单（M7 / F7-01）：排完菜顺路去买菜是同一件事的两半，
+                    所以入口就放在排菜的页上（而不是只挂在发现页） */}
+                <Link className="prep__shop" to="/shopping" state={{ from: location.pathname }}>
+                  看要买什么 →
+                </Link>
               </p>
             )}
 

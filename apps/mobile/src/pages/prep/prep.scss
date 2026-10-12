@@ -142,3 +142,11 @@
   color: var(--color-ink-3);
   text-align: right;
 }
+
+/* 采购清单入口（F7-01）：与"还有几餐空着"同一行，排完菜顺路去买菜 */
+.prep__shop {
+  margin-left: 6px;
+  font-size: 12.5px;
+  color: var(--color-brand);
+  white-space: nowrap;
+}

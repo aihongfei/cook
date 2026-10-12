@@ -19,6 +19,7 @@
     "test:http": "node scripts/verify-recipes-http.cjs",
     "test:http:favorites": "node scripts/verify-favorites-http.cjs",
     "test:http:discover": "node scripts/verify-discover-http.cjs",
+    "test:http:shopping": "node scripts/verify-shopping-http.cjs",
     "import:recipes": "ts-node src/scripts/import-recipes.ts",
     "normalize:names": "ts-node src/scripts/normalize-names.ts",
     "mirror:images": "ts-node src/scripts/mirror-images.ts",

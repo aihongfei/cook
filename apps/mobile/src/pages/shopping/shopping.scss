@@ -1,0 +1,159 @@
+/* 采购清单（M7 / F7-01）：按菜单算出来的一张买菜单。样式沿用 shared.scss 的 .card / .page-back */
+
+.shop__tip,
+.shop__empty {
+  padding: 15px;
+}
+
+.shop__tip-text,
+.shop__empty-text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.shop__link {
+  display: block;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--color-brand);
+}
+
+.shop__status {
+  padding: 15px;
+}
+
+/* 可见性说明与备菜计划同一套写法（共享关掉时说清为什么看到的少） */
+.shop__scope {
+  margin: 10px var(--spacing-page) 0;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-2);
+  background: rgb(224 123 57 / 7%);
+  border-radius: 10px;
+}
+
+.shop__summary {
+  margin: 12px var(--spacing-page) 0;
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+}
+
+.shop__progress {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin: 10px var(--spacing-page) 0;
+}
+
+.shop__progress-text {
+  font-size: 13px;
+  color: var(--color-ink);
+}
+
+.shop__progress-hint {
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.shop__list {
+  padding: 6px 10px;
+}
+
+.shop__items {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 一行一样食材：勾选框 + 名字 + 用量 + 为哪几道菜买。
+ * 整行可点（`<label>` 包住 input），手机上点名字就能勾上——不用去戳那个 16px 的小方框。 */
+.shop__label {
+  display: flex;
+  flex-wrap: wrap;
+  /* 用量是这一行的主角（买多少），所以给它一个固定的起栏位置，
+     长食材名换行时后面的用量不会跟着乱跑 */
+  gap: 4px 8px;
+  align-items: baseline;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--color-line);
+  cursor: pointer;
+}
+
+.shop__item:last-child .shop__label {
+  border-bottom: 0;
+}
+
+.shop__check {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-brand);
+  transform: translateY(2px);
+}
+
+.shop__name {
+  font-size: 14px;
+  color: var(--color-ink);
+}
+
+.shop__amount {
+  font-size: 12.5px;
+  color: #b45f30;
+}
+
+.shop__from {
+  flex: 1 1 100%;
+  /* 换到第二行的菜名注释：缩进对齐到名字（16 + 8），一眼看出它属于上一行 */
+  padding-left: 24px;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+/* 勾掉：整行变浅并划掉名字（超市里"这个拿了"的视觉）。字色与删除线都要弱，
+ * 但**不能淡到看不见**——用户还要回头看自己买了什么 */
+.shop__label.is-packed .shop__name,
+.shop__label.is-packed .shop__amount {
+  color: var(--color-ink-3);
+  text-decoration: line-through;
+}
+
+.shop__label.is-packed .shop__from {
+  opacity: 0.6;
+}
+
+.shop__missing {
+  padding: 13px 15px;
+}
+
+.shop__missing-title {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+}
+
+.shop__missing-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--color-ink);
+}
+
+.shop__missing-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-ink-3);
+}
+
+.shop__foot {
+  margin: 12px var(--spacing-page) 24px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-ink-3);
+}
