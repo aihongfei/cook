@@ -39,7 +39,7 @@ const ME = {
   createdAt: new Date().toISOString(),
 }
 
-function mockGet() {
+function mockGet(family: unknown = null) {
   vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
     if (url === '/auth/options') {
       return Promise.resolve({
@@ -52,7 +52,21 @@ function mockGet() {
       } as never)
     }
     if (url === '/auth/me') return Promise.resolve({ data: ME } as never)
-    if (url === '/family') return Promise.resolve({ data: null } as never)
+    if (url === '/family') return Promise.resolve({ data: family } as never)
+    if (url === '/checkins/stats') {
+      return Promise.resolve({
+        data: {
+          mine: {
+            weeks: [], from: '2026-06-15', to: '2026-10-12',
+            totalDays: 1, totalCount: 4, streak: 1,
+          },
+          family: { weeks: [], from: '2026-06-15', to: '2026-10-12', totalDays: 2, totalCount: 5, streak: 1 },
+          mineTotal: 4,
+          familyTotal: 5,
+          attachableMeals: [],
+        },
+      } as never)
+    }
     throw new Error(`未预期的请求：${url}`)
   })
 }
@@ -117,6 +131,29 @@ it('保存把昵称、头像与邮箱发给后端，成功后收起表单并提�
     }),
   )
   expect(await screen.findByText('资料已更新')).toBeTruthy()
+})
+
+it('打卡块的张数只出现一处，且打卡墙入口在"连续打卡"同一行的右侧', async () => {
+  const FAMILY = {
+    id: 'f1', name: '小满一家', shared: true, inviteCode: 'H65WAJ',
+    createdAt: new Date().toISOString(), memberCount: 2, memberLimit: 10,
+    myRole: 'OWNER', myCapabilities: [], members: [],
+  }
+  mockGet(FAMILY)
+  renderMine()
+
+  // 入口与"连续打卡"同处一行（head 里）
+  const head = (await screen.findByText(/连续打卡/)).closest('.me-checkin__head')
+  expect(head).toBeTruthy()
+  const link = screen.getByRole('link', { name: /去打卡墙看看/ })
+  expect(link.getAttribute('href')).toBe('/checkins')
+  expect(head!.contains(link)).toBe(true)
+
+  // 张数只留热力图图例里那处（曾经同时挂着「共 N 张」和「全家一起攒了 M 张」，三个数字互相打架）
+  const counts = screen.getAllByText(/共 \d+ 张/)
+  expect(counts).toHaveLength(1)
+  expect(counts[0].textContent).toContain('1 天有打卡')
+  expect(screen.queryByText(/全家一起攒了/)).toBeNull()
 })
 
 it('邮箱清空时传 null（解绑），不是空字符串', async () => {

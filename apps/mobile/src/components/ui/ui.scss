@@ -187,9 +187,14 @@
 /*
  * 二级页面的返回入口（家庭页、菜谱详情这类不在底部 Tab 里的页面）。
  * 文字链接而不是图标：手绘风里图标按钮容易和装饰元素混淆，文字更明确。
- */.page-back {
+ *
+ * **左右栏距由此类自带**（16px）：各页面容器有的自带栏距（`.recipes-page`）、有的没有（`.pscreen`）。
+ * 把栏距交给容器时，谁忘了写谁就贴边——打卡墙的返回键曾落在 x=0，别的页面在 x=16。
+ * 容器自带栏距的场景（菜谱页）在容器样式里用一行 `padding-left: 0` 抵消，四个入口就落在同一位置。
+ */
+.page-back {
   display: inline-block;
-  padding: 8px 0;
+  padding: 8px var(--spacing-page);
   font-size: 13px;
   color: var(--color-ink-3);
 }

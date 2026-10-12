@@ -190,50 +190,64 @@
   box-shadow: var(--shadow-card);
 }
 
+/*
+ * 热力图版式：格子**按容器宽度平分**，不再写死 11px。
+ * 写死的那版在 390px 手机上 18 周只占 ~250px，卡片右侧空出一条（用户截图报来"没充满"）。
+ * 现在：18 列等分可用宽度，格子用 aspect-ratio 保持正方形，宽屏用 max-width 兜住不变成大方块。
+ */
 .heatmap__body {
-  display: flex;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 5px 6px;
+  /* 宽屏下不再继续放大（手机上一屏铺满，桌面上停在这个宽度，免得格子长成大色块） */
+  max-width: 470px;
 }
 
-/* 星期几的刻度：只在左侧一列，高度与格子对齐 */
+/* 星期刻度：7 个等分行，行高与右侧格子一一对应（总高由格子那列决定，这里跟着均分） */
 .heatmap__weekdays {
   display: flex;
   flex-direction: column;
+  grid-row: 1;
+  grid-column: 1;
   gap: 3px;
-  padding-top: 0;
+  align-items: center;
   font-size: 9px;
-  line-height: 11px;
+  line-height: 1;
   color: var(--color-ink-3);
 }
 
 .heatmap__weekdays span {
-  height: 11px;
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  min-height: 0;
 }
 
+/*
+ * 格子铺满可用宽度：每周一列、**等分**（flex 1 1 0），格子用 aspect-ratio 保持正方形。
+ * 以前写死 11px，18 周只占 ~250px，卡片右侧空出一条（用户截图报来"没充满"）。
+ * 用等分列而不是"让格子连续流入 18 列网格"：后者依赖"每周都是完整 7 天"，
+ * 哪天后端返回一周不满 7 天，整张图会错位而不是变短。
+ */
 .heatmap__grid {
   display: flex;
-  flex: 1 1 auto;
+  grid-row: 1;
+  grid-column: 2;
   gap: 3px;
-  /* 18 周 × (11px + 3px) ≈ 250px，一屏放得下；容器窄时允许横向滑动 */
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.heatmap__grid::-webkit-scrollbar {
-  display: none;
 }
 
 .heatmap__week {
   display: flex;
+  flex: 1 1 0;
   flex-direction: column;
-  flex: 0 0 auto;
   gap: 3px;
+  min-width: 0;
 }
 
 .heatmap__cell {
-  display: block;
-  width: 11px;
-  height: 11px;
+  width: 100%;
+  aspect-ratio: 1 / 1;
   border-radius: 3px;
   background: var(--color-cream-2);
 }
@@ -245,18 +259,24 @@
 .heatmap__cell--l3 { background: #d4833c; }
 .heatmap__cell--l4 { background: #b4571f; }
 
+/*
+ * 月份标：与格子同样等分（列宽一致 → 天然对齐，不用手工凑 padding）。
+ * 但**允许文字溢出到右边**（不裁剪）：列宽只有一格（约 15px），而「10 月」比一格宽；
+ * 月份之间至少隔 4 周（≈58px），溢出的标签不会撞上后面的。裁掉就会出现"10 月"缺笔画。
+ */
 .heatmap__months {
   display: flex;
+  grid-row: 2;
+  grid-column: 2;
   gap: 3px;
-  padding-left: 17px;
-  margin-top: 5px;
   font-size: 9px;
   color: var(--color-ink-3);
 }
 
 .heatmap__months span {
-  width: 14px;
-  flex: 0 0 auto;
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .heatmap__legend {
@@ -278,6 +298,14 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
+}
+
+/* 图例里的小色块：尺寸写死（格子那套是"宽度撑满 + 正方形"，放进图例会塌成 0 宽） */
+.heatmap__scale .heatmap__cell {
+  width: 11px;
+  height: 11px;
+  aspect-ratio: auto;
+  flex: 0 0 auto;
 }
 
 /* ---- 我的页的打卡统计块 ---- */
@@ -304,15 +332,13 @@
   color: var(--color-brand);
 }
 
-.me-checkin__family {
-  margin: 8px var(--spacing-page) 0;
-  font-size: 11px;
-  color: var(--color-ink-3);
-}
-
+/* 「去打卡墙看看 →」在标题行右侧（与"连续打卡"同行）：两者都是这一块的摘要 */
 .me-checkin__more {
-  display: block;
-  margin: 10px var(--spacing-page) 0;
   font-size: 11.5px;
   color: var(--color-brand);
+  text-decoration: none;
+
+  &:active {
+    opacity: 0.7;
+  }
 }

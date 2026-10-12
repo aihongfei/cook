@@ -74,7 +74,7 @@ export default function FamilyPage() {
   const from =
     typeof requestedFrom === 'string' && requestedFrom in FAMILY_ENTRIES ? requestedFrom : '/mine'
   const back = (
-    <Link className="page-back" to={from} style={{ paddingInline: 'var(--spacing-page)' }}>
+    <Link className="page-back" to={from}>
       ← {FAMILY_ENTRIES[from]}
     </Link>
   )

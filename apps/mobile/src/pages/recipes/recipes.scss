@@ -4,6 +4,12 @@
   margin: 0 auto;
 }
 
+/* 返回键自带 16px 栏距（见 ui.scss 的 .page-back），而本容器已经有了，抵消一次。
+   列表页把返回键放在 .recipes-heading 里、详情页直接放在容器里，所以用后代选择器两种都覆盖 */
+.recipes-page .page-back {
+  padding-left: 0;
+}
+
 .recipes-heading {
   h1 { margin: 12px 0 8px; font-size: 27px; color: #6e3a1c; }
   p { margin: 0 0 20px; font-size: 13px; color: var(--color-ink-3); }

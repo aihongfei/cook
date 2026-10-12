@@ -5,9 +5,11 @@ import type { HeatmapGrid } from '@/api/checkins'
  * 打卡热力图（M9 / F9-03）。
  *
  * 参照 GitHub 贡献图：一周一列、周一在上，格子按当天打卡张数分 5 档深浅。
- * 三点刻意的做法：
+ * 四点刻意的做法：
  * - **格子不做成按钮**：这是"回看"用的图，一天点不下去；要看清某天就看格子的 title 提示；
  * - **月份标在列下**：只标"出现新月份的第一周"，避免每列都顶一个重复的月份；
+ * - **列宽按容器平分**（不是固定 11px）：18 周固定宽度在手机上会让右边空出一块，看着像没画完；
+ *   现在格子用 `aspect-ratio` 保持正方形，宽度自适应，宽屏下由 CSS 的 max-width 兜住不至于变成大方块；
  * - 等级阈值由后端给（`level`），前端只负责上色——改口径不用动前端。
  */
 
@@ -54,12 +56,13 @@ export default function Heatmap({ grid, emptyHint }: { grid: HeatmapGrid; emptyH
             </div>
           ))}
         </div>
-      </div>
 
-      <div className="heatmap__months" aria-hidden="true">
-        {monthLabels.map((label, index) => (
-          <span key={index}>{label}</span>
-        ))}
+        {/* 月份标与格子同处一个网格的第二列，列宽自然对齐（不用手工凑 padding） */}
+        <div className="heatmap__months" aria-hidden="true">
+          {monthLabels.map((label, index) => (
+            <span key={index}>{label}</span>
+          ))}
+        </div>
       </div>
 
       <div className="heatmap__legend">

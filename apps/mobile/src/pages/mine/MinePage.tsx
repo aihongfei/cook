@@ -152,17 +152,20 @@ export default function MinePage() {
 
         {family.data && checkins.data ? (
           <div className="me-checkin">
+            {/*
+              张数只在一处出现（热力图自己的图例里「N 天有打卡 · 共 M 张」）：
+              这里原本还挂着「共 N 张」与「全家一起攒了 M 张」，同一页三个数字容易互相打架。
+              入口放右上、与"连续打卡"同一行——它俩都是"这一块"的摘要，放一起最省一行高度。
+            */}
             <div className="me-checkin__head">
               <span className="me-checkin__streak">
                 连续打卡 <b>{checkins.data.mine.streak}</b> 天
               </span>
-              <span className="checkin-card__date">共 {checkins.data.mineTotal} 张</span>
+              <Link className="me-checkin__more" to="/checkins" state={{ from: '/mine' }}>
+                去打卡墙看看 →
+              </Link>
             </div>
             <Heatmap grid={checkins.data.mine} emptyHint="还没有打卡照片：做了一道好菜就拍一张。" />
-            <p className="me-checkin__family">全家一起攒了 {checkins.data.familyTotal} 张照片</p>
-            <Link className="me-checkin__more" to="/checkins" state={{ from: '/mine' }}>
-              去打卡墙看看 →
-            </Link>
           </div>
         ) : (
           <div className="rows" style={{ marginTop: 0 }}>
