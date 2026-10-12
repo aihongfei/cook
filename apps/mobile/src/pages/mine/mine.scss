@@ -47,23 +47,26 @@
   border: 0;
 }
 
+/*
+ * 头像行：**换行，不横向滚动**。
+ * 原来是 `overflow-x: auto` + nowrap，且藏掉了滚动条。问题是它处在卡片里（`.mine-edit` 是
+ * column flex，内宽 330px），而这一行是 flex 子项、`min-width: auto` 收不下去：8 个 38px 头像
+ * 撑到 353px，整行顶出卡片右内边距、最后一个头像离屏幕边只剩 6px（用户报"右侧溢出"）。
+ * 没有滚动条的横滚等于把头像藏起来，所以改成换行；尺寸取 8 个能排进一行（8×35 + 7×5 = 315 ≤ 330），
+ * 头像再多也只是多一行，不会再溢出。
+ */
 .mine-edit__row {
   display: flex;
-  gap: 7px;
+  flex-wrap: wrap;
+  gap: 5px;
   margin-top: 7px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.mine-edit__row::-webkit-scrollbar {
-  display: none;
 }
 
 .mine-edit__avatar {
   flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
-  font-size: 18px;
+  width: 35px;
+  height: 35px;
+  font-size: 17px;
   background: var(--color-cream-2);
   border: 1.5px solid transparent;
   border-radius: 50%;

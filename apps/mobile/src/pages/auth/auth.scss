@@ -76,7 +76,9 @@
   border: 1.5px solid var(--color-line);
   border-radius: 13px;
   outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .auth__field input:focus {
@@ -97,22 +99,22 @@
   color: var(--color-ink-2);
 }
 
+/*
+ * 头像选择器（与「我的 → 编辑资料」同款）：**换行，不横向滚动**。
+ * 8 个 42px 头像排成 385px，而注册卡片内宽只有 322px（390 视口），会顶破卡片和屏幕右边；
+ * 滚动条又被藏掉，用户根本看不出后面还有头像。35px + 5px 间距时 8 个共 315px，一行排得下。
+ */
 .auth__avatars-row {
   display: flex;
-  gap: 7px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.auth__avatars-row::-webkit-scrollbar {
-  display: none;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
 .auth__avatar {
   flex: 0 0 auto;
-  width: 42px;
-  height: 42px;
-  font-size: 20px;
+  width: 35px;
+  height: 35px;
+  font-size: 17px;
   background: var(--color-cream-2);
   border: 1.5px solid transparent;
   border-radius: 50%;
