@@ -8,18 +8,21 @@ import {
   AI_TIMEOUT_MAX_MS,
   AiReplyError,
   EXAMPLE_TEXT_MAX,
+  HINT_KEYWORDS_MAX,
   HINT_TEXT_MAX,
   PICKS_SCHEMA,
   PROMPTS_EXAMPLES_MAX,
   PROMPTS_HINTS_MAX,
   PROMPTS_HINTS_MIN,
   SUGGEST_PICKS_MAX,
+  extractKeywords,
   formatCandidates,
   parseChatMessages,
   parseHint,
   parsePicks,
   parsePrompts,
   readAiConfig,
+  sampleList,
   type CandidateDish,
 } from '../src/modules/ai/ai.rules'
 
@@ -244,4 +247,61 @@ test('提示词：长度上限是"整条丢掉"而不是截断（截断会断在
   assert.equal(parsed.hints.includes(long), false)
   assert.equal(parsed.hints.length, 5)
   assert.equal(parsed.examples.length, 3)
+})
+
+// ---------- 推荐为什么"总是那两道"（用户 2026-10-13 的反馈） ----------
+
+/*
+ * 关键词提取：原来的写法按标点切词、只留整段，于是「剩饭怎么处理」切出来是
+ * **一整个六字短语**，库里 contains 搜不到 → 每次都落到"随便取一批"的兜底分支。
+ * 用户看到的"不管点什么都是鱼香肉丝和蘑菇"就是这么来的。
+ */
+test('关键词：中文没有词边界，整段搜不到就切二元组（「剩饭怎么处理」要能切出「剩饭」）', () => {
+  const words = extractKeywords('剩饭怎么处理')
+  assert.ok(words.includes('剩饭'), `切出来要有「剩饭」，实际 ${JSON.stringify(words)}`)
+  assert.ok(words.includes('处理'), `切出来要有「处理」，实际 ${JSON.stringify(words)}`)
+  // 停用词不该混进去（它们出现在菜名里的概率极低，只会让 OR 变浑浊）
+  assert.ok(!words.includes('怎么'), '「怎么」是疑问词，不该当检索词')
+})
+
+test('关键词：标点分开的短句照旧整词保留（那条路原来是对的，不能改坏）', () => {
+  const words = extractKeywords('想吃，酸的')
+  assert.ok(words.includes('想吃') && words.includes('酸的'))
+})
+
+test('关键词：三字以内的短词不切二元组（切了只会得到它自己的碎片）', () => {
+  assert.deepEqual(extractKeywords('想喝汤'), ['想喝汤'])
+})
+
+test('关键词：去重、有序、数量有上限（太多会让 OR 全是噪音）', () => {
+  const words = extractKeywords('想吃肉想吃肉想吃肉想吃肉想吃肉想吃肉想吃肉想吃肉')
+  assert.ok(words.length <= HINT_KEYWORDS_MAX, `不该超过 ${HINT_KEYWORDS_MAX} 个，实际 ${words.length}`)
+  assert.equal(new Set(words).size, words.length, '不该有重复')
+  // 空输入与纯标点要安全返回空数组（走兜底分支）
+  assert.deepEqual(extractKeywords('   '), [])
+  assert.deepEqual(extractKeywords('，。、'), [])
+})
+
+/*
+ * 抽样：这是"推荐固定"的另一个根因——候选每次都取 `order by id asc` 的头一批，
+ * 模型总在同样 30 道里挑，而且明显偏爱清单开头那几条。
+ */
+test('抽样：会真的打乱顺序（传 0 保持原序、传 1 每次取到剩余里的最后一个）', () => {
+  const list = ['a', 'b', 'c', 'd', 'e']
+  assert.deepEqual(sampleList(list, 3, () => 0), ['a', 'b', 'c'], '传 0 等于不洗牌（可确定地验）')
+  // 传 1：每次把"剩余里的最后一个"换到当前位置。逐步写出来是 [e,b,c,d,a] → [e,a,c,d,b] → [e,a,b,d,c]，
+  // 取前三个就是 ['e','a','b']（我第一版按直觉写成 ['e','d','c']，实测红——**把期望值算清楚再写**）
+  assert.deepEqual(sampleList(list, 3, () => 1), ['e', 'a', 'b'], '传 1 每次取剩余里的最后一个')
+  // 连抽多次至少出现两种不同结果——固定顺序正是用户报的问题
+  const seen = new Set(Array.from({ length: 40 }, () => sampleList(list, 3).join('')))
+  assert.ok(seen.size > 1, '连抽 40 次只出现一种组合，等于没随机')
+})
+
+test('抽样：数量边界安全（要的比给的多就全给、0 与负数给空、永远不含 undefined）', () => {
+  const list = ['a', 'b', 'c']
+  assert.equal(sampleList(list, 99).length, 3)
+  assert.equal(sampleList(list, 0).length, 0)
+  assert.equal(sampleList(list, -1).length, 0)
+  assert.equal(sampleList([], 3).length, 0)
+  assert.ok(sampleList(list, 3, () => 1).every((item) => item !== undefined), 'random 越界也不能取到 undefined')
 })

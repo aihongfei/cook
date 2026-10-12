@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DotLoading } from 'antd-mobile'
-import BottomSheet, { type BottomSheetHandle } from '@/components/ui/BottomSheet'
+import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { useAiPrompts, useAiSuggest, useAiStatus, type SuggestedPick } from '@/api/ai'
@@ -47,6 +47,14 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
   const aiPrompts = useAiPrompts(status.data?.configured === true)
   const [hint, setHint] = useState('')
   const [picks, setPicks] = useState<SuggestedPick[] | null>(null)
+  /**
+   * 已经点过「点这道」的那几道（按 recipeId 记）。
+   *
+   * 为什么要有：点完一道**抽屉不会关**（见 pointAt），用户往往接着挑下一道；
+   * 而上一道的按钮仍然写着「点这道」，再点一次就会把同一道菜加进菜单两次。
+   * 与「问 AI」那边的建议卡同一个做法（`added` 数组）：点过就置灰，说清"已经加过了"。
+   */
+  const [added, setAdded] = useState<string[]>([])
   const [tip, setTip] = useState(0)
   /*
    * 快问在打开时抽定（调用方用 key 重挂载，每次打开都是一批新的）。
@@ -55,9 +63,8 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
    * 真正会让按钮自己跳的是"不进 state、渲染时现抽"，那种写法反证会红（见 ai-sheets.test）。
    */
   const [quickHints, setQuickHints] = useState(() => pickHints())
-  // 收起走抽屉自己的退场动画（见 BottomSheet 里那段 ⚠️）：直接调 onClose 会让抽屉"啪"地消失
-  const sheet = useRef<BottomSheetHandle>(null)
-  const closeSheet = () => (sheet.current ? sheet.current.close() : onClose())
+  // 这个抽屉**没有"写入成功后自动收起"**：一次问出好几道，用户要接着挑（见 pointAt）。
+  // 所以不需要 BottomSheet 的 imperative handle，关闭全交给用户（点遮罩/下拉）。
 
   /*
    * AI 那批到手就**重抽一次**。
@@ -93,6 +100,14 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
     const value = text.trim()
     setHint(value)
     setTip(0)
+    /*
+     * 先把上一次的结果清掉（用户 2026-10-13：「问完了下面有菜了时候，再问一次，
+     * 那两个菜没有清掉，还是显示在那里」）。清掉不只是好看：新问题的结果还没回来时，
+     * 下面留着旧推荐，用户会以为那就是这一问的答案。
+     * 已点过的标记也一起清——新一批推荐是另一批菜，留着旧菜名没有意义。
+     */
+    setPicks(null)
+    setAdded([])
     suggest.mutate(
       { hint: value || undefined },
       {
@@ -109,7 +124,8 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
       {
         onSuccess: (card) => {
           toast.success(`已把「${pick.name}」加进${card.mealLabel}`)
-          closeSheet()
+          // 不关抽屉：一次问出好几道，用户通常要连着点几道（关掉的话得重新问一遍）
+          setAdded((list) => (list.includes(pick.recipeId) ? list : [...list, pick.recipeId]))
         },
         onError: (error) => toast.error(apiErrorMessage(error)),
       },
@@ -117,7 +133,7 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
   }
 
   return (
-    <BottomSheet ref={sheet} visible={visible} title="AI 帮你想" onClose={onClose}>
+    <BottomSheet visible={visible} title="AI 帮你想" onClose={onClose}>
       {status.data && !status.data.configured ? (
         // 未配置就把话说清楚：怎么配、配完会怎样。不给假推荐。
         <p className="ai__tip">
@@ -183,7 +199,9 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
             <>
               <p className="ai__waiting">{SUGGEST_TIPS[tip]}</p>
               <div className="ai__skeleton">
-                {[0, 1, 2].map((row) => (
+                {/* 按新的一批上限铺 6 行（SUGGEST_PICKS_MAX）：铺不满的话结果一回来
+                    下面会"啪"地多出一截，看起来像界面在跳 */}
+                {[0, 1, 2, 3, 4, 5].map((row) => (
                   <div className="ai__skeleton-row" key={row}>
                     <span className="ai__skeleton-line ai__skeleton-line--name" />
                     <span className="ai__skeleton-line ai__skeleton-line--reason" />
@@ -205,28 +223,39 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
 
           {picks && picks.length > 0 && (
             <div className="ai__picks">
-              {picks.map((pick, index) => (
-                <div className="ai__pick" key={pick.recipeId}>
-                  {/* 序号不是装饰：它是"AI 从候选里挑出来的顺序"，
-                      用户一眼能看出这是 AI 选的几条而不是菜单列表 */}
-                  <span className="ai__pick-index" aria-hidden>
-                    {index + 1}
-                  </span>
-                  <div className="ai__pick-main">
-                    <span className="ai__pick-name">{pick.name}</span>
-                    {pick.reason && <span className="ai__pick-reason">{pick.reason}</span>}
+              {picks.map((pick, index) => {
+                const done = added.includes(pick.recipeId)
+                return (
+                  <div className={['ai__pick', done && 'is-done'].filter(Boolean).join(' ')} key={pick.recipeId}>
+                    {/* 序号不是装饰：它是"AI 从候选里挑出来的顺序"，
+                        用户一眼能看出这是 AI 选的几条而不是菜单列表 */}
+                    <span className="ai__pick-index" aria-hidden>
+                      {index + 1}
+                    </span>
+                    <div className="ai__pick-main">
+                      <span className="ai__pick-name">{pick.name}</span>
+                      {pick.reason && <span className="ai__pick-reason">{pick.reason}</span>}
+                    </div>
+                    {/* 点过的那道置灰（同「问 AI」的建议卡）：它已经在菜单里了，
+                        再点一次就是同一道菜加两遍 */}
+                    {done ? (
+                      <span className="ai__pick-done">已加入</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-ghost ai__pick-go"
+                        disabled={addItem.isPending || !family.data}
+                        onClick={() => pointAt(pick)}
+                      >
+                        点这道
+                      </button>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    className="btn-ghost ai__pick-go"
-                    disabled={addItem.isPending || !family.data}
-                    onClick={() => pointAt(pick)}
-                  >
-                    点这道
-                  </button>
-                </div>
-              ))}
-              <p className="ai__foot">推荐的菜都在菜谱小书里，点「点这道」会加进今天这一餐。</p>
+                )
+              })}
+              <p className="ai__foot">
+                推荐的菜都在菜谱小书里，点「点这道」会加进今天这一餐；点过的会标记出来，可以接着挑下一道。
+              </p>
             </div>
           )}
         </>

@@ -90,8 +90,17 @@ export function readAiConfig(env: Record<string, string | undefined> = process.e
 }
 
 /** 推荐时让模型从这些菜里挑（不给全库，几千道塞不进上下文也没必要） */
-export const SUGGEST_CANDIDATES = 24
-export const SUGGEST_PICKS_MAX = 5
+export const SUGGEST_CANDIDATES = 30
+/** 关键词命中后最多捞多少条再抽样：命中几百条时没必要全读进内存 */
+export const SUGGEST_MATCHES_MAX = 120
+export const SUGGEST_PICKS_MAX = 6
+/**
+ * 提示词里要求的条数下限（用户 2026-10-13：「两个菜有点少了，可以多一些」）。
+ *
+ * 只写进提示词、**不写进解析器**：模型给 3 道也不该判失败——那是"少一点"，
+ * 不是"答错了"，为它把整个回答丢掉、让用户重问一遍更糟。上限由 `SUGGEST_PICKS_MAX` 兜住。
+ */
+export const SUGGEST_PICKS_MIN = 4
 /** 聊天/推荐输入的长度闸门：家庭场景用不到长篇大论，也防着有人拿它当免费 LLM 用 */
 export const AI_HINT_MAX = 200
 export const AI_MESSAGE_MAX = 1000
@@ -226,6 +235,74 @@ export function formatCandidates(candidates: CandidateDish[]): string {
       return `- id=${dish.id} ${dish.name}（${dish.category}）${tags}${spicy}`
     })
     .join('\n')
+}
+
+/** 关键词最多留几个：太多会让 `OR` 里全是噪音，命中的菜反而不贴题 */
+export const HINT_KEYWORDS_MAX = 8
+/** 切词时按这些分隔符断（中英文标点与空白） */
+const KEYWORD_SEPARATORS = /[\s,，、。；;：:！!？?（）()【】[\]「」“”"'’]+/
+/** 语助词：它们出现在菜名/配料里的概率极低，留在关键词里只会让 OR 变浑浊 */
+const KEYWORD_STOPWORDS = new Set(['怎么', '什么', '可以', '想要', '一点', '多少', '如何', '哪些', '我们', '今天'])
+
+/**
+ * 从用户那句话里取**检索关键词**。
+ *
+ * 原来的写法是「按标点切词、只留 2 字以上的整段」，于是「剩饭怎么处理」切出来就是
+ * **一整个六字短语**——库里当然搜不到，每次都落到"随便取一批"的兜底分支。
+ * 这正是用户 2026-10-13 看到的现象：不管点什么，推荐来来回回就是鱼香肉丝和素炒蘑菇。
+ *
+ * 现在两条路并取：
+ * - 按标点切出的整词（≥2 字）照旧保留——「想吃 酸辣」这类分开说的仍然精确；
+ * - 中文**没有词边界**，所以再对每个整词切**二元组**（「剩饭怎么处理」→ 剩饭/饭怎/怎么/么处/处理），
+ *   去停用词后留下能真去库里匹配的片段（剩饭、处理）。二元组是个粗糙但有效的近似：
+ *   它不保证切在词边界上，但库里那一侧是 `contains` 匹配，多带一点噪音不影响，
+ *   少带（像原来那样整段去搜）才是真的搜不到。
+ */
+export function extractKeywords(hint: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const push = (word: string) => {
+    if (word.length < 2 || seen.has(word) || out.length >= HINT_KEYWORDS_MAX) return
+    seen.add(word)
+    out.push(word)
+  }
+
+  for (const token of hint.split(KEYWORD_SEPARATORS).map((part) => part.trim()).filter(Boolean)) {
+    // 整词优先（更精确）：先放整词，再放它的二元组
+    if (token.length >= 2 && !KEYWORD_STOPWORDS.has(token)) push(token)
+    if (token.length < 4) continue // 三字以内的词，二元组只会切出它自己的碎片，没有增量
+    for (let i = 0; i + 2 <= token.length; i += 1) {
+      const bigram = token.slice(i, i + 2)
+      if (KEYWORD_STOPWORDS.has(bigram)) continue
+      push(bigram)
+    }
+  }
+  return out
+}
+
+/**
+ * 从数组里**随机取 count 个**（不重复，保持随机顺序）。count ≥ 长度时等于整体打乱。
+ *
+ * 两个地方用它，都是"不能让结果固定"的地方：
+ * - **候选清单**：库里 600 道，如果每次都取 `order by id asc` 的头一批，
+ *   模型每回都在同样 30 道里挑——用户会以为这是写死的（2026-10-13 的实际反馈）；
+ * - **交给模型前的排序**：清单是有序时模型明显偏爱前几条，顺序固定 = 推荐固定。
+ *
+ * `random` 可注入是为了让"随机"能被**确定地**测（传 () => 0 等于保持原序，传 () => 1
+ * 等于每次取到剩余里的最后一个），否则这类断言只能靠概率、会偶发地红。
+ */
+export function sampleList<T>(list: readonly T[], count: number, random: () => number = Math.random): T[] {
+  const copy = [...list]
+  const limit = Math.min(Math.max(0, Math.floor(count)), copy.length)
+  for (let i = 0; i < limit; i += 1) {
+    // 夹在 [0, 剩余长度-1]：random() 理论上可能是 0 或（被桩成）1，越界会取到 undefined
+    const offset = Math.max(0, Math.min(Math.floor(random() * (copy.length - i)), copy.length - i - 1))
+    const j = i + offset
+    const swap = copy[i]
+    copy[i] = copy[j]
+    copy[j] = swap
+  }
+  return copy.slice(0, limit)
 }
 
 /**

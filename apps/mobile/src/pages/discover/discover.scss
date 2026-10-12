@@ -312,6 +312,10 @@
   background: var(--color-cream);
   border: 1px solid var(--color-line);
   border-radius: 14px;
+
+  /* 已经点过「点这道」的那道退到背景里（同 .ai__proposal 的做法）：它已经在菜单里了，
+     用户接着挑下一道就行——再点一次就是同一道菜加两遍 */
+  &.is-done { opacity: 0.55; }
 }
 
 .ai__pick-main {
@@ -335,6 +339,13 @@
 
 .ai__pick-go {
   flex: 0 0 auto;
+}
+
+/* 「已加入」占位：与 .ai__proposal-done 同一套语气（灰、不抢眼） */
+.ai__pick-done {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--color-ink-3);
 }
 
 .ai__foot {

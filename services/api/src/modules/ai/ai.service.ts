@@ -2,8 +2,10 @@ import { HttpException, HttpStatus, Injectable, ServiceUnavailableException } fr
 import { PrismaService } from '../recipes/prisma.service'
 import { AiUpstreamError, chatJson, chatStreamEvents, type StreamEvent, type WireMessage } from './ai.client'
 import {
-  AI_HINT_MAX, EXAMPLE_TEXT_MAX, HINT_TEXT_MAX, PROMPTS_EXAMPLES_MAX, PROMPTS_HINTS_MAX, SUGGEST_CANDIDATES, AiReplyError,
-  formatCandidates, parseChatMessages, parseHint, parsePicks, parsePrompts, readAiConfig,
+  AI_HINT_MAX, EXAMPLE_TEXT_MAX, HINT_TEXT_MAX, PROMPTS_EXAMPLES_MAX, PROMPTS_HINTS_MAX,
+  SUGGEST_CANDIDATES, SUGGEST_MATCHES_MAX, SUGGEST_PICKS_MAX, SUGGEST_PICKS_MIN, AiReplyError,
+  extractKeywords, formatCandidates, parseChatMessages, parseHint, parsePicks, parsePrompts, readAiConfig,
+  sampleList,
   type AiConfig, type AiPrompts, type CandidateDish, type ChatMessage, type SuggestedPick,
 } from './ai.rules'
 import {
@@ -67,8 +69,15 @@ export class AiService {
 
     const systemPrompt = [
       '你是家庭厨房的掌勺参谋。只能从下面这份候选菜清单里挑菜，不要编造清单之外的菜。',
-      '按 picks 数组回：每条的 id 必须是候选清单里的 id，reason 是一句话说明为什么适合这一餐（20 字内）。',
+      `按 picks 数组回：每条的 id 必须是候选清单里的 id，reason 是一句话说明为什么适合这一餐（20 字内）。`,
+      // 条数（用户 2026-10-13：「两个菜有点少了，可以多一些」）：原来没写清楚要几道，
+      // 模型常只给 2 道。写进提示词而不是加进解析器——给少了是"少一点"，不是"答错了"，
+      // 为它整个丢弃、让用户重问一遍更糟（上限仍由 SUGGEST_PICKS_MAX 兜住）
+      `挑 ${SUGGEST_PICKS_MIN}～${SUGGEST_PICKS_MAX} 道：用户要看着选，只给两道不够挑；也不要凑数，清单里确实不合适的就别选。`,
       '挑选原则：口味均衡、荤素搭配、考虑家里人数与当下时令；同等条件下优先快手菜。',
+      // 候选清单每次都是随机抽的，但模型偏爱清单开头那几条——不说明的话同一句话问两遍
+      // 会把清单前两道再报一遍，看起来就像写死的（用户 2026-10-13 的原话：「是固定的吗」）
+      '清单每次都是随机抽的，**不要只挑排在前面的**；同一个问题再问一次时，尽量换几道不一样的。',
       '',
       '候选清单：',
       formatCandidates(candidates),
@@ -432,26 +441,52 @@ export class AiService {
   }
 
   /**
-   * 候选池：有提示就按名称/配料/标签搜（走库里的 searchText），没有就按最近点过的热门菜补足。
+   * 候选池：有提示就按名称/配料/标签搜（走库里的 searchText），没有就全库随机抽一批。
    * 刻意**不做**"按口味/忌口过滤"——那是 M8 口味档案的活（F5-03），现在没有数据源，
    * 假过滤比不过滤更糟（用户会以为系统记住了他的忌口）。
+   *
+   * **两处随机都是必须的**（用户 2026-10-13：「怎么都是鱼香肉丝和蘑菇，是固定的吗」）：
+   * - 兜底分支原来写的是 `take: 24, orderBy: { id: 'asc' }`——每次都是库里 id 最小的那 24 道，
+   *   模型每回都在这同一批里挑，于是推荐永远是那几道。改成**全库随机抽**（先取 id 列、再抽样、再按 id 取详情）；
+   * - 命中分支也可能一次命中几百道（"想吃肉"这种），只取前 30 道同样会固定，所以先随机抽再交给模型。
+   *
+   * 关键词本身也修了：原来「剩饭怎么处理」这种没有标点的句子切出来是一个六字整词，
+   * 库里搜不到 → 每次都落兜底。现在由 `extractKeywords` 切成二元组，能真匹配上（见那里的说明）。
    */
   private async candidates(hint: string): Promise<CandidateDish[]> {
-    const keywords = hint.split(/[\s,，、。]+/).map((word) => word.trim()).filter((word) => word.length >= 2).slice(0, 4)
+    const keywords = extractKeywords(hint)
 
     const rows = keywords.length
       ? await this.prisma.recipe.findMany({
           where: { OR: keywords.map((word) => ({ searchText: { contains: word } })) },
-          take: SUGGEST_CANDIDATES,
+          take: SUGGEST_MATCHES_MAX,
           orderBy: { id: 'asc' },
         })
       : []
 
-    const picked = rows.length >= 6
-      ? rows
-      : await this.prisma.recipe.findMany({ take: SUGGEST_CANDIDATES, orderBy: { id: 'asc' } })
+    /*
+     * 命中够多就用命中；否则补足。**补足也要随机**：原来固定取 id 最小的那几道，
+     * 于是"随便看看"永远看到同一批（那正是用户截图里的现象）。
+     * 先只取 id（几百道也就几 KB），抽样后再取详情，避免把整库读进内存。
+     */
+    let pool = rows
+    if (pool.length < SUGGEST_CANDIDATES) {
+      const ids = await this.prisma.recipe.findMany({ select: { id: true }, orderBy: { id: 'asc' } })
+      const known = new Set(pool.map((row) => row.id))
+      const extra = sampleList(ids.map((row) => row.id).filter((id) => !known.has(id)), SUGGEST_CANDIDATES - pool.length)
+      if (extra.length) {
+        const filled = await this.prisma.recipe.findMany({ where: { id: { in: extra } } })
+        // 抽样出来的顺序要保住（`in` 查询回来的顺序不保证），否则随机又白做了
+        const byId = new Map(filled.map((row) => [row.id, row]))
+        pool = [...pool, ...extra.map((id) => byId.get(id)).filter((row) => row !== undefined)]
+      }
+    }
 
-    return picked.slice(0, SUGGEST_CANDIDATES).map((recipe) => ({
+    // 交给模型前**再打乱一次**：清单有序时模型明显偏爱前几条（实测它总挑清单开头那两道），
+    // 顺序固定 = 推荐固定——这正是用户看到的"每次都是鱼香肉丝和素炒蘑菇"。
+    const picked = sampleList(pool, SUGGEST_CANDIDATES)
+
+    return picked.map((recipe) => ({
       id: recipe.id,
       name: recipe.name,
       category: recipe.category,

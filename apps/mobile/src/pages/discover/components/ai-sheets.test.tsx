@@ -466,3 +466,88 @@ it('再问一句时上一轮的建议要收走（它属于上一句回答）', a
   await waitFor(() => expect(sent).toHaveLength(2))
   await waitFor(() => expect(screen.queryByText('要加进菜单吗？')).toBeNull())
 })
+
+// ---------- 用户 2026-10-13 的三条反馈 ----------
+
+it('再问一次时先把上一次的推荐清掉（旧结果留着会被当成这一问的答案）', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  vi.setSystemTime(new Date('2026-10-12T10:00:00+08:00'))
+  try {
+    /*
+     * 第一问给「番茄炒蛋」；第二问**故意让它一直挂着**（不 resolve）。
+     *
+     * 为什么必须挂住：如果第二问马上返回，旧的那道会被新结果"顺带"换掉，于是
+     * "有没有清"这件事根本观察不到——我第一版就是这么写的，反证（去掉 setPicks(null)）
+     * **照样全绿**，等于没验。挂住之后，界面上要么还留着旧菜（没清），要么是空的（清了）。
+     */
+    let round = 0
+    const { post } = mockApi()
+    post.mockImplementation((url: string) => {
+      if (url === '/ai/prompts') return Promise.resolve({ data: { hints: [], examples: [] } } as never)
+      if (url === '/ai/suggest') {
+        round += 1
+        if (round === 1) {
+          return Promise.resolve({ data: { picks: [{ recipeId: 'r1', name: '番茄炒蛋', reason: '快手' }], hint: '', candidates: 30 } } as never)
+        }
+        return new Promise(() => {}) as never // 第二问挂着不返回
+      }
+      throw new Error(`未预期的请求：${url}`)
+    })
+
+    renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+    await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
+
+    clickFirstHint()
+    expect(await screen.findByText('番茄炒蛋')).toBeTruthy()
+
+    clickFirstHint()
+    // 请求还在路上：旧的那道就该已经不在界面上了（这才是"清掉"的实质）
+    await waitFor(() => expect(screen.queryByText('番茄炒蛋')).toBeNull())
+    expect(screen.getByText(/正在翻菜谱小书|在挑荤素搭配|快好了/)).toBeTruthy()
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('点过的那道置灰并说"已加入"，不能再点第二次（同一道菜不该加两遍）', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  vi.setSystemTime(new Date('2026-10-12T10:00:00+08:00'))
+  try {
+    // GET 必须一起桩上：少了 /family 与 /orders/options，`target.day` 是空的，
+    // 「点这道」会直接 return（我第一次就是这么写的，界面永远等不到"已加入"）
+    const { post } = mockApi()
+    post.mockImplementation((url: string) => {
+      if (url === '/ai/prompts') return Promise.resolve({ data: { hints: [], examples: [] } } as never)
+      if (url === '/ai/suggest') {
+        return Promise.resolve({
+          data: {
+            picks: [
+              { recipeId: 'r1', name: '番茄炒蛋', reason: '快手' },
+              { recipeId: 'r2', name: '红烧排骨', reason: '下饭' },
+            ],
+            hint: '', candidates: 30,
+          },
+        } as never)
+      }
+      if (url === '/orders/items') return Promise.resolve({ data: { date: '2026-10-12', mealLabel: '晚餐' } } as never)
+      throw new Error(`未预期的请求：${url}`)
+    })
+
+    renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+    await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
+    clickFirstHint()
+    await screen.findByText('番茄炒蛋')
+
+    const buttons = () => screen.getAllByRole('button', { name: '点这道' })
+    expect(buttons()).toHaveLength(2)
+
+    fireEvent.click(buttons()[0])
+    // 点过的变成"已加入"，另一道仍可点（用户要接着挑下一道）
+    expect(await screen.findByText('已加入')).toBeTruthy()
+    expect(buttons()).toHaveLength(1)
+    // 抽屉**不关**：一次问好几道，关掉就得重新问一遍
+    expect(document.querySelector('.sheet__body')).not.toBeNull()
+  } finally {
+    vi.useRealTimers()
+  }
+})

@@ -196,13 +196,49 @@ async function main() {
     )
     check(
       '推荐结果只引用候选清单里的 id（模型编造的一律丢掉）',
-      (suggest.body?.picks ?? []).length <= 5
+      (suggest.body?.picks ?? []).length <= 6
         && (suggest.body?.picks ?? []).every((pick) => pick.recipeId !== 'invented-by-model')
         && (suggest.body?.picks ?? []).length >= 1,
       // 至少要有 1 条留下：stub 会回"清单里的第一道 + 一条编造的"，
       // 如果两条都没了，说明候选清单根本没送到模型手上（而不是"编造的被丢掉了"）
       JSON.stringify(suggest.body?.picks ?? null),
     )
+
+    /*
+     * 用户 2026-10-13：「怎么都是鱼香肉丝和蘑菇，是固定的吗」。
+     *
+     * 根因有两个，都在服务端，所以这里能直接验：
+     * ① 没有关键词可搜时，候选池原来取的是 `order by id asc` 的头 24 道——**每次都一样**；
+     * ② 关键词按标点整段切，「剩饭怎么处理」切出来是一个六字短语，库里搜不到 → 永远落 ①。
+     *
+     * 判据用**关系**（两次问出不同的菜），不写死菜名——写死就把这条规则绑到某个数据快照上了。
+     * 两句问的是**完全不同**的诉求，正常情况下该给出不同的候选与推荐。
+     */
+    const firstAsk = await callWithRetry('POST', '/ai/suggest', { token: mama.token, body: { hint: '剩饭怎么处理' } })
+    const secondAsk = await callWithRetry('POST', '/ai/suggest', { token: mama.token, body: { hint: '想吃点辣的' } })
+    const idsOf = (response) => (response.body?.picks ?? []).map((pick) => pick.recipeId)
+    check(
+      '两句话问到的是两批候选（不是每次都从库里固定取同一小批）',
+      firstAsk.body?.candidates > 0
+        && secondAsk.body?.candidates > 0
+        && JSON.stringify(idsOf(firstAsk)) !== JSON.stringify(idsOf(secondAsk)),
+      `第一问=${JSON.stringify(idsOf(firstAsk))} 第二问=${JSON.stringify(idsOf(secondAsk))}`,
+    )
+    // 反复问同一句话也要见到不同的菜（这一条只在真网关上有意义：stub 的候选是照抄清单头一条的）
+    const repeats = []
+    for (let round = 0; round < 3; round += 1) {
+      const again = await callWithRetry('POST', '/ai/suggest', { token: mama.token, body: { hint: '随便来点家常菜' } })
+      repeats.push(...idsOf(again))
+    }
+    if (String(process.env.AI_API_BASE ?? '').includes('stub')) {
+      check('（stub 上游不做"每次不同"的判定：它按清单第一条回，与真实模型行为不同）', true, `跳过，${repeats.length} 条`)
+    } else {
+      check(
+        '同一句话反复问，推荐不该总是同一道（候选池每次随机抽 + 清单顺序也打乱）',
+        new Set(repeats).size > 1,
+        `三轮共 ${new Set(repeats).size} 种：${JSON.stringify([...new Set(repeats)])}`,
+      )
+    }
 
     const chat = await callWithRetry('POST', '/ai/chat', { token: mama.token, body: { messages: [{ role: 'user', content: '今晚想吃清淡的，给点主意' }] } })
     check(
