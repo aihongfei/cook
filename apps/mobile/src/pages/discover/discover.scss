@@ -2,6 +2,8 @@
 
 .weekplan__head {
   display: flex;
+  /* 三个胶囊在窄屏放不进标题那一行时**换行**，不要压着标题互相挤 */
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   justify-content: space-between;
@@ -13,17 +15,39 @@
   color: #6e3a1c;
 }
 
-/* 卡片右上角的两条出路（备菜计划 / 去点菜单）：并排、窄屏也不换行挤到标题上 */
+/* 卡片右上角的出路（常用组合 / 备菜计划 / 去点菜单）。
+ * 用户 2026-10-12 指着这一排说「这几个现在看不出来是可以点击的」——原文案是与正文
+ * 同色同字号的纯文字（ink-3、11.5px），只有一个小小的「→」，看起来像说明不像按钮。
+ * 现在给它们胶囊描边 + 品牌色（与 .btn-ghost / .dish-card__browse 同一套"可点"语汇），
+ * 按下缩一下（D-027：只有"一次性出现/消失"与按压反馈加动效，列表内容不动）。 */
 .weekplan__links {
   display: flex;
   flex: 0 0 auto;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px;
+  /* 换行后这一排仍然靠右：与标题同排时贴在卡片右上角 */
+  margin-left: auto;
 }
 
 .weekplan__more {
-  font-size: 11.5px;
-  color: var(--color-ink-3);
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #c4652a;
   text-decoration: none;
+  background: rgb(224 123 57 / 9%);
+  border: 1px solid #e2a06c;
+  border-radius: 999px;
+}
+
+.weekplan__more:active {
+  transform: scale(0.94);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .weekplan__more:active {
+    transform: none;
+  }
 }
 
 .weekplan__status-line {
