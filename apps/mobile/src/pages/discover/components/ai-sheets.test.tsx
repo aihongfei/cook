@@ -263,6 +263,24 @@ it('中途关掉抽屉不发"出错了"（用户自己走的，不是失败）',
   expect(document.querySelectorAll('.ai__turn--assistant')).toHaveLength(0)
 })
 
+// 等待态只该有**一格**气泡，就是"正在想…"那格。曾经还多画了一格预留位（空的 .ai__turn--assistant），
+// 它有内边距和圆角，看着就是个空圈——用户 2026-10-12 指着截图说「这块多了一个圆圈」，就是它。
+it('等第一段字时不留空气泡（空圈）', async () => {
+  mockStream({ replies: [], hang: true, statuses: ['正在翻菜谱…'] })
+  renderSheet(<AiChatSheet visible onClose={() => {}} />)
+
+  const input = await screen.findByPlaceholderText(/肉怎么去腥/)
+  fireEvent.change(input, { target: { value: '两个人吃多少米' } })
+  fireEvent.click(screen.getByText('问'))
+  expect(await screen.findByText('正在翻菜谱…')).toBeTruthy()
+
+  // 用户那句 + 一格 assistant（且是等待那格）——多出来的那格就是空圈
+  expect(document.querySelectorAll('.ai__turn--user')).toHaveLength(1)
+  const bubbles = document.querySelectorAll('.ai__turn--assistant')
+  expect(bubbles).toHaveLength(1)
+  expect(bubbles[0].classList.contains('ai__turn--waiting')).toBe(true)
+})
+
 it('问答边收边显示（流式），再问时把上文一起带上', async () => {
   const { sent } = mockStream({ replies: ['回答', '第1问'] })
   renderSheet(<AiChatSheet visible onClose={() => {}} />)

@@ -163,15 +163,21 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
 
           {turns.length > 0 && (
             <div className="ai__thread" ref={threadRef}>
-              {turns.map((turn, index) => (
-                <div className={`ai__turn ai__turn--${turn.role}`} key={`${turn.role}-${index}`}>
-                  {turn.content}
-                  {/* 光标只在"正在长的那一格"里闪：别的地方闪就成了干扰 */}
-                  {pending && turn.role === 'assistant' && index === turns.length - 1 && turn.content !== '' && (
-                    <span className="ai__caret" aria-hidden />
-                  )}
-                </div>
-              ))}
+              {turns.map((turn, index) => {
+                // 内容还是空的那格 assistant **不画**：它只是给流式正文预留的位置。
+                // 画出来就是个空圈（.ai__turn 有内边距 + 圆角），用户 2026-10-12 指着截图说
+                // 「这块多了一个圆圈」——正是它。等待态由下面那格"正在想…"负责，这里什么都不出。
+                if (turn.role === 'assistant' && turn.content === '') return null
+                return (
+                  <div className={`ai__turn ai__turn--${turn.role}`} key={`${turn.role}-${index}`}>
+                    {turn.content}
+                    {/* 光标只在"正在长的那一格"里闪：别的地方闪就成了干扰 */}
+                    {pending && turn.role === 'assistant' && index === turns.length - 1 && (
+                      <span className="ai__caret" aria-hidden />
+                    )}
+                  </div>
+                )
+              })}
               {pending && turns[turns.length - 1]?.content === '' && (
                 <div className="ai__turn ai__turn--assistant ai__turn--waiting">
                   <DotLoading color="currentColor" />
