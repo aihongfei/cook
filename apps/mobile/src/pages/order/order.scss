@@ -67,6 +67,53 @@
   color: #c7a97e;
 }
 
+/* 「点单历史」（F3-09）：与「自己写一道」同一档的整行入口。
+   边框用实线而不是虚线：虚线在这个界面里已经被"自己写一道"占住了（那是"共创"的意思），
+   历史是"回看"，两者不该长得一模一样。 */
+.order-history-link {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: calc(100% - var(--spacing-page) * 2);
+  margin: 10px var(--spacing-page) 0;
+  padding: 11px 13px;
+  font-family: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+}
+
+.order-history-link:active {
+  opacity: 0.7;
+}
+
+.order-history-link__icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+}
+
+.order-history-link__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: #6e3a1c;
+}
+
+.order-history-link__text small {
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.order-history-link__arrow {
+  flex: 0 0 auto;
+  color: #c7a97e;
+}
+
 /* 一道菜一行：菜名 + 备注 + 撤回入口 */
 .order-card__dish {
   display: flex;

@@ -51,6 +51,15 @@ export class OrdersController {
     return this.orders.plan(userId, days)
   }
 
+  @Get('history')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '点单历史：按日期区间往前翻（默认最近 31 天），每天的午/晚餐（F3-09）' })
+  @ApiQuery({ name: 'to', required: false, description: '这一页的结束日（含），默认今天' })
+  @ApiQuery({ name: 'pageSize', required: false, description: '一页多少天，默认 31，上限 62' })
+  async history(@CurrentUserId() userId: string, @Query('to') to?: string, @Query('pageSize') pageSize?: string) {
+    return this.orders.history(userId, { to, pageSize })
+  }
+
   @Post('items')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '点菜：点菜谱里的（recipeId）或自己写一道（dishName），二选一（F3-01/05、F3-10）' })

@@ -1,0 +1,143 @@
+/* 点单历史与美食日记（M3 / F3-09）。行结构照抄备菜计划那一套——
+   两份视图看的是同一份数据（MealProgressRow），样式不一致只会让人以为是两个东西。 */
+
+.history-page {
+  padding-bottom: 18px;
+}
+
+.history__tip {
+  padding: 14px;
+}
+
+.history__tip-text {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-ink-2);
+}
+
+.history__link {
+  font-size: 13px;
+  color: var(--color-brand);
+  text-decoration: none;
+}
+
+/* 共享关闭时吃货看到的是收窄后的空行——说清原因，别让人以为家里没张罗 */
+.history__scope {
+  padding: 9px 12px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #8a7259;
+  background: #fff8ef;
+  border: 1px solid #f0dcc4;
+  border-radius: 10px;
+}
+
+.history__summary {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+
+.history__day {
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.history__day-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px dashed var(--color-line);
+}
+
+.history__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: #fff;
+  background: var(--color-primary, #d98a4a);
+  border-radius: 8px;
+}
+
+.history__date {
+  font-size: 13.5px;
+  color: var(--color-ink);
+}
+
+.history__weekday {
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+.history__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+}
+
+.history__meal {
+  flex: 0 0 34px;
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+.history__main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.history__dishes {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-ink);
+}
+
+.history__dishes--link {
+  color: #4a3225;
+  text-decoration: none;
+}
+
+.history__dishes--link:active {
+  opacity: 0.7;
+}
+
+.history__dishes--empty {
+  color: var(--color-ink-3);
+}
+
+.history__meta {
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+.history__more-wrap {
+  margin-top: 14px;
+  text-align: center;
+}
+
+.history__more {
+  width: 100%;
+}
+
+/* 到头了要说清：这是"没记录了"，不是"按钮没加载出来" */
+.history__end {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+
+.history__status {
+  padding: 14px;
+}

@@ -6,6 +6,7 @@ import { PrismaService } from '../recipes/prisma.service'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
   aggregateItems, canAddItem, canRepeatFrom, confirmStampFor, dateKey, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
+  parseHistoryQuery, historyRange, hasEarlier, weekdayOf,
   parseItemTarget, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, planRepeat, revivedStatus,
   todayKey, todayMealState, visibleToMember,
   dayOptions, type AggregateItem, type DishRef, type ItemTarget, type MealProgressRow, type PlanDayRow,
@@ -473,6 +474,71 @@ export class OrdersService {
       meals: MEAL_SLOTS.map(value => ({ value, label: MEAL_LABEL[value] })),
       statuses: ORDER_STATUSES.map(value => ({ value, label: STATUS_LABEL[value] })),
       dayOptions: dayOptions(),
+    }
+  }
+
+  /**
+   * 点单历史（F3-09）：按**日期区间**给一页（默认最近 31 天），并告诉前端还能不能往前翻。
+   *
+   * 与 `list()` 的分工：那边是"现在要处理的单子"（最新的 60 张，含状态筛选与计数徽标），
+   * 这边是"回看过去"，所以
+   * - **不设条数上限**（只按天区间查）：R-19 记的就是"超过 60 张就看不见了"，
+   *   再给一个同样有上限的接口等于没解决；
+   * - **按天铺开**（`days` 里每一天都给一行，没记录的那天是空行）：日历视图要能看出
+   *   "这天家里没安排"，缺行和空行在界面上是两回事；
+   * - **可见性沿用同一套**（共享关闭 + 吃货 → 只看自己参与的餐次），与列表一致。
+   */
+  async history(
+    userId: string,
+    raw: { to?: unknown; pageSize?: unknown } = {},
+  ): Promise<{
+    scope: 'family' | 'mine'
+    from: string
+    to: string
+    pageSize: number
+    hasMore: boolean
+    days: { date: string; weekday: string; meals: MealProgressRow[] }[]
+  }> {
+    const { familyId, role } = await this.requireMember(userId)
+    const family = await this.requireFamily(familyId)
+    const query = parseHistoryQuery(raw)
+    const range = historyRange(query)
+    const scope = visibleToMember(family.shared, role)
+
+    const scoped: Prisma.MealOrderWhereInput =
+      scope === 'mine' ? { familyId, items: { some: { userId } } } : { familyId }
+
+    const rows = await this.prisma.mealOrder.findMany({
+      where: {
+        ...scoped,
+        mealDate: { gte: dateOnly(range.from), lte: dateOnly(range.to) },
+      },
+      include: MEAL_ORDER_INCLUDE,
+      orderBy: [{ mealDate: 'desc' }, { meal: 'desc' }],
+    })
+    const byKey = new Map(rows.map(row => [`${dateKey(row.mealDate)}-${row.meal}`, row]))
+
+    // 还能不能往前翻：库里还有比这一页更早的餐次才算有（见 hasEarlier 的说明）
+    const earliest = await this.prisma.mealOrder.findFirst({
+      where: scoped,
+      orderBy: { mealDate: 'asc' },
+      select: { mealDate: true },
+    })
+
+    return {
+      scope,
+      from: range.from,
+      to: range.to,
+      pageSize: query.pageSize,
+      hasMore: hasEarlier(earliest ? dateKey(earliest.mealDate) : null, range.from),
+      // 新的在前（与列表同一个读法：越近的越该先看到）
+      days: [...range.days].reverse().map(date => ({
+        date,
+        weekday: weekdayOf(date),
+        meals: MEAL_SLOTS.map(slot =>
+          this.mealProgress(byKey.get(`${date}-${slot}`), slot, date, userId, role, family.shared, '没有安排'),
+        ),
+      })),
     }
   }
 

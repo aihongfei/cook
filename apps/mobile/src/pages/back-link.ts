@@ -18,6 +18,7 @@ const EXTRA_ENTRIES: Record<string, string> = {
   '/recipes': '返回菜谱小书',
   // 备菜计划与常用组合都是独立子页（不在底部 Tab 里），从它们进了菜谱小书之后返回要能回到原处
   '/prep': '返回备菜计划',
+  '/order/history': '返回点单历史',
   '/combos': '返回常用组合',
 }
 

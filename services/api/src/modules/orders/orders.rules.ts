@@ -321,6 +321,95 @@ export function parsePlanDays(raw: unknown): number {
   return value
 }
 
+/*
+ * ---------- 点单历史与美食日记（F3-09） ----------
+ *
+ * 它要解决的是 `RISKS.md` R-19 记下的那件事：`GET /orders` 一次最多 60 张卡（约一个月），
+ * 更早的点单**数据还在库里、界面上看不到**。所以这一块的第一件事是**按日期范围翻页**，
+ * 而不是再加一个"历史"视图把同样的 60 张换个样子显示。
+ */
+
+/** 历史一页多少天：一个月的日历视图，正好铺满 6 行（最多 42 格） */
+export const HISTORY_PAGE_SIZE_DEFAULT = 31
+export const HISTORY_PAGE_SIZE_MAX = 62
+
+export interface HistoryQuery {
+  /** 结束日（含），默认"今天"；往前数 pageSize 天 */
+  to: string
+  pageSize: number
+}
+
+/**
+ * 历史的日期范围：以 `to`（默认今天）为终点往前数 `pageSize` 天。
+ *
+ * 口径是**按天给窗口**而不是"按条数翻页"：日历视图天然按天铺，
+ * 用 `page/pageSize`（条数）会出现"这一页某天只有半天的记录"这种对不上的情况。
+ * 一页 = 连续的 N 天，翻页 = 往前挪 N 天，两边都好讲。
+ */
+export function parseHistoryQuery(query: { to?: unknown; pageSize?: unknown } = {}, now: Date = new Date()): HistoryQuery {
+  const rawTo = query.to
+  let to: string
+  if (rawTo === undefined || rawTo === null || rawTo === '') {
+    to = todayKey(now)
+  } else {
+    if (typeof rawTo !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(rawTo)) {
+      throw new BadRequestException('日期格式不对（应为 YYYY-MM-DD）')
+    }
+    to = rawTo
+  }
+
+  const rawSize = query.pageSize
+  let pageSize = HISTORY_PAGE_SIZE_DEFAULT
+  if (rawSize !== undefined && rawSize !== null && rawSize !== '') {
+    const value = typeof rawSize === 'number' ? rawSize : Number(rawSize)
+    if (!Number.isInteger(value) || value < 1 || value > HISTORY_PAGE_SIZE_MAX) {
+      throw new BadRequestException(`一页天数要在 1～${HISTORY_PAGE_SIZE_MAX} 之间`)
+    }
+    pageSize = value
+  }
+
+  return { to, pageSize }
+}
+
+/**
+ * 一页历史覆盖的日期区间（含两端）：`[from, to]`，按**本地日历**往前数。
+ *
+ * 返回 `YYYY-MM-DD` 字符串而不是 Date：查库要用 `dateOnly()`（存的是 UTC 零点），
+ * 把本地午夜的 Date 直接拿去查会差一天（见 `dateOnly` 的说明）。
+ */
+export function historyRange(query: HistoryQuery, now: Date = new Date()): { from: string; to: string; days: string[] } {
+  const [year, month, day] = query.to.split('-').map(Number)
+  const days: string[] = []
+  for (let offset = query.pageSize - 1; offset >= 0; offset -= 1) {
+    // 用「年/月/日 - n」构造而不是减毫秒：跨夏令时的那一天减 24 小时会跑偏
+    days.push(todayKey(new Date(year, month - 1, day - offset)))
+  }
+  return { from: days[0], to: days[days.length - 1], days }
+}
+
+/**
+ * 这一页还能再往前翻吗：**库里还有比 `from` 更早的餐次**才算有。
+ *
+ * 判据用"还有没有更早的记录"，而不是"from 是不是早于某个下界"——
+ * 后者会让用户在翻到第一张卡之前先撞上好几页空白（家庭才开始用 App，
+ * 翻开一个月前当然什么都没有，那一页该直接说"到头了"）。
+ */
+export function hasEarlier(earliestKey: string | null, from: string): boolean {
+  if (!earliestKey) return false
+  return earliestKey < from
+}
+
+/**
+ * `2026-10-13` → `周二`。历史的日历视图每天要一个星期标（用户回看时是按"那天周几"回忆的）。
+ *
+ * 用**本地日历**构造 Date 取 getDay()：这里的 key 是"哪一天"这个标量，
+ * 若按 UTC 解析，东八区的周一 00:00 会显示成周日。
+ */
+export function weekdayOf(key: string): string {
+  const [year, month, day] = key.split('-').map(Number)
+  return WEEKDAY_LABEL[new Date(year, month - 1, day).getDay()]
+}
+
 export function parseSlot(raw: unknown): MealSlot {
   if (raw !== 'LUNCH' && raw !== 'DINNER') throw new BadRequestException('餐次只能是午餐或晚餐')
   return raw

@@ -15,6 +15,7 @@ import PrepPage from '@/pages/prep/PrepPage'
 import RecipeListPage from '@/pages/recipes/RecipeListPage'
 import RecipeDetailPage from '@/pages/recipes/RecipeDetailPage'
 import OrderPage from '@/pages/order/OrderPage'
+import HistoryPage from '@/pages/order/history/HistoryPage'
 import RequireAuth from './RequireAuth'
 
 /**
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
       { path: 'recipes', element: <RecipeListPage /> },
       { path: 'recipes/:id', element: <RecipeDetailPage /> },
       { path: 'order', element: <OrderPage /> },
+      { path: 'order/history', element: <HistoryPage /> },
       { path: 'prep', element: <PrepPage /> },
       { path: 'combos', element: <CombosPage /> },
       { path: 'discover', element: <DiscoverPage /> },

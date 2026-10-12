@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/stores/auth'
 import { apiClient } from './client'
 
@@ -131,6 +131,29 @@ export interface PlanBoard {
   days: PlanDay[]
 }
 
+/**
+ * 点单历史（F3-09）：按**日期区间**给一页，每天午晚两行（没安排的那餐也要占位）。
+ * 与 `PlanDay` 同一形状——"看得见的每一格都能点进去"，回看时也一样。
+ */
+export interface HistoryDay {
+  date: string
+  weekday: string
+  meals: MealProgressRow[]
+}
+
+export interface OrderHistory {
+  /** 共享关闭时吃货看到的是收窄后的空行，前端据此说明原因 */
+  scope: 'family' | 'mine'
+  /** 这一页覆盖的区间（含两端），页头用来说清"看的是哪一段" */
+  from: string
+  to: string
+  pageSize: number
+  /** 还能不能往前翻（库里有更早的餐次才算有） */
+  hasMore: boolean
+  /** 新的在前 */
+  days: HistoryDay[]
+}
+
 export interface OrderOptions {
   meals: { value: MealSlot; label: string }[]
   statuses: { value: OrderStatus; label: string }[]
@@ -168,6 +191,16 @@ export async function setDinerCount(mealKey: string, dinerCount: number | null):
     `/orders/meals/${encodeURIComponent(mealKey)}/diners`,
     { dinerCount },
   )
+  return data
+}
+
+export async function fetchHistory(input: { to?: string; pageSize?: number } = {}): Promise<OrderHistory> {
+  const { data } = await apiClient.get<OrderHistory>('/orders/history', {
+    params: {
+      ...(input.to ? { to: input.to } : {}),
+      ...(input.pageSize ? { pageSize: input.pageSize } : {}),
+    },
+  })
   return data
 }
 
@@ -305,6 +338,36 @@ export function useTodayBoard(options: { enabled?: boolean } = {}) {
     enabled: Boolean(token) && options.enabled !== false,
     staleTime: 15_000,
   })
+}
+
+/**
+ * 点单历史（F3-09）：无限往前翻。
+ *
+ * 翻页用**日期**当前进的游标（`pageParam` = 这一页的结束日），不用页码：
+ * 历史是"往前看"，页码会随着新的一天到来而整体错位（昨天看第 2 页和今天看第 2 页
+ * 是不同的日子），而"接着这一页的第一天再往前数"永远稳定。
+ * 取下一页时把上一页的 `from` 往前挪一天当新的 `to`，否则那一页会与上一页重叠一天。
+ */
+export function useOrderHistory(options: { enabled?: boolean } = {}) {
+  const token = useAuth((state) => state.token)
+  return useInfiniteQuery({
+    queryKey: ['orders', 'history'],
+    queryFn: ({ pageParam }) => fetchHistory({ to: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) =>
+      lastPage.hasMore ? shiftDay(lastPage.from, -1) : undefined,
+    enabled: Boolean(token) && options.enabled !== false,
+    staleTime: 60_000,
+    retry: 1,
+  })
+}
+
+/** `YYYY-MM-DD` 加 n 天（本地日历，跨月跨年都对） */
+export function shiftDay(key: string, n: number): string {
+  const [year, month, day] = key.split('-').map(Number)
+  const date = new Date(year, month - 1, day + n)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
 /** 本周菜单（发现页，F4-02）：与今日安排同一份数据的不同窗口 */

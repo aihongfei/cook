@@ -6,6 +6,12 @@ import {
   canRepeatFrom,
   dishKey,
   planRepeat,
+  parseHistoryQuery,
+  historyRange,
+  hasEarlier,
+  weekdayOf,
+  HISTORY_PAGE_SIZE_DEFAULT,
+  HISTORY_PAGE_SIZE_MAX,
   todayKey,
   ALLOWED_TRANSITIONS,
   MEAL_SLOTS,
@@ -479,4 +485,55 @@ test('目标那一餐是空的：整桌照抄，一个都不跳过', () => {
   ])
   assert.equal(plan.toAdd.length, 2)
   assert.equal(plan.skipped.length, 0)
+})
+
+// ---------- 点单历史与美食日记（F3-09 / D-035） ----------
+
+test('历史一页的日期区间：以 to 为终点往前数 pageSize 天（含两端）', () => {
+  const range = historyRange({ to: '2026-10-13', pageSize: 3 })
+  assert.deepEqual(range.days, ['2026-10-11', '2026-10-12', '2026-10-13'], '升序铺开，含两端')
+  assert.equal(range.from, '2026-10-11')
+  assert.equal(range.to, '2026-10-13')
+})
+
+test('历史翻页跨月/跨年也对（不是简单减天数）', () => {
+  const month = historyRange({ to: '2026-11-02', pageSize: 5 })
+  assert.deepEqual(month.days, ['2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02'])
+  const year = historyRange({ to: '2027-01-02', pageSize: 4 })
+  assert.deepEqual(year.days, ['2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02'])
+})
+
+test('历史查询：to 默认今天、pageSize 默认 31', () => {
+  const query = parseHistoryQuery({}, new Date(2026, 9, 13, 9, 0, 0))
+  assert.equal(query.to, '2026-10-13')
+  assert.equal(query.pageSize, HISTORY_PAGE_SIZE_DEFAULT)
+})
+
+test('历史查询：非法日期与越界的 pageSize 都要报 400', () => {
+  assert.throws(() => parseHistoryQuery({ to: '2026/10/13' }), BadRequestException)
+  assert.throws(() => parseHistoryQuery({ to: '20261013' }), BadRequestException)
+  assert.throws(() => parseHistoryQuery({ pageSize: '0' }), BadRequestException)
+  assert.throws(() => parseHistoryQuery({ pageSize: String(HISTORY_PAGE_SIZE_MAX + 1) }), BadRequestException)
+  assert.throws(() => parseHistoryQuery({ pageSize: '3.5' }), BadRequestException)
+  // 边界要放行
+  assert.equal(parseHistoryQuery({ pageSize: String(HISTORY_PAGE_SIZE_MAX) }).pageSize, HISTORY_PAGE_SIZE_MAX)
+  assert.equal(parseHistoryQuery({ pageSize: '1' }).pageSize, 1)
+})
+
+test('还能不能往前翻：只有库里确实还有更早的餐次才算有', () => {
+  // 库里最早是 8/01，这一页从 9/01 起 → 还有更早的
+  assert.equal(hasEarlier('2026-08-01', '2026-09-01'), true)
+  // 库里最早就是这一页的第一天 → 到头了
+  assert.equal(hasEarlier('2026-09-01', '2026-09-01'), false, '不早于这一页开头就是到头')
+  // 库里最早比这一页还晚（今天才开始用）→ 也是到头
+  assert.equal(hasEarlier('2026-09-20', '2026-09-01'), false)
+  // 一张卡都没有 → 到头（不是"永远还能翻"）
+  assert.equal(hasEarlier(null, '2026-09-01'), false, '空库不该让用户一直往前翻空白页')
+})
+
+test('星期标按本地日历算（不是 UTC）：东八区的周一不该显示成周日', () => {
+  // 2026-10-13 是周二
+  assert.equal(weekdayOf('2026-10-13'), '周二')
+  assert.equal(weekdayOf('2026-10-12'), '周一')
+  assert.equal(weekdayOf('2026-10-18'), '周日')
 })

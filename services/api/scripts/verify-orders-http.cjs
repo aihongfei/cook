@@ -921,6 +921,125 @@ async function main() {
     `dishCount=${doneTargetAfter.body?.cards?.find(card => card.mealKey === DONE_TARGET)?.dishCount}`,
   )
 
+  // ---------- 点单历史（F3-09 / D-035）：解决 R-19 的"60 张上限之外看不见" ----------
+  const histMama = await newUser('历史妈妈')
+  const histHome = await callWithRetry('POST', '/family', { token: histMama.token, body: { name: '历史验收家' } })
+  if (histHome.status !== 201) throw new Error(`建家失败：${histHome.status}`)
+  const histCode = histHome.body.inviteCode
+  const histSon = await newUser('历史小满')
+  const histJoined = await joinFamily(histSon.token, histCode)
+  if (histJoined.status !== 200) throw new Error(`历史小满加入失败：${histJoined.status} ${JSON.stringify(histJoined.body)}`)
+
+  const histRecipes = await callWithRetry('GET', '/recipes?pageSize=2')
+  const [histA, histB] = histRecipes.body?.items ?? []
+  if (!histA || !histB) throw new Error('菜谱库为空，无法验收历史')
+
+  /*
+   * 今天午晚各放一道（**两道都必须在窗口里**：接口不让人补点过去的日子，
+   * 而默认窗口的结束日就是今天——放"明天"的话它不在这一页，断言会拿到 undefined）。
+   * 由两个人分别点，顺带验"历史里也标得出有几个人点了"。
+   */
+  const histPutA = await callWithRetry('POST', '/orders/items', { token: histMama.token, body: { recipeId: histA.id, mealDate: TODAY, meal: 'DINNER' } })
+  const histPutB = await callWithRetry('POST', '/orders/items', { token: histSon.token, body: { recipeId: histB.id, mealDate: TODAY, meal: 'LUNCH' } })
+  if (histPutA.status !== 201 || histPutB.status !== 201) {
+    throw new Error(`历史验收前置点菜失败：${histPutA.status} / ${histPutB.status} ${JSON.stringify(histPutB.body)}`)
+  }
+
+  const histAnonymous = await callWithRetry('GET', '/orders/history')
+  check('未登录看历史 → 401', histAnonymous.status === 401, `${histAnonymous.status}`)
+
+  const hist = await callWithRetry('GET', '/orders/history', { token: histMama.token })
+  check(
+    '历史一页默认最近 31 天，且**按天铺开**（没有记录的那天也在，午晚两格都有）',
+    hist.status === 200
+      && hist.body?.days?.length === 31
+      && hist.body?.from === plusDaysKey(-30)
+      && hist.body?.to === TODAY
+      && hist.body?.days?.[0]?.date === TODAY
+      && hist.body.days.every(d => d.meals.length === 2),
+    `${hist.status} days=${hist.body?.days?.length} from=${hist.body?.from} to=${hist.body?.to} 首日=${hist.body?.days?.[0]?.date}`,
+  )
+  check(
+    '历史给出星期标（回看时是按"那天周几"回忆的），且与日期对得上',
+    hist.body?.days?.[0]?.weekday === weekdayOfKey(TODAY),
+    `实际=${hist.body?.days?.[0]?.weekday} 期望=${weekdayOfKey(TODAY)}`,
+  )
+
+  const histTodayDinner = (hist.body?.days ?? []).find(d => d.date === TODAY)?.meals?.find(m => m.meal === 'DINNER')
+  const histTodayLunch = (hist.body?.days ?? []).find(d => d.date === TODAY)?.meals?.find(m => m.meal === 'LUNCH')
+  check(
+    '历史里有内容的餐次带上菜名、状态与"几个人点了"（两个人点的事都看得出来）',
+    histTodayDinner?.dishCount === 1
+      && (histTodayDinner?.dishes ?? []).includes(histA.name)
+      && histTodayDinner?.status === 'PENDING'
+      && histTodayLunch?.dishCount === 1
+      && (histTodayLunch?.dishes ?? []).includes(histB.name)
+      && histTodayLunch?.ordererCount === 1,
+    `今天晚餐=${JSON.stringify(histTodayDinner)} 今天午餐=${JSON.stringify(histTodayLunch)}`,
+  )
+  check(
+    '这一页的窗口**到 to 为止**（明天的安排在"历史"里不该出现——那是本周菜单的事）',
+    !(hist.body?.days ?? []).some(d => d.date > (hist.body?.to ?? TODAY)),
+    `to=${hist.body?.to} 最大日=${(hist.body?.days ?? []).map(d => d.date).sort().pop()}`,
+  )
+  /*
+   * 空白格：拿**昨天**验（这个家的记录都在今天，昨天必然没有）。
+   * 用昨天而不是"今天某一餐"，是因为今天的午晚现在都放了菜——写今天会让断言依赖
+   * "哪一餐被占用"，加一条数据就红（这一版就是这么红的）。
+   */
+  const histYesterday = (hist.body?.days ?? []).find(d => d.date === plusDaysKey(-1))
+  check(
+    '历史里的空白格照样占位（每天都给午晚两行，没安排的那格 dishCount=0）',
+    histYesterday !== undefined
+      && histYesterday.meals.length === 2
+      && histYesterday.meals.every(m => m.dishCount === 0 && m.dishes.length === 0 && m.state === 'none'),
+    `昨天=${JSON.stringify(histYesterday)}`,
+  )
+
+  // 往前翻：这一页的结束日改成上一页的第一天
+  const histPrev = await callWithRetry('GET', `/orders/history?to=${plusDaysKey(-30)}&pageSize=5`, { token: histMama.token })
+  check(
+    '按日期区间往前翻：窗口跟着 to 走，且**不与上一页重叠**',
+    histPrev.status === 200
+      && histPrev.body?.to === plusDaysKey(-30)
+      && histPrev.body?.from === plusDaysKey(-34)
+      && histPrev.body?.days?.length === 5
+      && histPrev.body.days.every(d => d.date <= plusDaysKey(-30)),
+    `${histPrev.status} from=${histPrev.body?.from} to=${histPrev.body?.to} days=${histPrev.body?.days?.length}`,
+  )
+
+  /*
+   * hasMore 只能是 false：这个家今天才建，最早的点单就在窗口里（今天的晚餐 / 明天的午餐）。
+   * "库里还有更早的餐次"那条路径造不出来——接口不让人补点过去的日子（上面有"点昨天 → 400"），
+   * 那条由单测钉（见 orders.rules.test.ts 的 hasEarlier）。
+   * 这里要挡住的是**反向的错**：不能明明没有更早的记录还说"还能往前翻"，
+   * 那样用户会一直翻到空白页（家庭才用几天就点"再往前"，翻出来全是空的）。
+   */
+  const histSame = await callWithRetry('GET', '/orders/history', { token: histMama.token })
+  check(
+    '库里没有更早的餐次就说"到头了"（不让人一直翻空白页）',
+    histSame.status === 200
+      && histSame.body?.hasMore === false
+      && histPrev.body?.hasMore === false,
+    `最新一页 hasMore=${histSame.body?.hasMore} 往前一页 hasMore=${histPrev.body?.hasMore}`,
+  )
+
+  const histBadTo = await callWithRetry('GET', '/orders/history?to=2026/10/13', { token: histMama.token })
+  check('历史的日期格式不对 → 400', histBadTo.status === 400, `${histBadTo.status} ${histBadTo.body?.message ?? ''}`)
+
+  const histBadSize = await callWithRetry('GET', '/orders/history?pageSize=999', { token: histMama.token })
+  check('历史一页天数超上限 → 400', histBadSize.status === 400, `${histBadSize.status} ${histBadSize.body?.message ?? ''}`)
+
+  // 共享关闭：吃货只看得到自己参与的餐次（与列表同一套可见性）
+  await callWithRetry('PATCH', '/family', { token: histMama.token, body: { shared: false } })
+  const histSonClosed = await callWithRetry('GET', '/orders/history', { token: histSon.token })
+  check(
+    '共享关闭时吃货的历史也收窄（scope=mine，与列表同一套可见性）',
+    histSonClosed.status === 200 && histSonClosed.body?.scope === 'mine',
+    `scope=${histSonClosed.body?.scope}`,
+  )
+  await callWithRetry('PATCH', '/family', { token: histMama.token, body: { shared: true } })
+
   for (const item of results) {
     console.log(`${item.ok ? '✅' : '❌'} ${item.name}${item.detail ? `  — ${item.detail}` : ''}`)
   }
