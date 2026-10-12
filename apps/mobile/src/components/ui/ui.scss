@@ -159,12 +159,16 @@
  * 用 flex 的 gap 而不是外边距：相邻块的外边距会**合并**（取较大者），
  * 于是同一个说明在两处的间隙会随邻居不同而不一样（家庭页曾出现 12px 与 0px）。
  * gap 不受合并影响，说明与上下的间隙恒为同一个值。
+ *
+ * 间隙取 10px：说明是"贴在自己块下面"的附注，比块之间的 12px 略紧一点才像一组；
+ * 跟随其后的章节标题要**收掉自己的 20px 上内边距**，否则说明下方会空出一大截
+ * （用户指出过"tip 下方间隙太大"）。
  */
 .block-with-tip {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin: 0 var(--spacing-page) 12px;
+  gap: 10px;
+  margin: 0 var(--spacing-page) 10px;
 }
 
 /* 容器负责间距：里面的块与说明不再自带外边距，紧跟其后的元素也不再顶出上外边距 */
@@ -176,11 +180,14 @@
   margin-top: 0;
 }
 
+.block-with-tip + .section-title {
+  padding-top: 0;
+}
+
 /*
  * 二级页面的返回入口（家庭页、菜谱详情这类不在底部 Tab 里的页面）。
  * 文字链接而不是图标：手绘风里图标按钮容易和装饰元素混淆，文字更明确。
- */
-.page-back {
+ */.page-back {
   display: inline-block;
   padding: 8px 0;
   font-size: 13px;
@@ -220,4 +227,87 @@
   --adm-color-text: var(--color-ink);
   --adm-color-background: var(--color-paper);
   --adm-font-family: var(--font-sans);
+}
+
+/*
+ * 共用 toast（见 components/ui/toast.tsx）。
+ * 定位在底部 Tab 栏**上方**：不挡内容、离拇指近；认证页没有 Tab 栏时略高一点，也不影响阅读。
+ * 外观与页面同一套 token，像一张贴在屏幕上的小纸条。
+ */
+.toaster {
+  position: fixed;
+  right: 0;
+  bottom: calc(var(--spacing-tabbar) + 16px);
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding-inline: var(--spacing-page);
+  /* 容器不吃点击，避免挡住下面的按钮；只有纸条本身可点（点一下即散） */
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: 100%;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--color-ink);
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1.5px solid var(--color-line);
+  border-radius: 999px;
+  box-shadow: var(--shadow-card);
+  pointer-events: auto;
+  animation: toast-in 0.2s ease-out;
+}
+
+.toast__mark {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  color: var(--color-paper);
+  background: var(--color-brand);
+  border-radius: 50%;
+}
+
+.toast__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast--error {
+  color: var(--color-brick);
+  border-color: var(--color-focus-line);
+}
+
+.toast--error .toast__mark {
+  background: var(--color-brick);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 尊重"减少动态效果"：只淡入，不做位移 */
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
 }

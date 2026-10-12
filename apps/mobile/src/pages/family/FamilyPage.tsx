@@ -17,6 +17,7 @@ import {
 } from '@/api/family'
 import { useMe } from '@/api/auth'
 import Page from '@/components/ui/Page'
+import { toast } from '@/components/ui/toast'
 import SectionTitle from '@/components/ui/SectionTitle'
 import { useAuth } from '@/stores/auth'
 import '../shared.scss'
@@ -53,8 +54,6 @@ export default function FamilyPage() {
 
   const [name, setName] = useState('')
   const [inviteInput, setInviteInput] = useState('')
-  const [notice, setNotice] = useState('')
-  const [error, setError] = useState('')
   const [editingName, setEditingName] = useState(false)
   const [confirming, setConfirming] = useState(false)
 
@@ -79,22 +78,24 @@ export default function FamilyPage() {
     if (!data) return
     try {
       await navigator.clipboard.writeText(data.inviteCode)
-      setNotice('邀请码已复制，发给家里人就行')
+      toast.success('邀请码已复制，发给家里人就行')
     } catch {
-      setNotice(`邀请码：${data.inviteCode}（长按可复制）`)
+      // 浏览器不给剪贴板权限时直接把码显示出来，用户还能手抄
+      toast.success(`邀请码：${data.inviteCode}（长按可复制）`)
     }
   }
 
-  /** 统一收口：成功给一句话，失败把后端话术显示出来（不各自 try/catch） */
+  /**
+   * 统一收口：成功/失败都用 toast 提示（不各自 try/catch）。
+   * 不在页面里插提示段落——那会把下面的内容顶下去，页脚跟着跳一下。
+   */
   const submit = (
     mutate: (handlers: { onSuccess: () => void; onError: (error: unknown) => void }) => void,
     success: string,
   ) => {
-    setError('')
-    setNotice('')
     mutate({
-      onSuccess: () => setNotice(success),
-      onError: (err) => setError(apiErrorMessage(err)),
+      onSuccess: () => toast.success(success),
+      onError: (err) => toast.error(apiErrorMessage(err)),
     })
   }
 
@@ -122,17 +123,6 @@ export default function FamilyPage() {
             <br />
             一个人建，其他人凭邀请码加入。
           </p>
-
-          {error && (
-            <p className="family-error" role="alert">
-              {error}
-            </p>
-          )}
-          {notice && (
-            <p className="mine-notice" role="status">
-              {notice}
-            </p>
-          )}
 
           <div className="family-card">
             <div className="family-card__title">我来建一个家</div>
@@ -240,17 +230,6 @@ export default function FamilyPage() {
               保存
             </button>
           </div>
-        )}
-
-        {error && (
-          <p className="family-error" role="alert">
-            {error}
-          </p>
-        )}
-        {notice && (
-          <p className="mine-notice" role="status">
-            {notice}
-          </p>
         )}
 
         <div className="block-with-tip">
@@ -395,15 +374,12 @@ export default function FamilyPage() {
                 className="family-leave"
                 disabled={leaveFamily.isPending}
                 onClick={() => {
-                  const wasDisband = isOwner
                   setConfirming(false)
-                  setError('')
                   leaveFamily.mutate(undefined, {
                     onSuccess: (result) =>
-                      setNotice(result.disbanded ? '家庭已解散' : '已退出家庭'),
-                    onError: (err) => setError(apiErrorMessage(err)),
+                      toast.success(result.disbanded ? '家庭已解散' : '已退出家庭'),
+                    onError: (err) => toast.error(apiErrorMessage(err)),
                   })
-                  void wasDisband
                 }}
               >
                 {isOwner ? '确定解散' : '确定退出'}

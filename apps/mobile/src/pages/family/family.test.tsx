@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import { can, type Family } from '@/api/family'
+import { Toaster } from '@/components/ui/toast'
 import { useAuth } from '@/stores/auth'
 import FamilyPage from './FamilyPage'
 
@@ -19,6 +20,8 @@ function renderFamily(entry: string | { pathname: string; state?: unknown } = '/
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
+      {/* Toaster 在真实应用里挂在根部，测试里一并挂上，才能断言 toast 文案 */}
+      <Toaster />
       <MemoryRouter initialEntries={[entry as never]}>
         <Routes>
           <Route path="/family" element={<FamilyPage />} />
@@ -184,6 +187,8 @@ it('切换共享开关会调用接口并在成功后更新文案', async () => {
 
   fireEvent.click(await screen.findByRole('switch', { name: '家庭共享开关' }))
   await waitFor(() => expect(patch).toHaveBeenCalledWith('/family', { shared: false }))
+  // 结果用 toast 提示（不再在页面里插一段提示文字把内容顶下去）
+  expect(await screen.findByRole('status')).toBeTruthy()
   expect(await screen.findByText('已关闭家庭共享')).toBeTruthy()
   // 缓存被最新家庭替换后，开关状态跟着变
   await waitFor(() => expect(screen.getByRole('switch', { name: '家庭共享开关' }).getAttribute('aria-checked')).toBe('false'))

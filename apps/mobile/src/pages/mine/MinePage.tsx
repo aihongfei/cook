@@ -4,6 +4,7 @@ import { apiErrorMessage } from '@/api/client'
 import { logout, useAuthOptions, useMe, useUpdateProfile } from '@/api/auth'
 import { useFamily } from '@/api/family'
 import Page from '@/components/ui/Page'
+import { toast } from '@/components/ui/toast'
 import SectionTitle from '@/components/ui/SectionTitle'
 import { useAuth } from '@/stores/auth'
 import '../shared.scss'
@@ -34,7 +35,6 @@ export default function MinePage() {
   const [nickname, setNickname] = useState('')
   const [avatar, setAvatar] = useState('🐰')
   const [email, setEmail] = useState('')
-  const [notice, setNotice] = useState('')
   const [signingOut, setSigningOut] = useState(false)
 
   // 只在打开编辑时用当前值填充，避免保存失败后把用户正在输入的内容覆盖掉
@@ -54,16 +54,15 @@ export default function MinePage() {
       : '还没建家：创建或用邀请码加入'
 
   const save = () => {
-    setNotice('')
     updateProfile.mutate(
       // 邮箱留空 = 解绑（传 null），填了就走后端的格式与查重校验
       { nickname: nickname.trim(), avatar, email: email.trim() ? email.trim() : null },
       {
         onSuccess: () => {
           setEditing(false)
-          setNotice('资料已更新')
+          toast.success('资料已更新')
         },
-        onError: (error) => setNotice(apiErrorMessage(error)),
+        onError: (error) => toast.error(apiErrorMessage(error)),
       },
     )
   }
@@ -98,7 +97,11 @@ export default function MinePage() {
           <div className="mine-edit">
             <label className="mine-edit__field">
               <span>昵称</span>
-              <input value={nickname} maxLength={16} onChange={(event) => setNickname(event.target.value)} />
+              <input
+                value={nickname}
+                maxLength={16}
+                onChange={(event) => setNickname(event.target.value)}
+              />
             </label>
             <fieldset className="mine-edit__avatars">
               <legend>头像</legend>
@@ -107,7 +110,7 @@ export default function MinePage() {
                   <button
                     type="button"
                     key={item}
-                    className={`mine-edit__avatar${item === avatar ? ' is-active' : ''}`}
+                    className={`mine-edit__avatar${item === avatar ? 'is-active' : ''}`}
                     aria-pressed={item === avatar}
                     aria-label={`选择头像 ${item}`}
                     onClick={() => setAvatar(item)}
@@ -127,18 +130,29 @@ export default function MinePage() {
                 onChange={(event) => setEmail(event.target.value)}
               />
             </label>
-            <button type="button" className="mine-edit__save" disabled={updateProfile.isPending} onClick={save}>
+            <button
+              type="button"
+              className="mine-edit__save"
+              disabled={updateProfile.isPending}
+              onClick={save}
+            >
               {updateProfile.isPending ? '保存中…' : '保存'}
             </button>
           </div>
         )}
 
-        {notice && <p className="mine-notice" role="status">{notice}</p>}
-
         <SectionTitle title="我的设置" />
 
         <div className="rows" style={{ marginTop: 0 }}>
-          <div className="row" role="button" tabIndex={0} onClick={() => navigate('/family', { state: { from: '/mine' } })} onKeyDown={(event) => { if (event.key === 'Enter') navigate('/family', { state: { from: '/mine' } }) }}>
+          <div
+            className="row"
+            role="button"
+            tabIndex={0}
+            onClick={() => navigate('/family', { state: { from: '/mine' } })}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') navigate('/family', { state: { from: '/mine' } })
+            }}
+          >
             <div className="row__icon">👨‍👩‍👧</div>
             <div className="row__main">
               家庭共享与成员
@@ -173,7 +187,14 @@ export default function MinePage() {
           ))}
         </div>
 
-        <button type="button" className="mine-signout" disabled={signingOut} onClick={() => { void signOut() }}>
+        <button
+          type="button"
+          className="mine-signout"
+          disabled={signingOut}
+          onClick={() => {
+            void signOut()
+          }}
+        >
           {signingOut ? '正在退出…' : '退出登录'}
         </button>
       </div>

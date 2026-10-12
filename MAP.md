@@ -28,7 +28,8 @@ cook/
 │     │  ├─ api/             # client.ts（axios 实例 + token 注入 + 401 单飞续期 + 统一错误文案）、
 │     │  │                   # recipes.ts（菜谱接口与查询 hooks）、auth.ts（注册登录/找回密码）、
 │     │  │                   # family.ts（家庭接口与能力判定 can()）
-│     │  ├─ components/      # icons/（SVG 图标）、ui/（Page/SectionTitle/Chips/Pill/EmptyState/FilterTabs/BottomSheet/Toast/反馈/Skeleton）
+│     │  ├─ components/      # icons/（SVG 图标）、ui/（Page/SectionTitle/Chips/Pill/EmptyState/FilterTabs/BottomSheet/
+│     │  │                   # toast.tsx 手绘风轻提示 + Toaster、feedback.ts 确认框、Skeleton）
 │     │  ├─ config/          # tabs.ts（底部 5 Tab 定义）
 │     │  ├─ data/            # demo.ts（M0 占位数据；今日安排仍标注为示例）
 │     │  ├─ layouts/         # TabLayout（外壳 + 底部导航）
