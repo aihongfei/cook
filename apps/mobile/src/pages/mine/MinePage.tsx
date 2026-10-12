@@ -4,6 +4,7 @@ import { apiErrorMessage } from '@/api/client'
 import { logout, useAuthOptions, useMe, useUpdateProfile } from '@/api/auth'
 import { useCheckInStats } from '@/api/checkins'
 import { useFamily } from '@/api/family'
+import { useFavorites } from '@/api/favorites'
 import Heatmap from '@/components/ui/Heatmap'
 import PageHeader from '@/components/ui/PageHeader'
 import Page from '@/components/ui/Page'
@@ -34,6 +35,8 @@ export default function MinePage() {
   const family = useFamily()
   // 打卡统计（M9 / F9-03）：没加入家庭时不请求（后端会 404，打卡是家庭内的）
   const checkins = useCheckInStats({ enabled: Boolean(family.data) })
+  // 收藏数只用于入口那一行的副标题（F1-09）；没登录时后端 401，hook 自己不发请求
+  const favorites = useFavorites()
 
   // 先用本地缓存的账号信息渲染，接口回来后自动替换（避免进页面就闪一下"读取中"）
   const user = me.data ?? storedUser
@@ -148,6 +151,18 @@ export default function MinePage() {
             </button>
           </div>
         )}
+
+        {/* 我收藏的菜（M1 / F1-09）：放在「我的打卡」上面——收藏是随手的，
+            比"回看照片"更常翻；而且它不需要家庭（收藏是私人偏好） */}
+        <SectionTitle title="我的菜" />
+        <Link className="me-entry" to="/favorites" state={{ from: '/mine' }}>
+          <span className="me-entry__icon">❤️</span>
+          <span className="me-entry__text">
+            我收藏的菜
+            <small>{favorites.data ? `${favorites.data.total} 道` : '想做的时候来这儿找'}</small>
+          </span>
+          <span className="me-entry__arrow">›</span>
+        </Link>
 
         <SectionTitle title="我的打卡" />
 

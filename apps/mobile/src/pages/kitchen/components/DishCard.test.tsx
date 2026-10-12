@@ -33,7 +33,7 @@ function familyFixture(overrides: Partial<Family> = {}): Family {
   }
 }
 
-function mount(family: Family | null = familyFixture(), entry: unknown = '/recipes') {
+function mount(family: Family | null = familyFixture(), entry: string | { pathname: string; state: unknown } = '/recipes') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   clients.push(client)
   vi.spyOn(apiClient, 'get').mockImplementation(((url: string) => {
@@ -155,4 +155,61 @@ it('卡片本身仍是进详情的链接（加了按钮不该把原来的路挡�
 
   const link = await screen.findByRole('link', { name: /查看番茄炒蛋菜谱/ })
   expect(link.getAttribute('href')).toBe('/recipes/tomato')
+})
+
+/*
+ * 那颗心（M1 / F1-09）。卡片自己**不查状态**——状态由父级批量查一次给下来，
+ * 所以这里直接以 props 驱动，验"画不画、亮不亮、点了回调没有"。
+ */
+
+it('给了收藏回调才画心（没登录时父级不传，别让用户白点一次再收 401）', async () => {
+  mount()
+  // 上面那些用例没传 onToggleFavorite → 不该有心
+  expect(await screen.findByText('番茄炒蛋')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /收藏/ })).toBeNull()
+})
+
+it('已收藏是实心红心、未收藏是空心，且都在链接之外（点了不会进详情页）', async () => {
+  const onToggle = vi.fn()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  clients.push(client)
+  vi.spyOn(apiClient, 'get').mockImplementation(((url: string) => {
+    if (url === '/family') return Promise.resolve({ data: familyFixture() } as never)
+    if (url === '/orders/options') return Promise.resolve({ data: { meals: [], statuses: [], dayOptions: [] } } as never)
+    throw new Error(`未预期的请求：${url}`)
+  }) as never)
+  render(
+    <QueryClientProvider client={client}>
+      <Toaster />
+      <MemoryRouter>
+        <DishCard dish={dish} favorited onToggleFavorite={onToggle} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  const heart = await screen.findByRole('button', { name: '取消收藏番茄炒蛋' })
+  expect(heart.textContent).toBe('❤')
+  expect(heart.getAttribute('aria-pressed')).toBe('true')
+  // 心在 <a> 之外：放进去点击会冒泡到链接上，变成"想收藏却进了详情页"
+  expect(heart.closest('a')).toBeNull()
+
+  fireEvent.click(heart)
+  expect(onToggle).toHaveBeenCalledTimes(1)
+})
+
+it('未收藏时是空心 ♡（同一个按钮的两种状态）', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  vi.spyOn(apiClient, 'get').mockImplementation((() => Promise.resolve({ data: null } as never)) as never)
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <DishCard dish={dish} favorited={false} onToggleFavorite={() => {}} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  const heart = await screen.findByRole('button', { name: '收藏番茄炒蛋' })
+  expect(heart.textContent).toBe('♡')
+  expect(heart.getAttribute('aria-pressed')).toBe('false')
 })

@@ -43,6 +43,8 @@ model User {
   combos         Combo[]
   /// 这个账号定下来的餐（M4 / F4-05 的确认留痕）
   confirmedMeals MealOrder[]
+  /// 这个账号收藏的菜（M1 / F1-09）
+  favorites      Favorite[]
 
   @@index([createdAt])
 }
@@ -158,9 +160,30 @@ model Recipe {
   orderItems        OrderItem[]
   /// 被收进常用组合的引用（M4 / F4-04；菜谱删除时那一组里的这条也跟着删）
   comboItems        ComboItem[]
+  /// 被谁收藏了（M1 / F1-09；菜谱删除时收藏记录跟着删——菜都没了，收藏没有意义）
+  favorites         Favorite[]
 
   @@index([category, cuisine])
   @@index([origin])
+}
+
+/// 收藏（M1 / F1-09）：**按人存**，不按家庭。
+///
+/// 为什么是"人"而不是"家庭"：收藏是"我想做什么/我爱吃这个"这种个人偏好，
+/// 与点单（家庭协作）、组合（一家人的常用搭配）不是一回事——一家四口各收藏各的才合理。
+/// 家庭共享开关（F2-07）也就与它无关：它管的是"家人的点单与照片互相可见"。
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipeId  String
+  recipe    Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  /// 同一个人对同一道菜只能有一条：收藏是"是/不是"，不是计数（重复点只会变成取消再收藏）
+  @@unique([userId, recipeId])
+  /// 列表按人取、按时间倒序（最近收藏的在前）
+  @@index([userId, createdAt])
 }
 
 /// 一餐（F3-01/02/04）：**按「家庭 + 日期 + 餐次」聚合**，家人各自往里点菜，状态是整餐的（D-022）。

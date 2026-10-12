@@ -1367,3 +1367,56 @@ pnpm --dir services/api run test:http:orders     # 125/125（未动接口，回�
 三处均已恢复，恢复后前端 250/250。
 
 **注**：本项**未新增接口验收用例**——它走的是既有的 `POST /orders/items`（那一条路径已有 20+ 条接口断言，含权限、窗口、状态机）。新增的是**前端行为**（按钮出现条件、目标传递、置灰），所以证据落在单测与浏览器实测上；后端的回归是重跑 `test:http:orders`（125/125）。
+
+## R-030 收藏（F1-09）（D-037）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：后端新增 `modules/favorites/`（`favorites.rules.ts` 纯规则 + `favorites.service.ts` + `favorites.controller.ts` + `favorites.module.ts`）、Prisma `Favorite` 模型与迁移 `20261012174335_favorites`、`tests/favorites.rules.test.ts`（5 条）、`scripts/verify-favorites-http.cjs`（18 条，新增 `pnpm run test:http:favorites`）；前端新增 `api/favorites.ts`、`pages/recipes/favorites/FavoritesPage.tsx` + `.scss` + `.test.tsx`（6 条），改动 `pages/kitchen/components/DishCard.tsx`（心形按钮 + 7 条测试里的 3 条）、`KitchenPage.tsx` / `RecipeListPage.tsx`（批量取状态）、`MinePage.tsx`（入口）、`router/index.tsx`（`/favorites`）。
+
+### 怎么验
+
+```bash
+pnpm --dir services/api test                        # 143/143（收藏规则 +5）
+pnpm --dir apps/mobile test                         # 259/259（收藏页 +6、菜卡 +3）
+pnpm --dir apps/mobile exec tsc -b                  # ⚠️ 必须带 -b，见 RISKS R-25
+pnpm --dir services/api run test:http:favorites      # 18/18（新增）
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/api/favorites   # 401（未带 token）
+```
+
+> 改了后端后要 `docker compose up -d --build api` 才生效（本次改动前 `/favorites` 返回 404，重建后回到 401）。
+
+### 实测结果（2026-10-13）
+
+| 项 | 结果 |
+| --- | --- |
+| 接口（18/18） | 未登录看列表/点收藏都 401；新账号列表空且带 `limit=200`；点一下 `favorited=true` total=1、再点一下 `false` total=0；连点两下回到未收藏**且不留两条记录**；后收的排在前面；`favoritedAt` 可解析；批量状态只回收藏了的、换个人问是空对象（**按人隔离**）、入参不是数组时当没问不炸；收藏不存在的菜 404 且话术可读；空 id/数字 id 400；被拒的请求不改动已有收藏 |
+| 列表页心形（浏览器） | `/recipes` 第一张卡的心 `♡` `aria-pressed=false` → 点击 → `❤` `aria-pressed=true`（**写的是真实后端**） |
+| 收藏页（浏览器） | `/favorites` 显示「共 1 道（最多 200 道）」+ 那道菜带实心 `❤`；在收藏页点 `❤` → toast「已取消收藏「【桂圆银耳羹】」」→ 页面变空态「还没有收藏的菜」、`article` 数归 0 |
+| 双向同步（浏览器） | 取消后回 `/recipes`，那张卡的心**自己变回 `♡`**（状态来自服务端，不是各页各记一份） |
+| 入口（浏览器） | 我的页有「❤️ 我收藏的菜 0 道 ›」指向 `/favorites`（数字与刚取消的状态一致） |
+| 厨房页（浏览器） | 6 张推荐卡各带一颗心，**没有一颗在 `<Link>` 里**（`favInsideLink=false`），「点这道」按钮同时在 |
+| 测试 | 后端 143/143、前端 259/259（31 文件）、接口 18/18、`tsc -b` 沿用 R-25 记录的 7 条既有错误（本项未新增） |
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| `pnpm --dir services/api test tests/favorites.rules.test.ts` 报 `1..144` 且 fail 1 | 参数被**追加**到 `tsc -p tsconfig.test.json && node --test .test-build/tests/*.test.js` 之后，node 又去跑未编译的 `.ts` 源文件——多出的那 1 个是**文件级**报错，143 个真实用例其实全过 | 用 `pnpm --dir services/api test`（不带参数）跑全量；文件级失败要看 `failureType`，别当成断言失败去改代码 |
+| `playwright.click()` 点那颗心超时（连 `count()=1` 都确认过） | 与 F3-09 同一种**自动化桥接可操作性卡住**，不是应用缺陷：页内自检显示 `pointer-events:auto`、`elementFromPoint` 命中按钮自身、不在链接内、在视口内、`opacity:1` | 改用页内原生 `btn.click()`（走同一个 React 处理器），状态立即翻转——判断"能不能点"要用页内证据，别把桥接超时记成 bug |
+| 收藏页上想用 `button.dish-card__fav` 取消，`querySelector` 返回 null | 收藏页用的是 `.fav-card__fav`（另一套类名），`dish-card__fav` 只属于菜卡 | 先读组件真实标记再写选择器（与"别猜选择器"同一条）；两处按钮类名不同是有意的——两页卡片布局不同 |
+| `invalidateQueries({queryKey:['favorites']})` 会连累批量状态查询 | TanStack Query 的 key 是**前缀匹配**，`['favorites']` 命中 `['favorites','list']` 与 `['favorites','status',key]` 两者 | 把两类查询裂成 `['favorites','list']` 与 `['favorites','status',key]`，就地更新的状态不该被列表失效牵连（F1-10 之后的第二例，见 R-029） |
+| 用 `isSuccess \|\| isError` 判断"要不要画心" | 把**请求状态**与**能否收藏**混成一件事：已登录用户在心还没加载完时看到的是"不能收藏" | hook 显式返回 `signedIn`（`Boolean(token)`），两处父页面都改用它——"能不能"要有一份明确的判据，别拿传输状态凑 |
+
+### 回归测试
+
+**后端 `favorites.rules.test.ts`（新增 5 条）**：id 非空/去空格/长度上限；空与空白被拒；到上限拒绝新的；**已收藏过的那道永远放行**（满额时也能取消）；上限值本身在合理范围。
+
+**前端 `FavoritesPage.test.tsx`（新增 6 条）+ `DishCard.test.tsx`（+3 条）**：空态与文案；有收藏时列出并显示条数；点心调 `toggleFavorite` 并 toast；失败报错；未登录时不画心（`signedIn=false`）；**心在链接之外**（点了不会进详情页）；已收藏是实心、未收藏是空心且 `aria-pressed` 跟着走。
+
+**反证 2 组都验过会红**：
+
+1. `canFavorite` 去掉 `already` 判断（满额时连取消也拒）→ 后端 1 条红（"已收藏过的那道**永远放行**"），`not ok 79`；
+2. 把心从 `<Link>` 外移进 `<Link>` 里 → 前端 1 条红（"已收藏是实心红心、未收藏是空心，且都在链接之外"）。
+
+两处均已恢复，恢复后后端 143/143、前端 259/259。
+
+**注**：**收藏上限（200）没有 HTTP 用例**——构造它需要 200 道菜与 200 次请求，而占用限流窗口会拖累同一次运行里的其他断言。上限的判定落在 `canFavorite` 的纯单测（含上面那组反证）上，接口只验到"到上限时回 409"这条分支的**代码路径存在**；如实记为**未在 HTTP 层覆盖**。

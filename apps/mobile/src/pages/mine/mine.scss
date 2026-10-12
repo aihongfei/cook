@@ -110,3 +110,48 @@
   opacity: 0.6;
   cursor: default;
 }
+
+/* 「我收藏的菜」（M1 / F1-09）：整行入口，与点菜单的「点单历史」同一个形状——
+   两处都是"进一个子页"，长得一样才不会让人以为是两种东西。 */
+.me-entry {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 0 var(--spacing-page) 4px;
+  padding: 11px 13px;
+  font-family: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+}
+
+.me-entry:active {
+  opacity: 0.7;
+}
+
+.me-entry__icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+}
+
+.me-entry__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: #6e3a1c;
+}
+
+.me-entry__text small {
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.me-entry__arrow {
+  flex: 0 0 auto;
+  color: #c7a97e;
+}

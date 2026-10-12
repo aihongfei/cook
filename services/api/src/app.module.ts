@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module'
 import { CheckInsModule } from './modules/checkins/checkins.module'
 import { CombosModule } from './modules/combos/combos.module'
 import { FamilyModule } from './modules/family/family.module'
+import { FavoritesModule } from './modules/favorites/favorites.module'
 import { HealthModule } from './modules/health/health.module'
 import { OrdersModule } from './modules/orders/orders.module'
 import { RecipesModule } from './modules/recipes/recipes.module'
@@ -30,6 +31,7 @@ import { RecipesModule } from './modules/recipes/recipes.module'
     FamilyModule,
     OrdersModule,
     CombosModule,
+    FavoritesModule,
     CheckInsModule,
     RecipesModule,
   ],

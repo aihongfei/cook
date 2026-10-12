@@ -1,0 +1,117 @@
+/* 我收藏的菜（M1 / F1-09）。布局照菜谱小书的双列网格——
+   两份都是"翻菜"的界面，形状一致才不用重新认一遍。 */
+
+.favorites-page {
+  padding-bottom: 18px;
+}
+
+.favorites__status {
+  padding: 14px;
+}
+
+.favorites__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+
+.favorites__go {
+  width: auto;
+  padding: 9px 20px;
+  text-decoration: none;
+}
+
+.favorites__summary {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+
+.favorites__grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.fav-card {
+  position: relative; /* 取消收藏那颗心要压在图片右上角 */
+  overflow: hidden;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.fav-card__link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.fav-card__pic {
+  height: 96px;
+  background: var(--color-cream-2);
+}
+
+.fav-card__pic img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fav-card__body {
+  padding: 9px 10px 11px;
+}
+
+.fav-card__name {
+  font-size: 13.5px;
+  color: var(--color-ink);
+}
+
+.fav-card__meta {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.fav-card__calories {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+/* 取消收藏：实心红心（收藏页里的每张卡都是已收藏的，所以没有空心态）。
+   它是链接的**兄弟**（放进链接里点它会进详情页），靠 .fav-card 定位。 */
+.fav-card__fav {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: #d9534f;
+  cursor: pointer;
+  background: rgb(255 252 244 / 90%);
+  border: 0;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgb(120 80 45 / 18%);
+}
+
+.fav-card__fav:disabled {
+  opacity: 0.6;
+}
+
+.fav-card__fav:active {
+  opacity: 0.7;
+}

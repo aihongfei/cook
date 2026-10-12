@@ -20,6 +20,9 @@ import '../kitchen.scss'
  *   用户正在排"后天晚餐"，看到一道就点，当然该进后天晚餐，不能落到默认的下一餐；
  * - 没带目标就用**下一餐**（`nextMealDefaults`，与「想吃这道」「整组加入」共用同一条规则）。
  *
+ * **那颗心（F1-09）的状态由父级传下来**，卡片自己不去查：一屏十几张卡各查各的
+ * 就是十几个请求（还会撞限流），所以由父级用 `useFavoriteStatus(一屏的 id)` 一次问清。
+ *
  * 三件事刻意的：
  * - **按钮是 `<Link>` 的兄弟而不是子节点**：嵌套可点元素既是无效结构，点击也会冒泡到链接上，
  *   变成"想加菜却进了详情页"；
@@ -28,7 +31,17 @@ import '../kitchen.scss'
  * - **不能点菜时不画按钮**（没加入家庭 / 角色没有 `order.create`）：给个按钮让用户白点一次、
  *   再拿 403 告诉他不行，比不给他按钮更糟。
  */
-export default function DishCard({ dish }: { dish: RecipeSummary }) {
+export default function DishCard({
+  dish,
+  favorited = false,
+  onToggleFavorite,
+}: {
+  dish: RecipeSummary
+  /** 我收藏过这道没有（由**父级批量查**一次给下来，见下） */
+  favorited?: boolean
+  /** 点那颗心。**不给就不画心**（没登录时父级不传，别让用户白点一次再收 401） */
+  onToggleFavorite?: () => void
+}) {
   const location = useLocation()
   // 路由 state 是不可信输入，统一走 readPlanTarget 校验（见该文件）；这里只负责"原样传下去"
   const plan = readPlanTarget(location.state)
@@ -64,6 +77,23 @@ export default function DishCard({ dish }: { dish: RecipeSummary }) {
 
   return (
     <article className="dish-card">
+      {onToggleFavorite && (
+        /*
+         * 心放在图片上（与手绘稿一致），但**必须是 `<Link>` 的兄弟**：
+         * 放进 Link 里，点心的那次点击会冒泡到链接上——用户想收藏，结果进了详情页。
+         * 所以它靠 `.dish-card` 的定位压到图片右上角（见 kitchen.scss 的 .dish-card__fav）。
+         */
+        <button
+          type="button"
+          className={['dish-card__fav', favorited && 'is-on'].filter(Boolean).join(' ')}
+          aria-pressed={favorited}
+          aria-label={favorited ? `取消收藏${dish.name}` : `收藏${dish.name}`}
+          onClick={onToggleFavorite}
+        >
+          {favorited ? '❤' : '♡'}
+        </button>
+      )}
+
       <Link
         className="dish-card__link"
         to={`/recipes/${encodeURIComponent(dish.id)}`}

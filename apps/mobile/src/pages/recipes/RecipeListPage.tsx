@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { useFavoriteStatus, useToggleFavorite } from '@/api/favorites'
 import { recipeErrorMessage, useRecipeFilters as useFilterOptions, useRecipes } from '@/api/recipes'
 import FilterTabs from '@/components/ui/FilterTabs'
 import CornerArt from '@/components/ui/CornerArt'
@@ -22,6 +23,13 @@ export default function RecipeListPage() {
   const sentinel = useRef<HTMLDivElement>(null)
   const items = recipes.data?.pages.flatMap((page) => page.items) || []
   const total = recipes.data?.pages[0]?.total || 0
+
+  /*
+   * 收藏（F1-09）：**一屏一次问清**（不是每张卡各查各的——12 张卡就是 12 个请求）。
+   * 没登录时这个 hook 自己不发请求（后端会 401），也就不传 `onToggleFavorite`，卡片不画心。
+   */
+  const favoriteStatus = useFavoriteStatus(items.map((dish) => dish.id))
+  const toggleFavorite = useToggleFavorite()
 
   // URL 入口优先；只持久化品类与菜系，搜索词不会进入本地存储。
   useEffect(() => {
@@ -119,7 +127,16 @@ export default function RecipeListPage() {
         {recipes.isError && !recipes.data && <RecipeStatus title="菜谱加载失败" onRetry={() => { void recipes.refetch() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
         {recipes.isRefetchError && !recipes.isFetchNextPageError && recipes.data && <RecipeStatus title="菜谱更新失败，暂时保留上次结果" onRetry={() => { void recipes.refetch() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
         {recipes.isSuccess && items.length === 0 && <RecipeStatus title="还没有找到这道味道">试试别的菜名、食材，或清除筛选再看看。</RecipeStatus>}
-        <div className="recipes-grid">{items.map((dish) => <DishCard key={dish.id} dish={dish} />)}</div>
+        <div className="recipes-grid">
+          {items.map((dish) => (
+            <DishCard
+              key={dish.id}
+              dish={dish}
+              favorited={Boolean(favoriteStatus.data?.[dish.id])}
+              onToggleFavorite={favoriteStatus.signedIn ? () => toggleFavorite.mutate(dish.id) : undefined}
+            />
+          ))}
+        </div>
         <div ref={sentinel} className="recipes-sentinel" aria-hidden="true" />
         {recipes.isFetchNextPageError && <RecipeStatus title="后面的菜谱加载失败" onRetry={() => { void recipes.fetchNextPage() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
         {recipes.hasNextPage && <button className="recipe-button recipes-more" type="button" disabled={recipes.isFetching} onClick={() => { void recipes.fetchNextPage() }}>

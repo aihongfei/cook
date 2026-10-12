@@ -245,6 +245,7 @@
 }
 
 .dish-card {
+  position: relative; /* 收藏的心要压在图片右上角（F1-09），见 .dish-card__fav */
   flex: 0 0 150px;
   overflow: hidden;
   background: var(--color-paper);
@@ -266,17 +267,39 @@
   object-fit: cover;
 }
 
+/* 收藏的心（F1-09）：压在图片右上角。
+   它是 .dish-card__link 的**兄弟**（放进链接里点它会冒泡进详情页），
+   所以定位基准是 .dish-card（.dish-card__pic 在链接内部，够不着）——
+   因此 .dish-card 那条规则里补了 position: relative。 */
 .dish-card__fav {
   position: absolute;
   top: 8px;
   right: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 26px;
   height: 26px;
+  padding: 0;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: #b08a63;
   cursor: pointer;
   background: rgb(255 252 244 / 90%);
   border: 0;
   border-radius: 50%;
   box-shadow: 0 2px 6px rgb(120 80 45 / 18%);
+}
+
+/* 收藏了就是实心红心（♡ → ❤），一眼能看出状态 */
+.dish-card__fav.is-on {
+  color: #d9534f;
+}
+
+.dish-card__fav:active {
+  opacity: 0.7;
 }
 
 .dish-card__body {

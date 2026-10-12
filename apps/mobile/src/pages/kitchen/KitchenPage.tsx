@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { useFavoriteStatus, useToggleFavorite } from '@/api/favorites'
 import { fetchRecipes, recipeErrorMessage, recipeListUrl, useRecipeFilters } from '@/api/recipes'
 import BottomSheet from '@/components/ui/BottomSheet'
 import Page from '@/components/ui/Page'
@@ -28,6 +29,11 @@ export default function KitchenPage() {
     retry: 1,
   })
 
+  // 收藏（F1-09）：与菜谱小书同一套——**一屏一次问清**（这里只有 6 张，但口径一致，
+  // 免得以后推荐位变多时又要回来改）。没登录时 hook 不发请求、卡片不画心。
+  const favoriteStatus = useFavoriteStatus((recommendations.data?.items ?? []).slice(0, 6).map((dish) => dish.id))
+  const toggleFavorite = useToggleFavorite()
+
   return (
     <Page>
       <HeroBanner />
@@ -48,7 +54,14 @@ export default function KitchenPage() {
       {recommendations.isError && <div className="kitchen-api-status"><RecipeStatus title="推荐加载失败" onRetry={() => { void recommendations.refetch() }}>{recipeErrorMessage(recommendations.error)}</RecipeStatus></div>}
       {recommendations.data && recommendations.data.items.length === 0 && <div className="kitchen-api-status"><RecipeStatus title="菜谱库里还没有菜谱">有菜谱后，会在这里和你见面。</RecipeStatus></div>}
       <div className="dish-row">
-        {recommendations.data?.items.slice(0, 6).map((dish) => <DishCard key={dish.id} dish={dish} />)}
+        {recommendations.data?.items.slice(0, 6).map((dish) => (
+          <DishCard
+            key={dish.id}
+            dish={dish}
+            favorited={Boolean(favoriteStatus.data?.[dish.id])}
+            onToggleFavorite={favoriteStatus.signedIn ? () => toggleFavorite.mutate(dish.id) : undefined}
+          />
+        ))}
       </div>
       <SeasonalBanner />
 
