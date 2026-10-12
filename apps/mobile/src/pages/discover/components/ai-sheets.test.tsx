@@ -115,6 +115,14 @@ function mockStream({
   return { sent }
 }
 
+
+/** 点一个快问标签（名字是随机抽的，不能写死）：避开「换一批」——那是操作不是问题 */
+function clickFirstHint() {
+  const hints = document.querySelectorAll<HTMLButtonElement>('.ai__hint:not(.ai__hint--more)')
+  if (hints.length === 0) throw new Error('一个快问标签都没有')
+  fireEvent.click(hints[0])
+}
+
 beforeEach(() => {
   localStorage.clear()
   useAuth.getState().setSession({
@@ -155,7 +163,9 @@ it('推荐落地的菜点得动，而且带着日期与餐次（少一个后端�
     const { post } = mockApi()
     renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
 
-    fireEvent.click(await screen.findByText('清淡点'))
+    // 等快问标签出现再点（它们是从池子里随机抽的，所以按 class 找第一个，不写死某个词）
+    await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
+    clickFirstHint()
     expect(await screen.findByText('番茄炒蛋')).toBeTruthy()
     expect(screen.getByText('快手')).toBeTruthy()
 
@@ -168,11 +178,34 @@ it('推荐落地的菜点得动，而且带着日期与餐次（少一个后端�
   }
 })
 
+it('「换一批」真的换掉那一组（且不发任何请求：换示例是本地动作，不该花额度）', async () => {
+  const { post } = mockApi()
+  // 把随机数**钉死成两段**（前 5 次不洗牌、后 5 次每次换到末尾），这样"换没换"是确定的。
+  // 不钉死的话只能断言"长度一样"——那个断言在 onClick 被写成空函数时**照样通过**（反证验过）
+  let calls = 0
+  vi.spyOn(Math, 'random').mockImplementation(() => {
+    calls += 1
+    return calls <= 5 ? 0 : 0.999
+  })
+
+  renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+  await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
+  const before = [...document.querySelectorAll<HTMLButtonElement>('.ai__hint:not(.ai__hint--more)')].map((b) => b.textContent)
+
+  fireEvent.click(screen.getByText(/换一批/))
+  const after = [...document.querySelectorAll<HTMLButtonElement>('.ai__hint:not(.ai__hint--more)')].map((b) => b.textContent)
+
+  expect(after).toHaveLength(before.length)
+  expect(after).not.toEqual(before)
+  expect(post).not.toHaveBeenCalled()
+})
+
 it('推荐为空时说实话（不给"正在想"的假象），并指路去菜谱小书', async () => {
   mockApi({ picks: [], candidates: 0 })
   renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
 
-  fireEvent.click(await screen.findByText('快手菜'))
+  await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
+  clickFirstHint()
   expect(await screen.findByText(/这次没挑出来/)).toBeTruthy()
   expect(screen.getByText('菜谱小书')).toBeTruthy()
 })

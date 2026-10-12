@@ -8,6 +8,7 @@ import { useAiSuggest, useAiStatus, type SuggestedPick } from '@/api/ai'
 import { useAddOrderItem, useOrderOptions } from '@/api/orders'
 import { useFamily } from '@/api/family'
 import { nextMealDefaults } from '@/pages/order/next-meal'
+import { pickHints } from '../ai-prompts'
 import '../../shared.scss'
 
 /**
@@ -17,14 +18,12 @@ import '../../shared.scss'
  * 推荐里的菜名与 id 都由后端按库里数据回填（模型编造的 id 会被丢掉），
  * 所以这里可以放心把 pick 当"库里存在的菜"用。
  *
- * 两个刻意的设计：
+ * 三个刻意的设计：
  * - **未配置时明说去哪配**，不给假的推荐撑场面（假数据会让用户以为 AI 在工作）；
  * - **推荐结果给"点这道"**，而不是只让用户看一眼——看完再自己翻菜单找那道菜，
- *   等于白推荐（这是他为什么来用 AI，而不是去菜谱库翻）。
+ *   等于白推荐（这是他为什么来用 AI，而不是去菜谱库翻）；
+ * - **快问每次抽一批**（见 ai-prompts）：同一组示例看第三遍就成了墙纸，换着出才有引导作用。
  */
-
-/** 几个常见问法，省得用户对着空输入框不知道能说什么 */
-const HINTS = ['清淡点', '快手菜', '想吃肉', '有客人来', '冰箱里有剩的青菜']
 
 /** 等结果时的阶段提示（模型要 11～40 秒，明说在干什么比一个转圈更有耐心） */
 const SUGGEST_TIPS = ['正在翻菜谱小书…', '在挑荤素搭配…', '快好了，看看合不合口…']
@@ -43,6 +42,11 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
   const [hint, setHint] = useState('')
   const [picks, setPicks] = useState<SuggestedPick[] | null>(null)
   const [tip, setTip] = useState(0)
+  // 快问在打开时抽定（调用方用 key 重挂载，每次打开都是一批新的）。
+  // 用 `useState(函数)` 而不是 `useState(pickHints())`：后者每次渲染都白抽一轮随机数
+  // （值用不上，但白抽了）。**注意**两者在界面上的行为一样——反证验过，写成后者测试照样绿；
+  // 真正会让按钮自己跳的是"不进 state、渲染时现抽"，那种写法反证会红（见 ai-sheets.test）。
+  const [quickHints, setQuickHints] = useState(pickHints)
 
   // 等结果时轮播阶段提示。复位写在**发起请求的事件里**（见 ask）而不是这里：
   // 在 effect 里 setState 会多一轮渲染，也会被 react-hooks 的 set-state-in-effect 拦下
@@ -96,18 +100,30 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
         <>
           <p className="ai__lead">说说想吃什么，我从菜谱小书里挑几道能直接安排的。</p>
 
-          <div className="ai__hints">
-            {HINTS.map((item) => (
+          <div className="ai__hint-row">
+            <span className="ai__hint-label">常问</span>
+            <div className="ai__hints">
+              {quickHints.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className="ai__hint"
+                  disabled={suggest.isPending}
+                  onClick={() => ask(item)}
+                >
+                  {item}
+                </button>
+              ))}
+              {/* 「换一批」而不是把池子铺满：铺满会盖住输入框（这个入口不只是点标签，还要能自己说） */}
               <button
-                key={item}
                 type="button"
-                className="ai__hint"
+                className="ai__hint ai__hint--more"
                 disabled={suggest.isPending}
-                onClick={() => ask(item)}
+                onClick={() => setQuickHints(pickHints())}
               >
-                {item}
+                换一批 ↻
               </button>
-            ))}
+            </div>
           </div>
 
           <div className="ai__ask">
@@ -159,8 +175,13 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
 
           {picks && picks.length > 0 && (
             <div className="ai__picks">
-              {picks.map((pick) => (
+              {picks.map((pick, index) => (
                 <div className="ai__pick" key={pick.recipeId}>
+                  {/* 序号不是装饰：它是"AI 从候选里挑出来的顺序"，
+                      用户一眼能看出这是 AI 选的几条而不是菜单列表 */}
+                  <span className="ai__pick-index" aria-hidden>
+                    {index + 1}
+                  </span>
                   <div className="ai__pick-main">
                     <span className="ai__pick-name">{pick.name}</span>
                     {pick.reason && <span className="ai__pick-reason">{pick.reason}</span>}

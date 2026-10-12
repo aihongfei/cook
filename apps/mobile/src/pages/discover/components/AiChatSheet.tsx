@@ -4,6 +4,7 @@ import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
 import { StreamError, streamAiChat, useAiStatus, type ChatTurn } from '@/api/ai'
 import { toast } from '@/components/ui/toast'
+import { pickExamples } from '../ai-prompts'
 import '../../shared.scss'
 
 /**
@@ -15,15 +16,14 @@ import '../../shared.scss'
  *
  * 历史由前端带着（服务端不存对话）：一次会话内连续问，模型能看到上文；
  * 关掉抽屉就清空——家庭场景里问完就走，不必留一份聊天记录让人翻。
+ *
+ * 示例问题每次抽一批（见 ai-prompts）：同一组问题看第二遍就没人在读了。
  */
 
 interface AiChatSheetProps {
   visible: boolean
   onClose: () => void
 }
-
-/** 常见问法：让用户一眼看到这个入口能问什么（比一句"请输入问题"有用得多） */
-const EXAMPLES = ['豆腐买多了怎么存', '两个人吃多少米', '怎么做不辣的川菜']
 
 /** 等第一段文字时的提示轮播：比一个静止的"思考中"更能让人愿意再等几秒 */
 const WAITING_TIPS = ['在翻菜谱小书…', '正在想怎么做…', '快好了，先把锅烧上…']
@@ -34,6 +34,9 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
   const [tip, setTip] = useState(0)
+  // 用函数形式初始化：每次打开（调用方 key 重挂载）抽一批新的，且**不在渲染里现抽**
+  // （在渲染里抽的话每轮渲染都换一批，用户刚要点的那个会自己跑掉）
+  const [examples, setExamples] = useState(pickExamples)
   const abortRef = useRef<AbortController | null>(null)
   const threadRef = useRef<HTMLDivElement>(null)
 
@@ -107,12 +110,19 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
           {turns.length === 0 && (
             <>
               <p className="ai__lead">下厨上拿不准的都能问：食材怎么处理、多少量、替代做法。</p>
-              <div className="ai__hints">
-                {EXAMPLES.map((item) => (
-                  <button key={item} type="button" className="ai__hint" onClick={() => void send(item)}>
-                    {item}
+              <div className="ai__hint-row">
+                <span className="ai__hint-label">试试问</span>
+                <div className="ai__hints">
+                  {examples.map((item) => (
+                    <button key={item} type="button" className="ai__hint" onClick={() => void send(item)}>
+                      {item}
+                    </button>
+                  ))}
+                  {/* 「换一批」而不铺满整池：铺满会把输入框挤到屏幕外，而这个入口本来就要打字 */}
+                  <button type="button" className="ai__hint ai__hint--more" onClick={() => setExamples(pickExamples())}>
+                    换一批 ↻
                   </button>
-                ))}
+                </div>
               </div>
             </>
           )}

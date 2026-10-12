@@ -245,46 +245,118 @@
   color: var(--color-ink-3);
 }
 
-/* 发现页主卡 */
-.rank {
+/* 发现页主卡：今天吃什么（随机 + AI 合一，见 DiscoverPage 的注释） */
+.today {
   position: relative;
   overflow: hidden;
   margin: 14px var(--spacing-page) 0;
-  padding: 16px;
-  background: linear-gradient(100deg, #f6c9a8, #efb183);
+  padding: 14px 15px 12px;
+  background: linear-gradient(112deg, #f7cfa9, #eeb083);
   border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
 }
 
-.rank__en {
+/* 右上角淡光斑：给这块一点"有东西在里面"的感觉，而不是一张平卡 */
+.today::after {
+  position: absolute;
+  top: -52px;
+  right: -34px;
+  width: 128px;
+  height: 128px;
+  content: '';
+  background: radial-gradient(circle, rgb(255 251 242 / 34%), transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.today__head {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.today__en {
   font-size: 9px;
-  letter-spacing: 2.4px;
+  letter-spacing: 2.2px;
   color: #9a6238;
 }
 
-.rank__title {
-  margin-top: 7px;
-  font-size: 19px;
+.today__title {
+  font-size: 18px;
   color: #7a3b1e;
 }
 
-.rank__go {
-  margin-top: 13px;
-  padding: 9px 16px;
-  font-family: inherit;
-  font-size: 12.5px;
-  color: #c4652a;
-  cursor: pointer;
-  background: var(--color-paper);
-  border: 0;
-  border-radius: 999px;
+/* 两条出路并排：摇一道（立刻给结果）/ AI 帮你想（要等十几秒） */
+.today__actions {
+  display: flex;
+  gap: 9px;
+  margin-top: 11px;
 }
 
-.rank__deco {
-  position: absolute;
-  right: 14px;
-  bottom: 12px;
-  font-size: 44px;
-  opacity: 0.9;
+.today__shake,
+.today__ai {
+  display: flex;
+  flex: 1;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+  border: 0;
+  border-radius: 14px;
+  transition: transform 0.12s ease;
+
+  &:active {
+    transform: scale(0.97);
+  }
+
+  &:disabled {
+    opacity: 0.65;
+  }
+}
+
+/* 「摇一道」是纸色实底：它是**立刻给结果**的那条路，最常被点 */
+.today__shake {
+  color: #a8542a;
+  background: var(--color-paper);
+  box-shadow: 0 3px 8px rgb(150 100 60 / 12%);
+}
+
+/* 「AI 帮你想」用半透明底：同一条路上的另一种解法，别抢走视觉重心 */
+.today__ai {
+  color: #7a3b1e;
+  background: rgb(255 251 242 / 52%);
+  border: 1px solid rgb(255 251 242 / 70%);
+}
+
+.today__shake-emoji,
+.today__ai-emoji {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.today__shake-text,
+.today__ai-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 问 AI 是另一种问题（"豆腐怎么存"），给小字入口而不是第三个大按钮 */
+.today__ask {
+  display: block;
+  width: 100%;
+  margin-top: 9px;
+  padding: 4px 0 0;
+  font: inherit;
+  font-size: 11px;
+  color: #8a5a34;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-top: 1px dashed rgb(160 110 70 / 26%);
 }
 
 /* 用户卡 */
