@@ -32,9 +32,11 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swaggerConfig))
 
   const port = Number(config.get('PORT') ?? 3000)
-  await app.listen(port, '127.0.0.1')
+  // 容器里必须监听 0.0.0.0，否则同网络内的 nginx/其它服务连不上；本机开发保持只绑回环。
+  const host = config.get<string>('HOST') ?? '127.0.0.1'
+  await app.listen(port, host)
   // eslint-disable-next-line no-console
-  console.log(`[api] ready → http://127.0.0.1:${port}/api  (docs: /api/docs)`)
+  console.log(`[api] ready → http://${host}:${port}/api  (docs: /api/docs)`)
 }
 
 void bootstrap()

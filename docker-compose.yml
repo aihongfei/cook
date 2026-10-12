@@ -1,0 +1,101 @@
+# 御膳 · 家庭小厨房 —— 后端、数据库与图片存储编排（本地开发与服务器部署同一份文件）
+#
+# 范围说明：**只容器化后端、MySQL 与 MinIO**。前端不进 Docker ——
+# 开发期在本机跑 Vite（pnpm --dir apps/mobile run dev），发布时由 Capacitor 打包成 APK（M14），
+# 网页(WebView)与 APK 用的是同一份前端产物，无需为它单独部署容器。
+#
+# 为什么自建 MinIO：菜谱图片从第三方 API 导入时是对方图床的直链（官方文档写明链接会过期），
+# 所以导入后要把图片**备份进自己的对象存储**，此后前端只读自己的图，第三方接口不再参与运行时。
+#
+# ⚠️ MinIO 用**自建镜像**（`services/minio/Dockerfile`，`docker compose build minio`）。
+# 原因（2026-10-12 实测）：MinIO 官方 Docker 镜像已下架（`docker pull minio/minio` 报 repository does not exist，
+# 同期 `alpine` 可正常拉取，排除网络问题；`quay.io/minio/minio` 返回 401），官方直发地址 dl.min.io
+# 对二进制返回 **410 Gone**。自建镜像改从官方中国镜像站 dl.minio.org.cn 取官方二进制，
+# 并做版本固定 + sha256 校验。见 RISKS.md R-14。
+#
+# 用法：
+#   cp .env.example .env       # 按需改密码/端口
+#   docker compose up -d --build
+#   后端 http://127.0.0.1:3000/api   MySQL 127.0.0.1:3306   图片 http://127.0.0.1:9000
+#   前端另开终端：pnpm --dir apps/mobile run dev  → http://127.0.0.1:5173
+#
+# 部署到服务器时：把 .env 里 MYSQL_PASSWORD / MYSQL_ROOT_PASSWORD / MINIO_ROOT_PASSWORD 换成强密码；
+# 数据落在命名卷 mysql-data 与 minio-data 上，不随容器删除丢失。
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 里设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-cook}
+      MYSQL_USER: ${MYSQL_USER:-cook}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 里设置 MYSQL_PASSWORD}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    ports:
+      # 暴露到宿主机，方便本机用 prisma studio / migrate dev 连库调试
+      - "${MYSQL_PORT:-3306}:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  minio:
+    # 自建镜像：用 MinIO 官方发布的二进制（含 sha256 校验），不依赖任何第三方打包镜像。
+    # 背景见 services/minio/Dockerfile 顶部注释（官方 Docker 镜像已下架、dl.min.io 停发二进制）。
+    build:
+      context: ./services/minio
+      args:
+        # 海外服务器可改为 https://dl.min.io（该站已对 server 二进制返回 410，需自行确认）
+        MINIO_DOWNLOAD_BASE: ${MINIO_DOWNLOAD_BASE:-https://dl.minio.org.cn/server/minio/release}
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?请在 .env 里设置 MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?请在 .env 里设置 MINIO_ROOT_PASSWORD}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      # 数据卷根目录即 MinIO 的数据目录（桶直接落在卷根下），故挂到 /data
+      - minio-data:/data
+    ports:
+      # 9000 = S3 API（图片经此访问）；9001 = 网页控制台
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    # 桶（cook-media）与公开只读权限由 `pnpm run mirror:images` 幂等创建，镜像里不预置。
+    # healthcheck 见 Dockerfile（用镜像自带的 minio 二进制，容器内无需 curl/wget）
+
+  api:
+    build:
+      context: ./services/api
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
+    restart: unless-stopped
+    environment:
+      # 容器内用服务名 mysql 连库（与宿主机开发用的 127.0.0.1 不同，故此处显式覆盖）
+      DATABASE_URL: mysql://${MYSQL_USER:-cook}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-cook}
+      PORT: 3000
+      # 容器内必须监听 0.0.0.0，否则宿主机的浏览器/前端连不上
+      HOST: 0.0.0.0
+      # 前端在宿主机跑 Vite(5173)，因此必须放行该来源；移动端 APK 走 WebView，Origin 为 capacitor:// 需一并放行
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://127.0.0.1:5173,http://localhost:5173}
+      # 接口返回图片时拼的对外前缀。必须是**浏览器能访问到的地址**——
+      # 本机开发写宿主机回环；部署到服务器时改成域名或公网 IP（写错了图片就打不开）。
+      MEDIA_BASE_URL: ${MEDIA_BASE_URL:-http://127.0.0.1:9000/cook-media}
+      TZ: ${TZ:-Asia/Shanghai}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-3000}:3000"
+
+volumes:
+  mysql-data:
+  minio-data:
+
