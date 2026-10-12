@@ -6,6 +6,7 @@ import { OrdersService } from './orders.service'
 interface AddItemBody { recipeId?: string; dishName?: string; mealDate?: string; meal?: string; note?: string }
 interface StatusBody { status?: string }
 interface DinersBody { dinerCount?: number | null }
+interface RepeatBody { mealDate?: string; meal?: string }
 
 @ApiTags('orders')
 @Controller('orders')
@@ -78,5 +79,17 @@ export class OrdersController {
   @ApiOperation({ summary: '整餐状态流转（按目标状态校验能力）（F3-02）' })
   async updateStatus(@CurrentUserId() userId: string, @Param('mealKey') mealKey: string, @Body() body: StatusBody) {
     return this.orders.updateStatus(userId, mealKey, body?.status)
+  }
+
+  @Post('meals/:mealKey/repeat')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '再点一次：把这一餐整桌照抄到另一天某一餐，已有的菜跳过（F3-06）' })
+  async repeat(@CurrentUserId() userId: string, @Param('mealKey') mealKey: string, @Body() body: RepeatBody) {
+    // 与「整组加入」同一个校验点：缺参数在这里挡掉，服务层不用再猜"没给是默认还是忘了"
+    if (!body || body.mealDate === undefined || body.meal === undefined) {
+      throw new BadRequestException('要说清照到哪一天哪一餐')
+    }
+    return this.orders.repeat(userId, mealKey, body)
   }
 }

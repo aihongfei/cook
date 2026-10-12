@@ -759,6 +759,168 @@ async function main() {
     `scope=${planSonSharedOn.body?.scope} ${JSON.stringify(sonDinnerSharedOn)}`,
   )
 
+  // ---------- 再点一次（F3-06 / D-034） ----------
+  /*
+   * 用一个**独立家庭**验，免得与上面那些卡互相干扰（上面的卡状态被推来推去，
+   * "哪一餐能当来源"会跟着变，断言就脆了）。
+   *
+   * 来源用「已做好」的那一餐（终态）——另一条来源路径是"日子已经过去"，
+   * 但**接口不让人补点过去的日子**（上面就有"点昨天 → 400"），
+   * 所以那条只能由单测钉（见 orders.rules.test.ts 的 canRepeatFrom）。
+   */
+  const repeatMama = await newUser('复盘妈妈')
+  const repeatHome = await callWithRetry('POST', '/family', { token: repeatMama.token, body: { name: '再点一次验收家' } })
+  if (repeatHome.status !== 201) throw new Error(`建家失败：${repeatHome.status} ${JSON.stringify(repeatHome.body)}`)
+  const repeatCode = repeatHome.body.inviteCode
+  const repeatSon = await newUser('复盘小满')
+  const repeatJoined = await joinFamily(repeatSon.token, repeatCode)
+  if (repeatJoined.status !== 200) throw new Error(`加入失败：${repeatJoined.status}`)
+
+  const recipes3 = await callWithRetry('GET', '/recipes?pageSize=3')
+  const [repA, repB, repC] = recipes3.body?.items ?? []
+  if (!repA || !repB || !repC) throw new Error('菜谱库不足 3 道，无法验收"再点一次"')
+
+  // 来源那一餐：明天晚餐 —— 妈妈点 A（带备注）、小满点 B 两份，然后推到「已做好」
+  const SOURCE_KEY = `${TOMORROW}-DINNER`
+  await callWithRetry('POST', '/orders/items', { token: repeatMama.token, body: { recipeId: repA.id, mealDate: TOMORROW, meal: 'DINNER', note: '少放盐' } })
+  await callWithRetry('POST', '/orders/items', { token: repeatSon.token, body: { recipeId: repB.id, mealDate: TOMORROW, meal: 'DINNER' } })
+  const sourceCard = await callWithRetry('POST', '/orders/items', { token: repeatSon.token, body: { recipeId: repB.id, mealDate: TOMORROW, meal: 'DINNER' } })
+
+  check(
+    '还在收集中的那一餐不给「再点一次」入口（要加菜直接点那道菜）',
+    sourceCard.status === 201 && sourceCard.body?.canRepeat === false,
+    `status=${sourceCard.body?.status} canRepeat=${sourceCard.body?.canRepeat}`,
+  )
+
+  const fromOpen = await callWithRetry('POST', `/orders/meals/${SOURCE_KEY}/repeat`, {
+    token: repeatMama.token,
+    body: { mealDate: DAY_AFTER, meal: 'LUNCH' },
+  })
+  check(
+    '拿还在收集中的那一餐当来源 → 409（前端不给入口，接口也挡住）',
+    fromOpen.status === 409,
+    `${fromOpen.status} ${fromOpen.body?.message ?? ''}`,
+  )
+
+  await callWithRetry('POST', `/orders/meals/${SOURCE_KEY}/status`, { token: repeatMama.token, body: { status: 'PLANNED' } })
+  await callWithRetry('POST', `/orders/meals/${SOURCE_KEY}/status`, { token: repeatMama.token, body: { status: 'COOKING' } })
+  const sourceDone = await callWithRetry('POST', `/orders/meals/${SOURCE_KEY}/status`, { token: repeatMama.token, body: { status: 'DONE' } })
+  check(
+    '做好了的那一餐可以当「再点一次」来源（终态：要重做就照它点）',
+    sourceDone.status === 200 && sourceDone.body?.canRepeat === true,
+    `status=${sourceDone.body?.status} canRepeat=${sourceDone.body?.canRepeat}`,
+  )
+
+  // 照到"后天午餐"：一开是空的 → 整桌照抄（重复的那道只收一份）
+  const TARGET_LUNCH = `${DAY_AFTER}-LUNCH`
+  const repeated = await callWithRetry('POST', `/orders/meals/${SOURCE_KEY}/repeat`, {
+    token: repeatMama.token,
+    body: { mealDate: DAY_AFTER, meal: 'LUNCH' },
+  })
+  check(
+    '整桌照抄到后天午餐：加了 2 道（来源里点两份的那道只收一份），落在那张卡上',
+    repeated.status === 200
+      && (repeated.body?.added ?? []).length === 2
+      && repeated.body?.card?.mealKey === TARGET_LUNCH
+      && repeated.body?.card?.dishCount === 2,
+    `${repeated.status} added=${JSON.stringify(repeated.body?.added)} card=${repeated.body?.card?.mealKey} dishCount=${repeated.body?.card?.dishCount}`,
+  )
+  check(
+    '照抄过来的菜**不带备注**（备注是那个人对那一餐的交代，照抄会变成他没说过的话）',
+    (repeated.body?.card?.dishes ?? []).every(line => line.notes.length === 0),
+    JSON.stringify((repeated.body?.card?.dishes ?? []).map(line => ({ name: line.name, notes: line.notes }))),
+  )
+  check(
+    '来源里点两份的那道，照抄后是 1 份（份数是那一餐的投票结果，不是菜谱用量）',
+    (repeated.body?.card?.dishes ?? []).every(line => line.count === 1),
+    JSON.stringify((repeated.body?.card?.dishes ?? []).map(line => `${line.name}x${line.count}`)),
+  )
+  check(
+    '照抄出来的菜是**我点的**（不是把原来点菜的人一起搬过来：这一餐还没人表态）',
+    repeated.body?.card?.mineCount === 2 && repeated.body?.card?.ordererCount === 1,
+    `mineCount=${repeated.body?.card?.mineCount} ordererCount=${repeated.body?.card?.ordererCount} orderers=${JSON.stringify(repeated.body?.card?.orderers)}`,
+  )
+
+  // 再点一次同一餐：全都已经有了 → 幂等，且如实说"都有了"，不新增条目
+  const repeatAgain = await callWithRetry('POST', `/orders/meals/${SOURCE_KEY}/repeat`, {
+    token: repeatSon.token,
+    body: { mealDate: DAY_AFTER, meal: 'LUNCH' },
+  })
+  check(
+    '同一桌再点一次：全都跳过、不新增（幂等），并给出一句"都有了"',
+    repeatAgain.status === 200
+      && (repeatAgain.body?.added ?? []).length === 0
+      && (repeatAgain.body?.skipped ?? []).length === 2
+      && repeatAgain.body?.card?.dishCount === 2
+      && typeof repeatAgain.body?.message === 'string',
+    `${repeatAgain.status} added=${(repeatAgain.body?.added ?? []).length} skipped=${(repeatAgain.body?.skipped ?? []).length} dishCount=${repeatAgain.body?.card?.dishCount} msg=${repeatAgain.body?.message}`,
+  )
+
+  // 目标那一餐已经有其中一道 → 只补缺的那一道，已有的如实报"本来就有"
+  const partialTarget = await callWithRetry('POST', '/orders/items', {
+    token: repeatMama.token,
+    body: { recipeId: repA.id, mealDate: DAY_AFTER, meal: 'DINNER' },
+  })
+  check('为验"部分已有"，先在后天晚餐放一道', partialTarget.status === 201, `${partialTarget.status}`)
+  const partial = await callWithRetry('POST', `/orders/meals/${SOURCE_KEY}/repeat`, {
+    token: repeatMama.token,
+    body: { mealDate: DAY_AFTER, meal: 'DINNER' },
+  })
+  check(
+    '目标那一餐已有其中一道：只补缺的那道，已有的报进 skipped（不凑成两份）',
+    partial.status === 200
+      && (partial.body?.added ?? []).length === 1
+      && (partial.body?.skipped ?? []).length === 1
+      && partial.body?.card?.dishCount === 2,
+    `${partial.status} added=${JSON.stringify(partial.body?.added)} skipped=${JSON.stringify(partial.body?.skipped)} dishCount=${partial.body?.card?.dishCount}`,
+  )
+
+  const fromMissing = await callWithRetry('POST', `/orders/meals/2026-01-01-DINNER/repeat`, {
+    token: repeatMama.token,
+    body: { mealDate: DAY_AFTER, meal: 'LUNCH' },
+  })
+  check('来源那一餐不存在 → 404', fromMissing.status === 404, `${fromMissing.status} ${fromMissing.body?.message ?? ''}`)
+
+  const repeatNoBody = await callWithRetry('POST', `/orders/meals/${SOURCE_KEY}/repeat`, { token: repeatMama.token, body: {} })
+  check('没说照到哪一餐 → 400（不猜默认值）', repeatNoBody.status === 400, `${repeatNoBody.status} ${repeatNoBody.body?.message ?? ''}`)
+
+  const repeatFar = await callWithRetry('POST', `/orders/meals/${SOURCE_KEY}/repeat`, {
+    token: repeatMama.token,
+    body: { mealDate: '2027-01-01', meal: 'LUNCH' },
+  })
+  check('照到窗口之外的日子 → 400（与手点同一套日期校验）', repeatFar.status === 400, `${repeatFar.status} ${repeatFar.body?.message ?? ''}`)
+
+  const repeatBadKey = await callWithRetry('POST', `/orders/meals/not-a-meal-key/repeat`, {
+    token: repeatMama.token,
+    body: { mealDate: DAY_AFTER, meal: 'LUNCH' },
+  })
+  check('来源标识不是一餐 → 400', repeatBadKey.status === 400, `${repeatBadKey.status}`)
+
+  const repeatAnon = await callWithRetry('POST', `/orders/meals/${SOURCE_KEY}/repeat`, { body: { mealDate: DAY_AFTER, meal: 'LUNCH' } })
+  check('未登录照抄 → 401', repeatAnon.status === 401, `${repeatAnon.status}`)
+
+  // 目标那一餐已经定局（已做好）→ 409：整桌要么都进、要么都不进
+  await callWithRetry('POST', '/orders/items', { token: repeatMama.token, body: { recipeId: repC.id, mealDate: plusDaysKey(3), meal: 'DINNER' } })
+  const DONE_TARGET = `${plusDaysKey(3)}-DINNER`
+  await callWithRetry('POST', `/orders/meals/${DONE_TARGET}/status`, { token: repeatMama.token, body: { status: 'PLANNED' } })
+  await callWithRetry('POST', `/orders/meals/${DONE_TARGET}/status`, { token: repeatMama.token, body: { status: 'COOKING' } })
+  await callWithRetry('POST', `/orders/meals/${DONE_TARGET}/status`, { token: repeatMama.token, body: { status: 'DONE' } })
+  const intoDone = await callWithRetry('POST', `/orders/meals/${SOURCE_KEY}/repeat`, {
+    token: repeatMama.token,
+    body: { mealDate: plusDaysKey(3), meal: 'DINNER' },
+  })
+  check(
+    '照到已经做好的一餐 → 409（那餐是终态，加不进去）',
+    intoDone.status === 409,
+    `${intoDone.status} ${intoDone.body?.message ?? ''}`,
+  )
+  const doneTargetAfter = await callWithRetry('GET', '/orders', { token: repeatMama.token })
+  check(
+    '加不进去时**一道都不该进去**（整桌要么都进、要么都不进）',
+    doneTargetAfter.body?.cards?.find(card => card.mealKey === DONE_TARGET)?.dishCount === 1,
+    `dishCount=${doneTargetAfter.body?.cards?.find(card => card.mealKey === DONE_TARGET)?.dishCount}`,
+  )
+
   for (const item of results) {
     console.log(`${item.ok ? '✅' : '❌'} ${item.name}${item.detail ? `  — ${item.detail}` : ''}`)
   }

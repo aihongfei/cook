@@ -866,7 +866,7 @@ pnpm --dir apps/mobile test                   # 194/194（其中对话点菜 5 �
 ```bash
 # 单测（含 5 条动效契约，其中 2 条做过反证）
 pnpm --dir apps/mobile test                    # 199/199
-pnpm --dir apps/mobile exec tsc --noEmit       # exit=0
+pnpm --dir apps/mobile exec tsc -b          # ⚠️ 订正（2026-10-13）：前端 tsc 必须加 -b（tsconfig 是 references 型，不带 -b 什么都不编译、恒 exit=0），详见 RISKS.md R-25
 pnpm --dir apps/mobile run lint                # 6 条警告（与改动前一致，无新增）
 
 # 浏览器里量位移：点开抽屉后每 ~30ms 读一次 .adm-popup-body 的 inline transform
@@ -917,7 +917,7 @@ pnpm --dir apps/mobile run lint                # 6 条警告（与改动前一�
 # 单测（不需要 MySQL 与真模型）
 pnpm --dir services/api test                    # 104/104
 pnpm --dir apps/mobile test                     # 206/206
-pnpm --dir apps/mobile exec tsc --noEmit        # exit=0
+pnpm --dir apps/mobile exec tsc -b          # ⚠️ 订正（2026-10-13）：前端 tsc 必须加 -b（tsconfig 是 references 型，不带 -b 什么都不编译、恒 exit=0），详见 RISKS.md R-25
 
 # 接口（真请求，需要 docker compose 的 api）
 docker compose up -d --build api
@@ -981,7 +981,7 @@ pnpm --dir services/api run test:http:combos    # 28/28
 
 # 类型与 Lint
 pnpm --dir services/api exec tsc --noEmit       # exit=0
-pnpm --dir apps/mobile exec tsc --noEmit        # exit=0
+pnpm --dir apps/mobile exec tsc -b          # ⚠️ 订正（2026-10-13）：前端 tsc 必须加 -b（tsconfig 是 references 型，不带 -b 什么都不编译、恒 exit=0），详见 RISKS.md R-25
 pnpm --dir apps/mobile run lint                 # 6 条警告（与改动前一致）
 ```
 
@@ -1036,7 +1036,7 @@ pnpm --dir apps/mobile test                     # 219/219（汇总视图与留�
 
 # 类型与 Lint
 pnpm --dir services/api exec tsc --noEmit       # exit=0
-pnpm --dir apps/mobile exec tsc --noEmit        # exit=0
+pnpm --dir apps/mobile exec tsc -b          # ⚠️ 订正（2026-10-13）：前端 tsc 必须加 -b（tsconfig 是 references 型，不带 -b 什么都不编译、恒 exit=0），详见 RISKS.md R-25
 pnpm --dir apps/mobile run lint                 # 6 条警告（与改动前一致）
 
 # 接口（真请求，需要 docker compose 的 api）
@@ -1096,7 +1096,7 @@ pnpm --dir services/api run test:http:checkins  # 44/44（回归）
 pnpm --dir services/api test                    # 120/120（提示词规则 +7）
 pnpm --dir apps/mobile test                     # 227/227（提示词兜底/替换 +8）
 pnpm --dir services/api exec tsc --noEmit       # exit=0
-pnpm --dir apps/mobile exec tsc --noEmit        # exit=0
+pnpm --dir apps/mobile exec tsc -b          # ⚠️ 订正（2026-10-13）：前端 tsc 必须加 -b（tsconfig 是 references 型，不带 -b 什么都不编译、恒 exit=0），详见 RISKS.md R-25
 pnpm --dir apps/mobile run lint                 # 6 条警告（与改动前一致）
 
 # 接口：stub（不花额度）
@@ -1156,7 +1156,7 @@ docker compose up -d --build api               # 回到根 .env 的配置
 pnpm --dir services/api test                    # 126/126（关键词/抽样 +6）
 pnpm --dir apps/mobile test                     # 229/229（清空/置灰 +2）
 pnpm --dir services/api exec tsc --noEmit       # exit=0
-pnpm --dir apps/mobile exec tsc --noEmit        # exit=0
+pnpm --dir apps/mobile exec tsc -b          # ⚠️ 订正（2026-10-13）：前端 tsc 必须加 -b（tsconfig 是 references 型，不带 -b 什么都不编译、恒 exit=0），详见 RISKS.md R-25
 pnpm --dir apps/mobile run lint                 # 6 条警告（与改动前一致）
 
 # 接口：stub（不花额度）
@@ -1179,7 +1179,7 @@ pnpm --dir services/api run test:http:ai        # 25/25
 | 重问先清旧结果 | 浏览器实测：点「想几道」后 250ms 内旧那一批 `pickNames: []`（0 行）、骨架屏 6 行、等待语「快好了，看看合不合口…」；**5s 后**新一批 5 道上屏，与上一批**零重叠**，内容贴着新提示（「孩子不吃辣，想清淡点」→ 清蒸虾 / 金针菇烧豆腐 / 三素汤羹 / 菠菜鸡蛋水饺） |
 | 点过的那道置灰 | 点第一道的「点这道」→ 该行变 `is-done`、显示「已加入」、计算样式 `opacity: 0.55`（其余行 `opacity: 1`），「点这道」按钮从 5 个减到 4 个，**抽屉不关** |
 | 骨架形状 | 6 行（= `SUGGEST_PICKS_MAX`），不是原来的 2 行——结果回来时页面高度不跳 |
-| 单测 | 后端 126/126、前端 229/229、两处 `tsc --noEmit` exit=0、lint 6 条（不变） |
+| 单测 | 后端 126/126、前端 229/229、后端 `tsc --noEmit` exit=0、lint 6 条（不变）；**前端的 tsc 当时记错了**——`--noEmit` 对 references 型 tsconfig 是空操作，真实检查 `tsc -b` 有 7 条既有错（与本次无关），见 RISKS R-25 |
 | 接口 | stub 25/25、真网关 25/25（各含新增的 2 条关系型断言） |
 
 ### 踩过的坑
@@ -1205,3 +1205,60 @@ pnpm --dir services/api run test:http:ai        # 25/25
 3. 前端 `ask()` 拿掉 `setPicks(null)` → 前端 1 条红「再问一次时先把上一次的推荐清掉」（228/229）。
 
 三处均已恢复，恢复后后端 126/126、前端 229/229、工作树只留本轮改动。
+
+## R-027 再点一次（F3-06）：照过去的一餐整桌再来（D-034）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：后端 `orders.rules.ts` 新增 `dishKey` / `canRepeatFrom` / `planRepeat`（`aggregateItems` 的合并键改为复用 `dishKey`），`orders.service.ts` 新增 `repeat()` + `repeatDishOf()`，卡片视图新增 `canRepeat`；控制器新增 `POST /orders/meals/:mealKey/repeat`；前端 `api/orders.ts` 新增 `repeatMeal` / `useRepeatMeal` 与 `canRepeat` 字段，新增 `pages/order/components/RepeatMealSheet.tsx`，`OrderPage` 加卡片入口，`order.scss` 加样式；验收脚本 `verify-orders-http.cjs` 新增 14 条。
+
+### 怎么验
+
+```bash
+# 单测
+pnpm --dir services/api test                    # 132/132（再点一次规则 +6）
+pnpm --dir apps/mobile test                     # 234/234（入口与抽屉 +5）
+pnpm --dir services/api exec tsc --noEmit       # exit=0（后端这条是真检查）
+pnpm --dir apps/mobile exec tsc -b              # ⚠️ 必须带 -b！见下方"坑"第 3 条与 RISKS R-25
+pnpm --dir apps/mobile run lint                 # 6 条警告（与改动前一致）
+
+# 接口（服务已在跑即可，不需要 AI 上游）
+docker compose up -d --build api
+pnpm --dir services/api run test:http:orders    # 114/114（新增 14 条）
+```
+
+### 实测结果（2026-10-13）
+
+| 项 | 结果 |
+| --- | --- |
+| 入口出现的位置 | 浏览器实测 5 张卡：`已取消` 的 10-18 午餐、**日子已过去的 10-12 晚餐**（状态还挂在待确认）**有**「🔁 再点一次」；`已安排` 的 10-16、`待确认` 的 10-14/10-13（今天/明天）**没有** |
+| 接口：来源判定 | 待确认 → `canRepeat=false`，拿它当来源 → **409**「这一餐还在「待确认」，等它定局（做好或取消）之后再照它点」；推到 DONE 后 → `canRepeat=true` |
+| 接口：整桌照抄 | 来源（晚餐，A 带备注 + B 点两份）→ 照到后天午餐：`added` 2 道、`dishCount=2`；**B 是 1 份不是 2 份**；**备注全空**；`mineCount=2`（照抄的是我点的）+ `ordererCount=1` |
+| 接口：幂等 | 同一来源再照一次同一餐：`added=0`、`skipped=2`、`dishCount` 仍是 2、`message="这一餐里这桌菜都有了"` |
+| 接口：部分已有 | 目标已有一道 → `added=1`、`skipped=1`、`dishCount=2`（不凑成两份） |
+| 接口：边界 | 来源不存在 → 404；不传目标餐 → 400「要说清照到哪一天哪一餐」；目标超 7 天窗口 → 400（与手点同一套话术）；来源标识非法 → 400；未登录 → 401；目标已做好 → 409 且**一道都没进去**（`dishCount` 仍是 1） |
+| 浏览器（390×844） | 10-12 晚餐卡点「再点一次」→ 抽屉显示「2026-10-12 · 晚餐 共 1 道」+ 菜名「【桂圆银耳羹】」+「备注不跟着走」说明 + 日期（今天/明天/后天/周五…）/餐次选择 → 点「照这桌点进今天晚餐」→ toast「照 2026-10-12 晚餐点了 1 道进今天晚餐」→ **今天晚餐从 3 道变 4 道**，多出的正是那道菜；再照一次 → toast「这一餐里这桌菜都有了」，**仍是 4 道**（幂等） |
+| 单测/接口 | 后端 132/132、前端 234/234、接口 114/114、后端 `tsc --noEmit` exit=0、lint 6 条（不变） |
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| **验收脚本一开始想用"昨天"当来源，写不下去** | 接口**不让人补点过去的日子**（已有用例「点昨天 → 400」），所以**没法用 API 造出一张"日期在过去"的卡** | 来源改用「已做好」（终态）那条路径；"日子已经过去"那条由**单测**钉（`canRepeatFrom` 的纯函数）。**同一个口径的两条路径，能验到哪条就用哪条，另一条明确标注由哪一层覆盖** |
+| 首跑前端两条用例报 `post` 一次都没调 | ① 抽屉里的提交键在 `/orders/options` 回来前是 disabled 的，我点早了；② 我断言了"默认下一餐 = 明天晚餐"，而那是**按当前钟点算**的（15 点前是今晚） | ① 先 `findByRole` 等按钮可用；② **显式点「明天」「晚餐」再提交**——断言依赖钟点的默认值，下午必然变红。默认值那条规则由 `next-meal` 自己保证，不在这里重复验 |
+| `planRepeat` 一条用例红了：重复项被算进 `skipped` | 我的实现用**一个** `have` 集合同时管"目标已有"和"这次已收"，于是来源里的重复项（两个人各点一份）被报成"那一餐本来就有" | 拆成 `inTarget`（要报给用户的）+ `taken`（这次算过的）：重复项**静默收一份**，不谎报"本来就有"。**不是测试写错了，是逻辑错了**——用户会照着 toast 以为那道菜本来就在那一餐 |
+| **反证时我用 `git checkout <file>` 还原，把整份未提交的改动清掉了** | 那个文件（`orders.rules.ts`）的改动**还没提交**，`git checkout` 是从 HEAD 恢复，不是"撤销刚才的反证" | 用备份副本还原（`cp` 到 `/tmp` 再拷回）；`git checkout` 只对**已提交内容**安全。已把重写的那部分重新补上并确认 132/132 |
+
+### 回归测试
+
+**后端 `tests/orders.rules.test.ts`（新增 6 条）**：`canRepeatFrom` 认终态与"日子过去了"两条路径；今天/明天还在收集中的不给；`planRepeat` 已有的跳过 + 来源重复只收一份；跳过判定认 id 优先（改名不算新菜、同名不同 id 算新菜）；`dishKey` 有 id 时菜名不参与；目标为空则整桌照抄。
+
+**后端 `scripts/verify-orders-http.cjs`（新增 14 条）**：入口开关（待确认不给 / 已做好给）；拿未定局的当来源 409；整桌照抄的道数与落卡；不带备注；点两份的只收一份；照抄的是"我点的"；幂等（`added=0` + `skipped` + `message`）；部分已有只补缺的；来源不存在 404；缺目标参数 400；目标超窗口 400；来源标识非法 400；未登录 401；目标已做好 409 且一道没进。
+
+**前端 `order.test.tsx`（新增 5 条）**：入口按后端 `canRepeat` 出/不出；抽屉先念"要照的那一桌"（含 ×2 与"备注不跟着走"）；确认后按选中的那一餐发对请求 + 两条 toast（加了 N 道 / 跳过哪道）；整桌都有时只念后端给的那句、不编"加了 0 道"。
+
+**反证 3 组都验过会红**：
+
+1. 前端改成自己复刻状态判定（`card.status === 'DONE'`）而不是用后端下发的 `canRepeat` → 前端 1 条红（`已取消` 的那张卡入口消失）；
+2. `planRepeat` 退回单集合写法（来源重复项被报成"本来就有"）→ 后端 1 条红（132→131）；
+3. `canRepeatFrom` 去掉"日子已经过去"那条分支 → 后端 1 条红（132→131）。
+
+三处均已恢复，恢复后后端 132/132、前端 234/234。

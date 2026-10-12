@@ -5,6 +5,7 @@ import { useFamily } from '@/api/family'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import ConfirmMenuSheet from './components/ConfirmMenuSheet'
 import DinerCountSheet from './components/DinerCountSheet'
+import RepeatMealSheet from './components/RepeatMealSheet'
 import SaveComboSheet from './components/SaveComboSheet'
 import FreeDishSheet from './components/FreeDishSheet'
 import {
@@ -96,6 +97,8 @@ export default function OrderPage() {
   const [freeDishSeq, setFreeDishSeq] = useState(0)
   // 正在「存成常用组合」的那一餐（M4 / F4-04）：null = 抽屉关着
   const [comboFor, setComboFor] = useState<MealCard | null>(null)
+  // 正在「再点一次」的那一餐（F3-06）：null = 抽屉关着
+  const [repeatFor, setRepeatFor] = useState<MealCard | null>(null)
   const openFreeDish = () => {
     setFreeDishSeq((value) => value + 1)
     setFreeDishOpen(true)
@@ -357,6 +360,15 @@ export default function OrderPage() {
               </button>
             )}
 
+            {/* 再点一次（F3-06）：只出现在**定局的那一餐**（做好了 / 已取消 / 日子过去了，
+                判据在后端 `canRepeat`）。跟它并排的「存成常用组合」是另一件事：
+                那个是"想常做"，这个是"就照这桌再来一顿"。 */}
+            {card.canRepeat && card.dishCount > 0 && (
+              <button type="button" className="order-card__repeat" onClick={() => setRepeatFor(card)}>
+                🔁 再点一次
+              </button>
+            )}
+
             {/* 成品照（F9-08）：只有做好的那一餐才给这个入口——照片是"做出来了"的证据。
                 已传过的显示张数，并给一个"去看看"的入口（照片都在打卡墙那一餐下） */}
             {card.status === 'DONE' && (
@@ -430,6 +442,12 @@ export default function OrderPage() {
           defaultName={`${labelOfDay(comboFor.date)}${comboFor.mealLabel}`}
           onClose={() => setComboFor(null)}
         />
+      )}
+
+      {/* 再点一次（F3-06）：key 用来源那一餐——换了来源必须拿到干净的一份
+          （抽屉里的"照到哪一餐"是本地选择，重挂载才不会被上一次的选择带过来） */}
+      {repeatFor && (
+        <RepeatMealSheet key={`repeat-${repeatFor.mealKey}`} card={repeatFor} onClose={() => setRepeatFor(null)} />
       )}
 
       {/* key 每次打开都变：重挂载拿回干净的一份（抽屉不用 effect 清状态，见 FreeDishSheet） */}

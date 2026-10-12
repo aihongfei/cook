@@ -393,6 +393,86 @@ export interface AggregateItem {
   user: { nickname: string; avatar: string }
 }
 
+/** 一道菜在点单里的最小形状（合并键与「再点一次」的跳过判定都用它） */
+export interface DishRef {
+  recipeId: string | null
+  name: string
+}
+
+/**
+ * 一道菜的**身份**：有菜谱 id 就用 id，没有（自由菜品 F3-10，或菜谱被删）就退回菜名。
+ *
+ * 这个键只此一处定义。卡片的合并（`aggregateItems`）与「再点一次」的跳过判定
+ * （`planRepeat`）必须用同一个键：两处各写一遍的话，同一道菜会在一边被认成"已经有了"、
+ * 在另一边被认成"新菜"，结果是用户点一次"再点一次"却看到同一道菜多出一个 ×2 的行。
+ */
+export function dishKey(dish: DishRef): string {
+  return dish.recipeId ?? `name:${dish.name}`
+}
+
+/**
+ * 这一餐能不能作为「再点一次」的来源（F3-06）。
+ *
+ * 判据是**这一餐已经定局**，两种情况：
+ * - 状态到了终态（做好了 / 已取消）——D-022 里"要重做就再点一次"说的就是这一步；
+ * - 日子已经过去，但状态还停在待确认/已安排/准备中（一家人忘了点"做好了"）。
+ *   这种卡在列表里跟新的一样，可它就是过去的饭，不认它反而奇怪。
+ *
+ * 反过来，**今天/明天那一餐不给出这个入口**：它还在收集中，要加菜直接点那道菜就是了，
+ * "把这一桌复制到另一餐"另有常用组合（F4-04）负责。限定来源之后这个功能的意思才干净：
+ * 把过去的一餐再来一遍。
+ */
+export function canRepeatFrom(status: OrderStatus, date: string, today: string): boolean {
+  if (status === 'DONE' || status === 'CANCELED') return true
+  // YYYY-MM-DD 是定长数字串，字典序即日期先后（不用再转 Date）
+  return date < today
+}
+
+export interface RepeatPlan {
+  /** 要照抄过去的菜（每种一份） */
+  toAdd: DishRef[]
+  /** 目标那一餐里本来就有的（跳过） */
+  skipped: DishRef[]
+}
+
+/**
+ * 「再点一次」要加哪些菜：把来源那一餐的菜整桌照抄到目标那一餐，**已有的跳过**。
+ *
+ * 两条口径（与 D-029 的"整组加入"同一套思路）：
+ * - **已有的跳过、不叠加份数**：目标是"这一桌菜出现在这一餐"，不是"再点一遍"。
+ *   跳过之后同一次复制点两次也不会变样（幂等），由服务层把 `skipped` 告诉用户。
+ * - **每种菜一份**：来源里的 ×2 是"两个人各点了一份"这个**投票结果**，不是菜谱上的用量。
+ *   复制的是菜谱（做法），份数要由这一餐的人重新表态——照抄 ×2 会把两个人的意愿
+ *   记在复制者一个人名下（卡上会变成"1 人点了"却有两份）。想多要一份的人可以自己再点。
+ */
+export function planRepeat(existing: DishRef[], source: DishRef[]): RepeatPlan {
+  /*
+   * 两个集合分开：`inTarget` 只描述"目标那一餐本来就有"（这个要报给用户），
+   * `taken` 是"这次已经算过的键"（含刚从来源收下的）。合成一个的话，
+   * 来源自身的重复项会被当成"目标里本来就有"报出去——用户会以为那道菜本来就在这一餐。
+   */
+  const inTarget = new Set(existing.map(dishKey))
+  const taken = new Set(inTarget)
+  const reported = new Set<string>()
+  const toAdd: DishRef[] = []
+  const skipped: DishRef[] = []
+
+  for (const dish of source) {
+    const key = dishKey(dish)
+    if (inTarget.has(key)) {
+      if (!reported.has(key)) {
+        reported.add(key)
+        skipped.push(dish)
+      }
+      continue
+    }
+    if (taken.has(key)) continue // 来源里重复的一道：静默收一份
+    taken.add(key)
+    toAdd.push(dish)
+  }
+  return { toAdd, skipped }
+}
+
 export interface AggregatedCard {
   dishes: DishLine[]
   /** 点菜人去重，按首次点菜顺序 */
@@ -413,8 +493,8 @@ export function aggregateItems(items: AggregateItem[], viewerId: string): Aggreg
   const orderers: string[] = []
 
   for (const item of items) {
-    const key = item.recipeId ?? `name:${item.recipeName}`
-    let line = dishes.find(dish => (dish.recipeId ?? `name:${dish.name}`) === key)
+    const key = dishKey({ recipeId: item.recipeId, name: item.recipeName })
+    let line = dishes.find(dish => dishKey(dish) === key)
     if (!line) {
       line = { recipeId: item.recipeId, name: item.recipeName, image: item.recipeImage, count: 0, notes: [], mineItemIds: [] }
       dishes.push(line)

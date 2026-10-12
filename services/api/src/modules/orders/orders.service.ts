@@ -5,10 +5,10 @@ import { publicImageUrl } from '../media/media.storage'
 import { PrismaService } from '../recipes/prisma.service'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
-  aggregateItems, canAddItem, confirmStampFor, dateKey, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
-  parseItemTarget, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, revivedStatus,
+  aggregateItems, canAddItem, canRepeatFrom, confirmStampFor, dateKey, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
+  parseItemTarget, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, planRepeat, revivedStatus,
   todayKey, todayMealState, visibleToMember,
-  dayOptions, type AggregateItem, type ItemTarget, type MealProgressRow, type PlanDayRow,
+  dayOptions, type AggregateItem, type DishRef, type ItemTarget, type MealProgressRow, type PlanDayRow,
 } from './orders.rules'
 
 /**
@@ -59,6 +59,13 @@ export interface MealCardView {
   confirmedAt: string | null
   /** 这一餐的成品照张数（F9-08）。按视图范围算：看不到的照片不计入（见 cardFromRow 说明） */
   photoCount: number
+  /**
+   * 能不能拿这一餐去「再点一次」（F3-06）：做好了 / 已取消 / 日子已经过去。
+   *
+   * 由后端算好而不是让前端看着状态和日期自己判断——判据只有一份（`canRepeatFrom`），
+   * 前端复刻一遍就会分叉（后端限了来源、前端却还显示按钮，点下去拿到 409）。
+   */
+  canRepeat: boolean
   nextActions: { status: OrderStatus; label: string; needsConfirm: boolean }[]
   submittedAt: string
 }
@@ -187,9 +194,120 @@ export class OrdersService {
     return emptyCard(item.mealOrder.mealDate, item.mealOrder.meal)
   }
 
+  /**
+   * 再点一次（F3-06）：把**某一餐整桌**照抄到另一天某一餐。
+   *
+   * 复用的是"点菜"这条链路（逐道调 `addItem`），所以"已安排之后不能加菜""取消过的餐加菜会复活"
+   * 这些语义两处完全一致——另写一段写库逻辑迟早会分叉（combos 的"整组加入"也是这个做法）。
+   *
+   * 三件事刻意这样定：
+   * - **只允许从定局的那一餐复制**（`canRepeatFrom`）：做好了 / 已取消 / 日子过去了。
+   *   还在收集中的那一餐要加菜，直接点那道菜就行，不必绕道"复制"；
+   * - **备注不带过来**：备注是**那个人对那一餐**的交代（"小满那份不要辣"），
+   *   照抄到另一餐会出现"一个人名下挂着一句他这次没说过的话"，甚至点名点到没参与的人；
+   * - **已有的菜跳过**（`planRepeat`）：同一餐里同一道菜变两行、份数 ×2，是最容易被误当成两个人想吃的一道，
+   *   所以这一步不是优化，是避免用户看不懂。
+   */
+  async repeat(
+    userId: string,
+    mealKey: string,
+    input: { mealDate?: unknown; meal?: unknown },
+  ): Promise<{ added: string[]; skipped: string[]; card: MealCardView; message?: string }> {
+    const { familyId } = await this.requireCapability(userId, CAPABILITIES.ORDER_CREATE)
+
+    const { mealDate: sourceDate, meal: sourceMeal } = parseMealKey(mealKey)
+    const targetDate = parseMealDate(input?.mealDate)
+    const targetMeal = parseSlot(input?.meal)
+
+    const source = await this.prisma.mealOrder.findUnique({
+      where: { familyId_mealDate_meal: { familyId, mealDate: sourceDate, meal: sourceMeal } },
+      include: { items: { orderBy: { createdAt: 'asc' } } },
+    })
+    if (!source) throw new NotFoundException('这一餐还没有人点菜')
+    if (!canRepeatFrom(source.status, dateKey(source.mealDate), todayKey())) {
+      throw new ConflictException(
+        `这一餐还在「${STATUS_LABEL[source.status]}」，等它定局（做好或取消）之后再照它点`,
+      )
+    }
+
+    // 先按"插进去之后长什么样"解析来源的菜：自由菜品在插入时可能挂到同名菜谱上
+    // （见 resolveItem），不先解析就会漏判、插出一条卡上看着重复的菜
+    const sourceDishes: DishRef[] = []
+    for (const item of source.items) {
+      sourceDishes.push(await this.repeatDishOf(item))
+    }
+
+    const targetRow = await this.prisma.mealOrder.findUnique({
+      where: { familyId_mealDate_meal: { familyId, mealDate: targetDate, meal: targetMeal } },
+      include: { items: true },
+    })
+    const existing: DishRef[] = (targetRow?.items ?? []).map(item => ({ recipeId: item.recipeId, name: item.recipeName }))
+    const { toAdd, skipped } = planRepeat(existing, sourceDishes)
+
+    if (toAdd.length === 0) {
+      /*
+       * 全被跳过 = 目标那一餐本来就有这一桌菜，卡一定在（`existing` 非空才有可跳过的）。
+       * 这里不做任何写入，只把"都已经有了"如实回给用户：点两次的结果一样（幂等）。
+       */
+      return {
+        added: [],
+        skipped: skipped.map(dish => dish.name),
+        card: await this.card(targetRow!.id, userId),
+        message: '这一餐里这桌菜都有了',
+      }
+    }
+
+    // 整桌要么都进、要么都不进：先判定目标那一餐收不收新菜，别加到一半才发现"已做好了"
+    await this.assertMealAcceptsItems(userId, targetDate, targetMeal)
+
+    const targetKey = dateKey(targetDate)
+    for (const dish of toAdd) {
+      await this.addItem(
+        userId,
+        dish.recipeId
+          ? { recipeId: dish.recipeId, mealDate: targetKey, meal: targetMeal }
+          : { dishName: dish.name, mealDate: targetKey, meal: targetMeal },
+      )
+    }
+
+    const finalRow = await this.prisma.mealOrder.findUnique({
+      where: { familyId_mealDate_meal: { familyId, mealDate: targetDate, meal: targetMeal } },
+    })
+    return {
+      added: toAdd.map(dish => dish.name),
+      skipped: skipped.map(dish => dish.name),
+      card: finalRow ? await this.card(finalRow.id, userId) : emptyCard(targetDate, targetMeal),
+    }
+  }
+
+  /**
+   * 来源那一餐里的一条菜，**按"它重新插进去会变成什么样"**给出它的身份。
+   *
+   * 挂到同名菜谱上这件事只有 `resolveItem` 知道（F3-10 的自由菜品与库里同名的菜合并成一行）。
+   * 这里要是不走同一套判定，就会出现：来源里写着"番茄炒蛋"（自由菜品、库里也有同名菜谱），
+   * 目标那一餐里已经有"番茄炒蛋"（点的是菜谱），跳过判定按两条不同的键算成"不一样"，
+   * 于是插进去之后卡上出现两行同名的番茄炒蛋。
+   */
+  private async repeatDishOf(item: {
+    recipeId: string | null
+    recipeName: string
+  }): Promise<DishRef> {
+    if (item.recipeId) {
+      const recipe = await this.prisma.recipe.findUnique({ where: { id: item.recipeId } })
+      // 菜谱还在就用它现在的名字（改过名的历史点单也会跟着显示新的，与卡片视图一致）
+      return recipe ? { recipeId: recipe.id, name: recipe.name } : { recipeId: item.recipeId, name: item.recipeName }
+    }
+    const matched = await this.prisma.recipe.findFirst({
+      where: { name: item.recipeName },
+      orderBy: { id: 'asc' },
+    })
+    return matched
+      ? { recipeId: matched.id, name: matched.name }
+      : { recipeId: null, name: item.recipeName }
+  }
+
   /** 整餐状态流转（F3-02）：按目标状态要对应能力，且必须走状态机允许的一步 */
-  async updateStatus(userId: string, mealKey: string, next: unknown): Promise<MealCardView> {
-    const target = parseStatus(next)
+  async updateStatus(userId: string, mealKey: string, next: unknown): Promise<MealCardView> {    const target = parseStatus(next)
     const { familyId, role } = await this.requireMember(userId)
 
     const { mealDate, meal } = parseMealKey(mealKey)
@@ -443,6 +561,8 @@ export class OrdersService {
       // 确认留痕（M4 / F4-05）：走的是列表与单卡共用的 MEAL_ORDER_INCLUDE，所以每个视图都带得上
       confirmedBy: row.confirmedBy,
       confirmedAt: row.confirmedAt?.toISOString() ?? null,
+      // 能不能拿这一餐去「再点一次」（F3-06）：口径只有 canRepeatFrom 一份，前端不复刻
+      canRepeat: canRepeatFrom(row.status, dateKey(row.mealDate), todayKey()),
       nextActions: nextActionsFor(role, row.status),
       submittedAt: row.createdAt.toISOString(),
     }
@@ -504,6 +624,8 @@ function emptyCard(mealDate: Date, meal: MealSlot): MealCardView {
     confirmedBy: null,
     confirmedAt: null,
     photoCount: 0,
+    // 空卡没内容可照抄，不给这个入口
+    canRepeat: false,
     nextActions: [],
     submittedAt: new Date().toISOString(),
   }

@@ -130,6 +130,11 @@ function cardFixture(overrides: Partial<MealCard> = {}): MealCard {
     dinerCount: null,
     // 成品照张数（F9-08）：后端按可见范围算好，前端只显示
     photoCount: 0,
+    // 确认留痕（M4 / F4-05）：null = 还没定下这一版
+    confirmedBy: null,
+    confirmedAt: null,
+    // 能不能「再点一次」（F3-06）：由后端按状态与日期算好，前端只负责显示按钮
+    canRepeat: false,
     // 后端按角色算好的下一步（前端只负责渲染，不自己推状态机）
     nextActions: [
       { status: 'PLANNED', label: '选好了', needsConfirm: false },
@@ -641,4 +646,133 @@ it('点人数那行会打开定人数的抽屉', async () => {
   fireEvent.click(await screen.findByRole('button', { name: /3 人吃/ }))
   expect(await screen.findByText('定几个人吃')).toBeTruthy()
   expect(screen.getByRole('button', { name: '就这么多人' })).toBeTruthy()
+})
+
+/*
+ * 再点一次（F3-06，口径见 D-034）。
+ *
+ * 判定核心是**入口出不出现在后端的 canRepeat 上**（前端不复刻"做好了/已取消/日子过去了"这套判据），
+ * 以及抽屉里的"照到哪一餐"能不能把请求发对。
+ */
+
+it('定局的那一餐才有「再点一次」入口（能不能照它点由后端算）', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ mealKey: 'done-1', canRepeat: true, status: 'DONE', statusLabel: '已做好', nextActions: [] }),
+      ]),
+    },
+  })
+  renderOrder()
+
+  expect(await screen.findByRole('button', { name: '🔁 再点一次' })).toBeTruthy()
+})
+
+it('还在收集中的那一餐不给这个入口（要加菜直接点那道菜，不必绕道"复制"）', async () => {
+  mockGet({
+    boards: { family: boardFixture([cardFixture({ mealKey: 'open-1', canRepeat: false })]) },
+  })
+  renderOrder()
+
+  expect(await screen.findByText('2026-10-13 · 晚餐')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '🔁 再点一次' })).toBeNull()
+})
+
+it('「再点一次」先把要照的那桌菜念出来，再让选照到哪一餐', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({
+          mealKey: '2026-10-10-DINNER',
+          date: '2026-10-10',
+          canRepeat: true,
+          status: 'DONE',
+          statusLabel: '已做好',
+          nextActions: [],
+          dishes: [
+            { recipeId: 'r1', name: '番茄炒蛋', image: null, count: 1, notes: [{ nickname: '妈妈', text: '少放盐' }], mineItemIds: [] },
+            { recipeId: 'r2', name: '红烧排骨', image: null, count: 2, notes: [], mineItemIds: [] },
+          ],
+        }),
+      ]),
+    },
+  })
+  renderOrder()
+
+  fireEvent.click(await screen.findByRole('button', { name: '🔁 再点一次' }))
+
+  expect(await screen.findByText('再点一次')).toBeTruthy()
+  // 要照的是哪一桌：菜名连同份数（×2 是"两个人各点了一份"，照抄时只收一份）
+  expect(screen.getByText('番茄炒蛋、红烧排骨 ×2')).toBeTruthy()
+  // 备注不跟着走这件事要说清楚，否则用户会以为"少放盐"也被带过去了
+  expect(screen.getByText(/备注不跟着走/)).toBeTruthy()
+})
+
+it('确认后按选中的那一餐发请求，并把"加了哪些、哪些本来就有"如实说给用户', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ mealKey: '2026-10-10-DINNER', date: '2026-10-10', canRepeat: true, status: 'CANCELED', statusLabel: '已取消', nextActions: [] }),
+      ]),
+    },
+  })
+  const post = vi
+    .spyOn(apiClient, 'post')
+    .mockResolvedValue({
+      data: {
+        added: ['番茄炒蛋'],
+        skipped: ['红烧排骨'],
+        card: cardFixture({ mealKey: '2026-10-12-DINNER' }),
+      },
+    } as never)
+  renderOrder()
+
+  fireEvent.click(await screen.findByRole('button', { name: '🔁 再点一次' }))
+  /*
+   * **显式选日子与餐次**，不依赖"默认下一餐"：`nextMealDefaults` 按当前钟点算
+   * （15 点前默认今晚、之后默认明天午饭），断言钉死其中一个值会在下午变红。
+   * 这里要验的是"选中的那一餐有没有发对"，默认值那条规则由 next-meal 自己的口径保证。
+   */
+  fireEvent.click(await screen.findByRole('button', { name: '明天' }))
+  fireEvent.click(screen.getByRole('button', { name: '晚餐' }))
+  fireEvent.click(screen.getByRole('button', { name: /照这桌点进/ }))
+
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith('/orders/meals/2026-10-10-DINNER/repeat', {
+      mealDate: '2026-10-13',
+      meal: 'DINNER',
+    }),
+  )
+  await waitFor(() => expect(useToasts.getState().items.map((item) => item.text)).toContain('照 2026-10-10 晚餐点了 1 道进明天晚餐'))
+  // 跳过的那道单独说一句：这一桌两道却只提示加了一道，用户会去数
+  expect(useToasts.getState().items.map((item) => item.text)).toContain('红烧排骨 本来就有，没重复加')
+})
+
+it('整桌都已经有了：只说"都有了"，不编一个"加了 0 道"', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ mealKey: '2026-10-10-DINNER', date: '2026-10-10', canRepeat: true, status: 'DONE', statusLabel: '已做好', nextActions: [] }),
+      ]),
+    },
+  })
+  vi.spyOn(apiClient, 'post').mockResolvedValue({
+    data: {
+      added: [],
+      skipped: ['番茄炒蛋', '红烧排骨'],
+      card: cardFixture({ mealKey: '2026-10-13-DINNER' }),
+      message: '这一餐里这桌菜都有了',
+    },
+  } as never)
+  renderOrder()
+
+  fireEvent.click(await screen.findByRole('button', { name: '🔁 再点一次' }))
+  fireEvent.click(await screen.findByRole('button', { name: '明天' }))
+  fireEvent.click(await screen.findByRole('button', { name: /照这桌点进/ }))
+
+  await waitFor(() =>
+    expect(useToasts.getState().items.map((item) => item.text)).toContain('这一餐里这桌菜都有了'),
+  )
+  // 后端给的话就照念，前端不自己拼一句（两处拼迟早说岔）
+  expect(useToasts.getState().items.map((item) => item.text).join('|')).not.toContain('点了 0 道')
 })

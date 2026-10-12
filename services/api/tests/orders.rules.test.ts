@@ -3,6 +3,9 @@ import test from 'node:test'
 import { BadRequestException } from '@nestjs/common'
 import {
   ACTION_LABEL,
+  canRepeatFrom,
+  dishKey,
+  planRepeat,
   todayKey,
   ALLOWED_TRANSITIONS,
   MEAL_SLOTS,
@@ -407,4 +410,73 @@ test('回到待确认（取消后重新加菜）也要清留痕——菜单重�
   // 这里钉住"它确实会走到 PENDING"这一半；写库那一半由接口验收覆盖（R-024）。
   assert.equal(revivedStatus('CANCELED'), 'PENDING')
   assert.equal(confirmStampFor('PENDING'), 'keep', 'PENDING 不经过状态接口（状态机没有回退），清留痕由 addItem 负责')
+})
+
+// ---------- 再点一次（F3-06 / D-034） ----------
+
+test('能照哪一餐再点一次：定局的那一餐（做好了 / 已取消 / 日子过去了）', () => {
+  const today = '2026-10-13'
+  // 终态：做好了、已取消（D-022 里"要重做就再点一次"说的就是这一步）
+  assert.equal(canRepeatFrom('DONE', today, today), true)
+  assert.equal(canRepeatFrom('CANCELED', today, today), true)
+  // 忘了点"做好了"，可日子已经过去了——那也是过去的饭，认它
+  assert.equal(canRepeatFrom('PENDING', '2026-10-12', today), true, '昨天还挂在待确认的，照样能照它点')
+  assert.equal(canRepeatFrom('PLANNED', '2026-10-10', today), true)
+  assert.equal(canRepeatFrom('COOKING', '2026-10-01', today), true)
+})
+
+test('还在收集中的这一餐不给这个入口（要加菜直接点那道菜）', () => {
+  const today = '2026-10-13'
+  // 今天/明天还没定局的，不给：它正在收集中，"复制它"没有意义（组合 F4-04 另有入口）
+  assert.equal(canRepeatFrom('PENDING', today, today), false)
+  assert.equal(canRepeatFrom('PLANNED', today, today), false)
+  assert.equal(canRepeatFrom('COOKING', today, today), false)
+  assert.equal(canRepeatFrom('PENDING', '2026-10-14', today), false, '明天那一餐也一样：还没到点')
+})
+
+test('照抄时已有的菜跳过、每种只收一份（不叠加份数）', () => {
+  const source = [
+    { recipeId: 'r1', name: '番茄炒蛋' },
+    { recipeId: 'r2', name: '红烧排骨' },
+    { recipeId: 'r2', name: '红烧排骨' }, // 两个人各点了一份，来源里是两条记录
+    { recipeId: 'r3', name: '凉拌黄瓜' },
+  ]
+  const plan = planRepeat([{ recipeId: 'r1', name: '番茄炒蛋' }], source)
+
+  assert.deepEqual(plan.toAdd.map(d => d.name), ['红烧排骨', '凉拌黄瓜'], '已有的跳过；重复的两条只收一份')
+  assert.deepEqual(plan.skipped.map(d => d.name), ['番茄炒蛋'])
+})
+
+test('跳过判定按"菜的同一性"：有 recipeId 认 id，没有的认菜名', () => {
+  const existing = [
+    { recipeId: 'r1', name: '番茄炒蛋' },
+    { recipeId: null, name: '外婆的腌笃鲜' },
+  ]
+  const plan = planRepeat(existing, [
+    { recipeId: 'r1', name: '番茄炒蛋（改过名）' }, // 同一道菜：改名了也认得出（认 id）
+    { recipeId: 'r9', name: '外婆的腌笃鲜' }, // 不同一道：有 id 就认 id，不能因为同名就跳过
+    { recipeId: null, name: '外婆的腌笃鲜' }, // 自由菜品：认菜名，跳过
+  ])
+
+  assert.deepEqual(plan.toAdd.map(d => d.name), ['外婆的腌笃鲜'], '同名但来自菜谱的算新菜')
+  assert.deepEqual(plan.skipped.map(d => d.name), ['番茄炒蛋（改过名）', '外婆的腌笃鲜'])
+})
+
+test('dishKey：有 id 认 id、没有的认菜名（卡片合并与照抄判定必须用同一个键）', () => {
+  assert.equal(dishKey({ recipeId: 'r1', name: '番茄炒蛋' }), 'r1')
+  assert.equal(dishKey({ recipeId: null, name: '外婆的腌笃鲜' }), 'name:外婆的腌笃鲜')
+  // 关键：有 id 时菜名不参与判定——改过名的同一道菜不该被当成两道
+  assert.equal(
+    dishKey({ recipeId: 'r1', name: '番茄炒蛋' }),
+    dishKey({ recipeId: 'r1', name: '番茄炒蛋（家常版）' }),
+  )
+})
+
+test('目标那一餐是空的：整桌照抄，一个都不跳过', () => {
+  const plan = planRepeat([], [
+    { recipeId: 'r1', name: '番茄炒蛋' },
+    { recipeId: null, name: '外婆的腌笃鲜' },
+  ])
+  assert.equal(plan.toAdd.length, 2)
+  assert.equal(plan.skipped.length, 0)
 })

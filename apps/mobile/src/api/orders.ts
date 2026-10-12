@@ -74,6 +74,11 @@ export interface MealCard {
   confirmedAt: string | null
   /** 这一餐的成品照张数（F9-08）；按可见范围算，看不到的不计入 */
   photoCount: number
+  /**
+   * 能不能拿这一餐去「再点一次」（F3-06）：做好了 / 已取消 / 日子已经过去。
+   * 由后端算好（判据只有一份），前端不复刻状态与日期的判定——复刻就会分叉。
+   */
+  canRepeat: boolean
   nextActions: NextAction[]
   submittedAt: string
 }
@@ -197,6 +202,29 @@ export async function updateMealStatus(mealKey: string, status: OrderStatus): Pr
   return data
 }
 
+/** 「再点一次」的结果（F3-06）：加了哪些、哪些本来就有，以及受影响的那张卡 */
+export interface RepeatResult {
+  added: string[]
+  skipped: string[]
+  card: MealCard
+  /** 全都被跳过时后端给的一句话（前端直接念它，不自己拼） */
+  message?: string
+}
+
+export async function repeatMeal(input: {
+  /** 照哪一餐（来源，用它的 mealKey） */
+  mealKey: string
+  /** 照到哪一天哪一餐（目标） */
+  mealDate: string
+  meal: MealSlot
+}): Promise<RepeatResult> {
+  const { data } = await apiClient.post<RepeatResult>(
+    `/orders/meals/${encodeURIComponent(input.mealKey)}/repeat`,
+    { mealDate: input.mealDate, meal: input.meal },
+  )
+  return data
+}
+
 export function useOrders(
   scope: 'family' | 'mine',
   status = 'ALL',
@@ -302,3 +330,24 @@ export const useUpdateMealStatus = () =>
   useOrderMutation((input: { mealKey: string; status: OrderStatus }) =>
     updateMealStatus(input.mealKey, input.status),
   )
+
+/**
+ * 再点一次（F3-06）：返回的不是一张卡而是 `{added, skipped, card}`，
+ * 所以不能套 `useOrderMutation`（那个只认 MealCard）——并缓存那一步照抄过来。
+ */
+export function useRepeatMeal() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: repeatMeal,
+    onSuccess: (result) => {
+      if (result.card) {
+        for (const scope of ['family', 'mine'] as const) {
+          queryClient.setQueriesData<OrderBoard>({ queryKey: ['orders', scope] }, (board) =>
+            board ? mergeCard(board, result.card) : board,
+          )
+        }
+      }
+      void queryClient.invalidateQueries({ queryKey: ['orders'], refetchType: 'active' })
+    },
+  })
+}

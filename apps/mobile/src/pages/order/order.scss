@@ -262,6 +262,36 @@
   opacity: 0.7;
 }
 
+/* 「再点一次」（F3-06）：与「存成常用组合」同一档——一行文字按钮，
+   不跟真正要动手的流转按钮抢注意力（它俩常常同时出现在一张定局的卡上） */
+.order-card__repeat {
+  display: block;
+  padding: 7px 0 0;
+  font-family: inherit;
+  font-size: 12px;
+  color: #c4652a;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.order-card__repeat:active {
+  opacity: 0.7;
+}
+
+/* 抽屉里先把"要照的是哪一桌"念清楚 */
+.repeat-sheet__dishes {
+  padding: 8px 10px;
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #4a3225;
+  background: #fffdf8;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+}
+
 .order-card__diners {
   display: block;
   width: 100%;
