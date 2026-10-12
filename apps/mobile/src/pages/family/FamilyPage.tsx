@@ -16,6 +16,7 @@ import {
   type FamilyRole,
 } from '@/api/family'
 import { useMe } from '@/api/auth'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Page from '@/components/ui/Page'
 import { toast } from '@/components/ui/toast'
 import SectionTitle from '@/components/ui/SectionTitle'
@@ -55,7 +56,16 @@ export default function FamilyPage() {
   const [name, setName] = useState('')
   const [inviteInput, setInviteInput] = useState('')
   const [editingName, setEditingName] = useState(false)
-  const [confirming, setConfirming] = useState(false)
+  /**
+   * 需要二次确认的危险操作。一次只可能有一个，所以用一个状态描述"待确认的是什么"：
+   * 退出/解散家庭、移出成员、转让掌勺人 —— 都会影响自己或别人，不接受一闪就过的执行。
+   */
+  const [pending, setPending] = useState<
+    | { kind: 'leave' }
+    | { kind: 'remove'; userId: string; nickname: string }
+    | { kind: 'transfer'; userId: string; nickname: string }
+    | null
+  >(null)
 
   const data = family.data
   const memberLimit = options.data?.memberLimit ?? data?.memberLimit ?? 10
@@ -185,6 +195,30 @@ export default function FamilyPage() {
   const mayResetInvite = can(data, CAPABILITY.INVITE_RESET)
   const isOwner = data.myRole === 'OWNER'
 
+  // 弹窗文案：同一个组件，三处调用只是内容不同
+  const confirmContent =
+    pending === null
+      ? { title: '', message: '' }
+      : pending.kind === 'leave'
+        ? {
+            title: isOwner ? '解散家庭' : '退出家庭',
+            message: isOwner
+              ? '解散后这个家就没了，成员关系也会一起清掉，且不能恢复。'
+              : '退出后你自己看不到家里的菜单与点单了，需要重新用邀请码才能回来。',
+            confirmText: isOwner ? '解散' : '退出',
+          }
+        : pending.kind === 'remove'
+          ? {
+              title: '移出成员',
+              message: `把${pending.nickname}移出家庭？他需要重新用邀请码才能回来。`,
+              confirmText: '移出',
+            }
+          : {
+              title: '转让掌勺人',
+              message: `把掌勺人交给${pending.nickname}？你会变成帮厨，之后管成员、换邀请码这些事只有他能做。`,
+              confirmText: '转让',
+            }
+
   return (
     <Page>
       <div className="pscreen">
@@ -286,9 +320,20 @@ export default function FamilyPage() {
                     disabled={updateRole.isPending}
                     onChange={(event) => {
                       const role = event.target.value as FamilyRole
+                      // 转让掌勺人 = 自己马上降为帮厨，必须先问一次；其它角色调整直接生效
+                      if (role === 'OWNER' && data.myRole === 'OWNER') {
+                        setPending({
+                          kind: 'transfer',
+                          userId: member.userId,
+                          nickname: member.nickname,
+                        })
+                        return
+                      }
                       submit(
                         (cb) => updateRole.mutate({ userId: member.userId, role }, cb),
-                        role === 'OWNER' ? `已把掌勺人交给${member.nickname}` : '角色已调整',
+                        `已把${member.nickname}改为${
+                          options.data?.roles.find((item) => item.value === role)?.label ?? role
+                        }`,
                       )
                     }}
                   >
@@ -303,10 +348,11 @@ export default function FamilyPage() {
                     className="family-member__remove"
                     disabled={removeMember.isPending}
                     onClick={() =>
-                      submit(
-                        (cb) => removeMember.mutate(member.userId, cb),
-                        `已把${member.nickname}移出家庭`,
-                      )
+                      setPending({
+                        kind: 'remove',
+                        userId: member.userId,
+                        nickname: member.nickname,
+                      })
                     }
                   >
                     移出
@@ -353,40 +399,46 @@ export default function FamilyPage() {
             你是掌勺人：把「掌勺人」交给一位家人后，才能退出这个家。
           </p>
         ) : (
-          <button type="button" className="family-leave" onClick={() => setConfirming(true)}>
+          <button
+            type="button"
+            className="family-leave"
+            onClick={() => setPending({ kind: 'leave' })}
+          >
             {isOwner ? '解散家庭' : '退出家庭'}
           </button>
         )}
 
-        {confirming && (
-          <div className="family-confirm" role="dialog" aria-label="确认退出">
-            <p>
-              {isOwner
-                ? '解散后这个家就没了，成员关系也会一起清掉。确定吗？'
-                : '退出后要重新用邀请码才能回来。确定吗？'}
-            </p>
-            <div className="family-confirm__actions">
-              <button type="button" className="btn-ghost" onClick={() => setConfirming(false)}>
-                再想想
-              </button>
-              <button
-                type="button"
-                className="family-leave"
-                disabled={leaveFamily.isPending}
-                onClick={() => {
-                  setConfirming(false)
-                  leaveFamily.mutate(undefined, {
-                    onSuccess: (result) =>
-                      toast.success(result.disbanded ? '家庭已解散' : '已退出家庭'),
-                    onError: (err) => toast.error(apiErrorMessage(err)),
-                  })
-                }}
-              >
-                {isOwner ? '确定解散' : '确定退出'}
-              </button>
-            </div>
-          </div>
-        )}
+        <ConfirmDialog
+          open={pending !== null}
+          pending={leaveFamily.isPending || removeMember.isPending || updateRole.isPending}
+          tone="danger"
+          {...confirmContent}
+          onCancel={() => setPending(null)}
+          onConfirm={() => {
+            const action = pending
+            if (!action) return
+            setPending(null)
+            if (action.kind === 'leave') {
+              leaveFamily.mutate(undefined, {
+                onSuccess: (result) =>
+                  toast.success(result.disbanded ? '家庭已解散' : '已退出家庭'),
+                onError: (err) => toast.error(apiErrorMessage(err)),
+              })
+              return
+            }
+            if (action.kind === 'remove') {
+              submit(
+                (cb) => removeMember.mutate(action.userId, cb),
+                `已把${action.nickname}移出家庭`,
+              )
+              return
+            }
+            submit(
+              (cb) => updateRole.mutate({ userId: action.userId, role: 'OWNER' }, cb),
+              `已把掌勺人交给${action.nickname}`,
+            )
+          }}
+        />
       </div>
     </Page>
   )

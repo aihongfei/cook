@@ -332,32 +332,3 @@
   border: 1.5px solid var(--color-focus-line);
   border-radius: 14px;
 }
-
-.family-confirm {
-  margin: 12px var(--spacing-page) 0;
-  padding: 14px;
-  background: var(--color-paper);
-  border: 1.5px solid var(--color-focus-line);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-}
-
-.family-confirm p {
-  margin: 0 0 10px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--color-ink);
-}
-
-.family-confirm__actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.family-confirm__actions .family-leave {
-  width: auto;
-  padding: 9px 16px;
-  margin: 0;
-  font-size: 13px;
-}

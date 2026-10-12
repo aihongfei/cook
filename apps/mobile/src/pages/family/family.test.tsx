@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import { can, type Family } from '@/api/family'
-import { Toaster } from '@/components/ui/toast'
+import { Toaster, useToasts } from '@/components/ui/toast'
 import { useAuth } from '@/stores/auth'
 import FamilyPage from './FamilyPage'
 
@@ -76,6 +76,8 @@ function mockGet({ family, me = { id: 'u1', account: 'mama', nickname: '妈妈',
 
 beforeEach(() => {
   localStorage.clear()
+  // toast 是模块级 store，不清就会带到下一条用例（出现两个 role=status）
+  useToasts.setState({ items: [] })
   // 家庭页要求已登录（无 token 会跳登录页）。
   // 直接写 store 而不是 localStorage：persist 只在**模块加载时**读一次 localStorage，
   // 在 beforeEach 里写已经晚了，store 里仍然是 null。
@@ -165,19 +167,77 @@ it('掌勺人家里还有人时不显示退出按钮（避免撞后端 409）', 
   expect(screen.queryByRole('button', { name: '解散家庭' })).toBeNull()
 })
 
-it('掌勺人独自一人时可以解散，且要先确认', async () => {
+it('解散家庭要二次确认：取消不请求，确认才解散', async () => {
   mockGet({
     family: familyFixture({
       memberCount: 1,
       members: [{ userId: 'u1', nickname: '妈妈', avatar: '🍳', role: 'OWNER', joinedAt: new Date().toISOString(), isMe: true }],
     }),
   })
+  const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { left: true, disbanded: true } } as never)
   renderFamily()
 
   fireEvent.click(await screen.findByRole('button', { name: '解散家庭' }))
-  expect(screen.getByText('解散后这个家就没了，成员关系也会一起清掉。确定吗？')).toBeTruthy()
-  fireEvent.click(screen.getByRole('button', { name: '再想想' }))
-  expect(screen.queryByText('解散后这个家就没了，成员关系也会一起清掉。确定吗？')).toBeNull()
+  // 弹窗（模态框）：居中展示、遮罩隔离，取消键在前
+  const dialog = screen.getByRole('dialog')
+  expect(dialog.getAttribute('aria-modal')).toBe('true')
+  expect(dialog.textContent).toContain('解散后这个家就没了')
+  expect(post).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: '取消' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(post).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: '解散家庭' }))
+  fireEvent.click(screen.getByRole('button', { name: '解散' }))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/family/leave'))
+})
+
+it('移出成员要二次确认：不点确认不会把人移出', async () => {
+  mockGet({ family: familyFixture() })
+  const del = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: familyFixture() } as never)
+  renderFamily()
+
+  fireEvent.click(await screen.findByRole('button', { name: '移出' }))
+  expect(screen.getByRole('dialog').textContent).toContain('把小满移出家庭')
+  expect(del).not.toHaveBeenCalled()
+
+  // 页面里也有一个「移出」按钮，所以要限定在弹窗内点击
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '移出' }))
+  await waitFor(() => expect(del).toHaveBeenCalledWith('/family/members/u2'))
+})
+
+it('转让掌勺人要二次确认：确认后自己降为帮厨', async () => {
+  mockGet({ family: familyFixture() })
+  const patch = vi.spyOn(apiClient, 'patch').mockResolvedValue({
+    data: familyFixture({
+      myRole: 'COOK',
+      myCapabilities: ['order.create', 'menu.manage', 'menu.confirm'],
+      members: [
+        { userId: 'u1', nickname: '妈妈', avatar: '🍳', role: 'COOK', joinedAt: new Date().toISOString(), isMe: true },
+        { userId: 'u2', nickname: '小满', avatar: '🐰', role: 'OWNER', joinedAt: new Date().toISOString(), isMe: false },
+      ],
+    }),
+  } as never)
+  renderFamily()
+
+  // 把成员的角色选成「掌勺人」= 转让，先弹确认
+  fireEvent.change(await screen.findByLabelText('设置 小满 的角色'), { target: { value: 'OWNER' } })
+  expect(screen.getByRole('dialog').textContent).toContain('你会变成帮厨')
+  expect(patch).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: '转让' }))
+  await waitFor(() => expect(patch).toHaveBeenCalledWith('/family/members/u2', { role: 'OWNER' }))
+})
+
+it('普通角色调整（帮厨/吃货）不打扰用户，直接生效', async () => {
+  mockGet({ family: familyFixture() })
+  const patch = vi.spyOn(apiClient, 'patch').mockResolvedValue({ data: familyFixture() } as never)
+  renderFamily()
+
+  fireEvent.change(await screen.findByLabelText('设置 小满 的角色'), { target: { value: 'COOK' } })
+  expect(screen.queryByRole('dialog')).toBeNull()
+  await waitFor(() => expect(patch).toHaveBeenCalledWith('/family/members/u2', { role: 'COOK' }))
 })
 
 it('切换共享开关会调用接口并在成功后更新文案', async () => {
@@ -188,7 +248,6 @@ it('切换共享开关会调用接口并在成功后更新文案', async () => {
   fireEvent.click(await screen.findByRole('switch', { name: '家庭共享开关' }))
   await waitFor(() => expect(patch).toHaveBeenCalledWith('/family', { shared: false }))
   // 结果用 toast 提示（不再在页面里插一段提示文字把内容顶下去）
-  expect(await screen.findByRole('status')).toBeTruthy()
   expect(await screen.findByText('已关闭家庭共享')).toBeTruthy()
   // 缓存被最新家庭替换后，开关状态跟着变
   await waitFor(() => expect(screen.getByRole('switch', { name: '家庭共享开关' }).getAttribute('aria-checked')).toBe('false'))

@@ -311,3 +311,99 @@
     animation: none;
   }
 }
+
+/*
+ * 共用确认弹窗（见 components/ui/ConfirmDialog.tsx）。
+ * 居中 + 遮罩：这是"必须回应才能继续"的东西，别让它像普通提示一样一闪而过。
+ */
+.confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-page);
+  background: rgb(60 35 20 / 38%);
+  animation: confirm-mask-in 0.16s ease-out;
+}
+
+.confirm {
+  width: 100%;
+  max-width: 300px;
+  padding: 20px 18px 16px;
+  text-align: center;
+  background: var(--color-paper);
+  border: 1.5px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-hero);
+  animation: confirm-in 0.2s ease-out;
+}
+
+.confirm__title {
+  font-size: 17px;
+  color: #6e3a1c;
+}
+
+.confirm__message {
+  margin-top: 9px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-ink-2);
+}
+
+.confirm__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.confirm__btn {
+  flex: 1;
+  padding: 11px;
+  font-size: 14px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  background: var(--color-cream-2);
+  border: 0;
+  border-radius: 13px;
+}
+
+.confirm__btn--primary {
+  color: var(--color-paper);
+  background: var(--color-brand);
+}
+
+/* 危险操作（移出成员/退出/解散）：确认键用砖红，与普通确认区分 */
+.confirm__btn--danger {
+  background: var(--color-brick);
+}
+
+.confirm__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@keyframes confirm-mask-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes confirm-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirm-mask,
+  .confirm {
+    animation: none;
+  }
+}
