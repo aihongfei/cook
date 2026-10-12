@@ -349,6 +349,42 @@
   border-radius: 999px;
 }
 
+/* 卡片上的「点这道」（F1-10）：贴在卡片底部的一条实心按钮。
+   与卡内的「看做法 →」并排成两级——看做法是次要（描边），点这道是要动手的（实心）；
+   两者都在卡里，所以按钮**不做成整行**，免得一张卡上两个"整行按钮"抢注意力。 */
+.dish-card__order {
+  padding: 0 11px 12px;
+}
+
+.dish-card__order-btn {
+  display: block;
+  width: 100%;
+  padding: 7px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: #fff;
+  cursor: pointer;
+  background: var(--color-primary, #d98a4a);
+  border: 0;
+  border-radius: 999px;
+}
+
+.dish-card__order-btn:disabled {
+  opacity: 0.6;
+}
+
+/* 加过就置灰说明"已加入"：同一张卡连点两次会变成两份，而多数时候那是误触 */
+.dish-card__order-done {
+  display: block;
+  padding: 7px;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+  text-align: center;
+  background: var(--color-cream-2, #f6efe4);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
 .search__submit {
   padding: 0 5px;
   color: var(--color-brand);
