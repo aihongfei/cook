@@ -3,7 +3,7 @@ import { Throttle } from '@nestjs/throttler'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import type { Request, Response } from 'express'
 import { CurrentUserId, JwtAuthGuard } from '../auth/jwt-auth.guard'
-import { AiService } from './ai.service'
+import { AiService, type ChatEvent } from './ai.service'
 
 interface SuggestBody { hint?: string; mealKey?: string }
 interface ChatBody { messages?: unknown }
@@ -53,14 +53,20 @@ export class AiController {
    * 反过来的话，输入错（400）与没配置（503）就只能在已经发出 200 之后再报，
    * 前端拿到的是"一个正常的流里忽然蹦出一段报错"——状态码已经没得改了。
    *
-   * 每段用 `data: {"text":"..."}` 包一层 JSON 而不是直接发裸文本：
-   * 模型的话里有换行，裸文本按行解析必然错位。
+   * 每段用 `event: <类型>` + `data: {...}` 的**具名事件**发给前端（D-026 第三次补充）：
+   * - `text`：正文增量，上屏；
+   * `status`：工具执行中的一句人话（"正在翻菜谱…"）。工具轮次要 3~5 秒，没有这句就像卡住了；
+   * `proposals`：攒好的"加菜建议"，界面据此长出确认按钮（**用户点了才真写库**）；
+   * `error`：头已经发出去了，失败只能当流里的一条事件报。
+   *
+   * 具名事件是为了让前端**按类型分派**而不是去猜 JSON 里有哪些字段；正文仍然包在 JSON 里
+   * （模型的话有换行，裸文本按行解析必然错位）。
    */
   @Post('chat/stream')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: '问 AI（流式 SSE）' })
+  @ApiOperation({ summary: '问 AI（流式 SSE，支持对话内点菜工具）' })
   async chatStream(
     @CurrentUserId() userId: string,
     @Body() body: ChatBody,
@@ -77,15 +83,15 @@ export class AiController {
     response.setHeader('X-Accel-Buffering', 'no')
     response.flushHeaders?.()
 
-    const send = (payload: { text?: string; error?: string }) => {
-      response.write(`data: ${JSON.stringify(payload)}\n\n`)
+    const send = (event: ChatEvent) => {
+      response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
     }
 
     try {
-      if (!first.done) send({ text: first.value })
+      if (!first.done) send(first.value)
       for await (const chunk of stream) {
         if (response.writableEnded) break
-        send({ text: chunk })
+        send(chunk)
       }
       response.write('data: [DONE]\n\n')
     } catch (error) {
@@ -93,7 +99,7 @@ export class AiController {
       const message = error instanceof HttpException
         ? (error.getResponse() as { message?: string }).message ?? error.message
         : 'AI 服务开小差了，过会儿再试'
-      send({ error: message })
+      response.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: message })}\n\n`)
     } finally {
       response.end()
     }

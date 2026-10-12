@@ -49,7 +49,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  * 为什么要统计**段数**而不是只看全文对不对：全文一样可能是"攒够了一次性发"，
  * 那样流式就白做了（用户还是在等一个整包）。段数 >1 才说明真的边生成边发。
  */
-async function readStream(token, question) {
+async function readStream(token, question, extra = {}) {
   // 从**发请求之前**开始计时：只从拿到响应头之后算的话，首个字永远是 1ms，
   // 体现不出"用户等了多久才看到第一个字"（那个才是流式要改善的东西）
   const startedAt = Date.now()
@@ -66,7 +66,7 @@ async function readStream(token, question) {
     } catch {
       parsed = null
     }
-    return { status: response.status, contentType, chunks: 0, text: '', done: false, firstChunkMs: null, body: parsed }
+    return { status: response.status, contentType, chunks: 0, text: '', done: false, firstChunkMs: null, body: parsed, statuses: [], proposals: [] }
   }
 
   const reader = response.body.getReader()
@@ -76,6 +76,8 @@ async function readStream(token, question) {
   let chunks = 0
   let done = false
   let firstChunkMs = null
+  const statuses = []
+  const proposals = []
   for (;;) {
     const { value, done: finished } = await reader.read()
     if (finished) break
@@ -93,7 +95,11 @@ async function readStream(token, question) {
           continue
         }
         const payload = JSON.parse(data)
-        if (payload.error) return { status: response.status, contentType, chunks, text, done, firstChunkMs, error: payload.error }
+        if (payload.error) return { status: response.status, contentType, chunks, text, done, firstChunkMs, statuses, proposals, error: payload.error }
+        // 具名事件（D-026 第三次补充）：status 是工具执行中的那句人话，proposals 是攒好的加菜建议。
+        // 正文仍然看 payload.text——三种事件共用一套解析，由 type 分派。
+        if (payload.type === 'status' && typeof payload.label === 'string') statuses.push(payload.label)
+        if (payload.type === 'proposals' && Array.isArray(payload.items)) proposals.push(...payload.items)
         if (payload.text) {
           chunks += 1
           if (firstChunkMs === null) firstChunkMs = Date.now() - startedAt
@@ -102,7 +108,7 @@ async function readStream(token, question) {
       }
     }
   }
-  return { status: response.status, contentType, chunks, text, done, firstChunkMs }
+  return { status: response.status, contentType, chunks, text, done, firstChunkMs, statuses, proposals }
 }
 
 async function callWithRetry(method, path, options = {}) {
@@ -230,6 +236,59 @@ async function main() {
     )
     const streamAnon = await callWithRetry('POST', '/ai/chat/stream', { body: { messages: [{ role: 'user', content: 'hi' }] } })
     check('未登录的流式问答 → 401', streamAnon.status === 401, `${streamAnon.status}`)
+
+    // ---------- 对话内点菜：工具循环（D-026 第三次补充）----------
+    // 用户原话：「写几个内置的工具，比如说我在对话中可以直接插入点菜什么的，
+    // 然后每句话的最后……询问我一下是否需要点击加入菜单」。所以这一段验四件事：
+    // ① 服务端把工具声明发给了模型（stub 靠这个才切到工具脚本）；
+    // ② 模型要调工具时**服务端真的执行了**（并行两个 search_dishes 都要跑到，参数碎片要拼得起来）；
+    // ③ 模型编造的 id 被丢掉、真实那道留下 → 界面上只会出现真实存在的菜；
+    // ④ 建议是"提议"不是"已写入"——**库里不能有任何变化**（用户没点确认）。
+    const planBefore = await callWithRetry('GET', '/orders/plan?days=3', { token: mama.token })
+    const dishesBefore = JSON.stringify(planBefore.body ?? {})
+
+    const toolRun = await readStream(mama.token, '今晚想吃点清淡的，帮我挑两道')
+    check(
+      '对话内点菜：工具轮次要有状态提示（"正在翻菜谱…"），否则那几秒看着像卡住',
+      toolRun.status === 200 && toolRun.statuses.length >= 1,
+      `${toolRun.status} 状态=${JSON.stringify(toolRun.statuses)}`,
+    )
+    check(
+      '对话内点菜：模型编造的 id 不出现，真实那道成为建议',
+      toolRun.proposals.length >= 1
+        && toolRun.proposals.every((item) => item.recipeId !== 'invented-by-model')
+        && toolRun.proposals.every((item) => typeof item.name === 'string' && item.name.length > 0),
+      `建议=${JSON.stringify(toolRun.proposals)}`,
+    )
+    check(
+      '对话内点菜：建议里带"哪一餐"的人话（按钮上要显示）',
+      toolRun.proposals.every((item) => /今天|明天|后天|\d{2}-\d{2}/.test(item.when ?? '')),
+      `when=${JSON.stringify(toolRun.proposals.map((item) => item.when))}`,
+    )
+    check(
+      '对话内点菜：**只是提议，没有写库**（用户没点确认，菜单必须原样）',
+      planBefore.status === 200 && JSON.stringify(planBefore.body ?? {}) === dishesBefore,
+      `plan 前后一致=${JSON.stringify(planBefore.body ?? {}) === dishesBefore}`,
+    )
+    check(
+      '对话内点菜：模型最后的话要问一句要不要加（用户明确要的"主动让我有选择"）',
+      /加|菜单/.test(toolRun.text),
+      `全文=${JSON.stringify(toolRun.text.slice(0, 80))}`,
+    )
+
+    // 用户点了确认才真写库：走的就是手点那条路（/orders/items）
+    const first = toolRun.proposals[0]
+    if (first) {
+      const added = await callWithRetry('POST', '/orders/items', {
+        token: mama.token,
+        body: { recipeId: first.recipeId, mealDate: first.mealDate, meal: first.meal },
+      })
+      check(
+        '点了"加入菜单"之后才真的写进那一餐（与手点同一条接口）',
+        added.status === 201 || added.status === 200,
+        `${added.status} ${added.body?.message ?? ''}`,
+      )
+    }
   }
 
   for (const item of results) {

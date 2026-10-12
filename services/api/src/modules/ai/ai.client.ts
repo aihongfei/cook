@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common'
 import { PICKS_SCHEMA, type AiConfig, type ChatMessage } from './ai.rules'
+import type { ToolCall } from './ai.tools'
 
 /**
  * 直连 OpenAI 兼容接口的极薄客户端（D-026）。
@@ -113,20 +114,45 @@ export async function chatJson(config: AiConfig, request: ChatRequest): Promise<
 }
 
 /**
- * 流式对话：把上游的 SSE 逐块读出来，**每读到一段就 yield 一段**。
+ * 流式对话 + 工具调用：把上游的 SSE 逐块读出来，**逐事件**交给调用方。
  *
- * 为什么值得单独写一条路：实测这个模型要先推理 5～40 秒才吐正文，一次性等回包的话
+ * 为什么值得单独写一条路：实测这个模型要先推理几秒到几十秒才吐正文，一次性等回包的话
  * 用户盯着转圈的时间几乎等于全程；流式能让第一个字一出现就上屏，等待感差别很大。
  *
- * 与 `chatJson` 的差别只有两处，别的一律照旧：
+ * 与 `chatJson` 的差别只有三处，别的一律照旧：
  * - 请求体发 `stream: true`，且**不带 response_format**（结构化输出与流式要靠流式 JSON 解析凑，
- *   而我们这边已经有容忍解析 `scanPicks`，不需要再赌网关支不支持两者叠加）；
- * - 回包按 SSE 边读边给，不 `await` 到整段。
+ *   而我们这边已经有容忍解析 `parsePicks`，不需要再赌网关支不支持两者叠加）；
+ * - 回包按 SSE 边读边给，不 `await` 到整段；
+ * - 除了正文增量，还要**攒工具调用**：OpenAI 兼容的流式协议把 `tool_calls` 切成一堆碎片按
+ *   `index` 分发（`function.name` 只来一次，`function.arguments` 一段一段拼），所以必须按
+ *   index 归并、等这一轮读完再整只交出去——半截 JSON 交给谁都没法执行。
  *
  * 没有流可读（上游直接回 JSON、或网关把 stream 忽略了）时，退回一次性解析——**不报错**，
  * 因为对调用方来说"拿到了完整回答"这个结果是一样的。
  */
-export async function* chatStream(config: AiConfig, request: ChatRequest): AsyncGenerator<string> {
+export interface WireMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | null
+  /** 助手消息里"我要调这些工具"（下一轮要原样带回去，否则上游认不出 tool 结果对应谁） */
+  tool_calls?: ToolCall[]
+  /** role=tool 时对应哪一次调用 */
+  tool_call_id?: string
+}
+
+export interface ToolStreamRequest {
+  systemPrompt: string
+  messages: WireMessage[]
+  /** 传了就允许模型调工具；不传就是纯聊天（与旧行为一致） */
+  tools?: readonly unknown[]
+  temperature?: number
+  signal?: AbortSignal
+}
+
+export type StreamEvent =
+  | { type: 'text'; text: string }
+  | { type: 'tool_calls'; calls: ToolCall[] }
+
+export async function* chatStreamEvents(config: AiConfig, request: ToolStreamRequest): AsyncGenerator<StreamEvent> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), config.timeoutMs)
   request.signal?.addEventListener('abort', () => controller.abort(), { once: true })
@@ -145,10 +171,11 @@ export async function* chatStream(config: AiConfig, request: ChatRequest): Async
         model: config.model,
         messages: [
           { role: 'system', content: request.systemPrompt },
-          ...request.messages.map((message) => ({ role: message.role, content: message.content })),
+          ...request.messages.map(toWire),
         ],
         temperature: request.temperature ?? 0.7,
         stream: true,
+        ...(request.tools?.length ? { tools: request.tools } : {}),
       }),
       signal: controller.signal,
     })
@@ -162,15 +189,24 @@ export async function* chatStream(config: AiConfig, request: ChatRequest): Async
     const contentType = response.headers.get('content-type') ?? ''
     if (!response.body || !contentType.includes('text/event-stream')) {
       // 上游没按流回（有的网关会忽略 stream）：整段读出来一次 yield，结果一样
-      const content = readJsonText(await response.json())
-      if (!content) throw new AiUpstreamError('AI 没有给出回答（回包是空的）', 502)
-      yield content
+      const payload = await response.json()
+      const content = readJsonText(payload)
+      const calls = readJsonToolCalls(payload)
+      if (calls.length) yield { type: 'tool_calls', calls }
+      if (content) yield { type: 'text', text: content }
+      if (!content && calls.length === 0) throw new AiUpstreamError('AI 没有给出回答（回包是空的）', 502)
       return
     }
 
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
+    const pending = new Map<number, ToolCall>()
     let buffer = ''
+    // 正文增量即时转成事件；工具调用只往 pending 里攒，等整轮读完再交（见下）
+    const drain = (event: string): StreamEvent[] => {
+      const text = readSseEvent(event, pending)
+      return text ? [{ type: 'text', text }] : []
+    }
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
@@ -179,13 +215,15 @@ export async function* chatStream(config: AiConfig, request: ChatRequest): Async
       const events = buffer.split(/\r?\n\r?\n/)
       buffer = events.pop() ?? ''
       for (const event of events) {
-        const delta = readSseDelta(event)
-        if (delta) yield delta
+        for (const emitted of drain(event)) yield emitted
       }
     }
-    // 收尾：上游最后一段没跟空行时也要认
-    const tail = readSseDelta(buffer)
-    if (tail) yield tail
+    if (buffer.trim()) {
+      for (const emitted of drain(buffer)) yield emitted
+    }
+    // 工具调用是"整轮读完才算数"的：半截 JSON 谁也没法执行
+    const calls = [...pending.values()].filter((call) => call.name)
+    if (calls.length) yield { type: 'tool_calls', calls }
   } catch (error) {
     if (error instanceof AiUpstreamError) throw error
     if ((error as { name?: string })?.name === 'AbortError') {
@@ -198,8 +236,37 @@ export async function* chatStream(config: AiConfig, request: ChatRequest): Async
   }
 }
 
-/** 一个 SSE 事件块里的正文增量（只认 choices[0].delta.content，推理内容不算回答） */
-function readSseDelta(event: string): string {
+/**
+ * 把内部消息形状转成**上游认的协议形状**。
+ *
+ * ⚠️ 这里踩过一个坑：内部的 `ToolCall` 是 `{id, name, arguments}`（自己看着方便），
+ * 而上游要的是 `{id, type:'function', function:{name, arguments}}`。第一版直接把内部对象
+ * 塞回 `tool_calls`，结果**第二轮请求被网关 400 拒掉**（错误体还是那个信息量极少的
+ * `{"model":"deepseek-v4.1-flash"}`）——表现是"第一轮搜完菜就断了"。
+ * stub 当时也没拦住，因为它不校验协议形状（已给它补上，见 ai-stub-upstream.cjs）。
+ */
+function toWire(message: WireMessage): Record<string, unknown> {
+  const wire: Record<string, unknown> = { role: message.role, content: message.content }
+  if (message.tool_calls?.length) {
+    wire.tool_calls = message.tool_calls.map((call) => ({
+      id: call.id,
+      type: 'function',
+      function: { name: call.name, arguments: call.arguments },
+    }))
+  }
+  if (message.tool_call_id) wire.tool_call_id = message.tool_call_id
+  return wire
+}
+
+/**
+ * 一个 SSE 事件块里的正文增量（只认 `choices[0].delta.content`，推理内容不算回答），
+ * 顺手把 `delta.tool_calls` 按 **index 归并**进 `pending`。
+ *
+ * 归并是必须的：协议把一次调用切成好几片发（id 可能只在第一片、`function.arguments` 是
+ * 一段一段的 JSON 碎片），不按 index 拼就永远拼不出可执行的参数。`name` 是**赋值**不是追加
+ * ——它同样可能重复出现，追加会拼出 `search_dishess earch_dishes` 这种鬼东西。
+ */
+function readSseEvent(event: string, pending: Map<number, ToolCall>): string {
   let text = ''
   for (const line of event.split(/\r?\n/)) {
     const trimmed = line.trim()
@@ -207,14 +274,46 @@ function readSseDelta(event: string): string {
     const data = trimmed.slice(5).trim()
     if (!data || data === '[DONE]') continue
     try {
-      const parsed = JSON.parse(data) as { choices?: { delta?: { content?: unknown } }[] }
-      const delta = parsed.choices?.[0]?.delta?.content
-      if (typeof delta === 'string') text += delta
+      const parsed = JSON.parse(data) as {
+        choices?: { delta?: { content?: unknown; tool_calls?: unknown[] } }[]
+      }
+      const delta = parsed.choices?.[0]?.delta
+      if (typeof delta?.content === 'string') text += delta.content
+      if (Array.isArray(delta?.tool_calls)) {
+        for (const raw of delta.tool_calls) {
+          const index = typeof (raw as { index?: unknown })?.index === 'number'
+            ? (raw as { index: number }).index : 0
+          const call = pending.get(index) ?? { id: '', name: '', arguments: '' }
+          const id = (raw as { id?: unknown })?.id
+          if (typeof id === 'string' && id) call.id = id
+          const fn = (raw as { function?: { name?: unknown; arguments?: unknown } })?.function
+          if (typeof fn?.name === 'string' && fn.name) call.name = fn.name
+          if (typeof fn?.arguments === 'string') call.arguments += fn.arguments
+          pending.set(index, call)
+        }
+      }
     } catch {
       // 跳过解析不了的段落（心跳/注释/半截 JSON）
     }
   }
   return text
+}
+
+/** 非流式回包里的工具调用（网关忽略 stream 时的退路，形状与流式拼出来的对齐） */
+function readJsonToolCalls(payload: unknown): ToolCall[] {
+  const calls = (payload as { choices?: { message?: { tool_calls?: unknown[] } }[] })
+    ?.choices?.[0]?.message?.tool_calls
+  if (!Array.isArray(calls)) return []
+  return calls.flatMap((raw) => {
+    const id = (raw as { id?: unknown })?.id
+    const fn = (raw as { function?: { name?: unknown; arguments?: unknown } })?.function
+    if (typeof fn?.name !== 'string' || !fn.name) return []
+    return [{
+      id: typeof id === 'string' ? id : `call_${Math.random().toString(36).slice(2)}`,
+      name: fn.name,
+      arguments: typeof fn.arguments === 'string' ? fn.arguments : '',
+    }]
+  })
 }
 
 /**

@@ -30,10 +30,29 @@ const server = http.createServer((req, res) => {
     } catch {
       parsed = {}
     }
+    // **协议形状校验**：上游只认 {id, type:'function', function:{name, arguments}} 这种形状的
+    // tool_calls。第一版服务端把内部对象直接塞回来了（{id,name,arguments}），真实网关 400 拒掉，
+    // 而当时 stub 照单全收、什么都没报——于是"第一轮搜完菜就断"这个 bug 只能花真额度才能发现。
+    // 这里补上这一层：形状不对就按上游的做法回 400，让本地验收也能拦住它。
+    const badCalls = (parsed.messages ?? []).flatMap((m) => m.role === 'assistant' ? (m.tool_calls ?? []) : [])
+      .filter((c) => c.type !== 'function' || typeof c.function?.name !== 'string' || typeof c.function?.arguments !== 'string')
+    const orphanTool = (parsed.messages ?? []).some((m) => m.role === 'tool' && !m.tool_call_id)
+    if (badCalls.length || orphanTool) {
+      console.log(`[stub] !! 协议形状不合法：tool_calls=${JSON.stringify(badCalls).slice(0, 120)} 缺 tool_call_id=${orphanTool}`)
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ model: parsed.model, error: { message: 'invalid tool_calls shape' } }))
+      return
+    }
+
     const system = parsed.messages?.find((m) => m.role === 'system')?.content ?? ''
     const user = parsed.messages?.find((m) => m.role === 'user')?.content ?? ''
-    received.push({ model: parsed.model, hasAuth: Boolean(req.headers.authorization), system, user })
-    console.log(`[stub] model=${parsed.model} auth=${Boolean(req.headers.authorization)} 候选清单=${/id=/.test(system)} response_format=${parsed.response_format?.type ?? '无'} 用户说=${user.slice(0, 40)}`)
+    const tools = parsed.tools ?? []
+    received.push({ model: parsed.model, hasAuth: Boolean(req.headers.authorization), system, user, tools: tools.map((t) => t.function?.name) })
+    // 工具循环的第几轮：靠"消息里有没有 tool 结果"判断（服务端把工具结果回喂时才有 role=tool）
+    const toolResults = parsed.messages?.filter((m) => m.role === 'tool') ?? []
+    console.log(`[stub] model=${parsed.model} auth=${Boolean(req.headers.authorization)} 候选清单=${/id=/.test(system)} `
+      + `response_format=${parsed.response_format?.type ?? '无'} 工具=${tools.map((t) => t.function?.name).join(',') || '无'} `
+      + `已回喂工具结果=${toolResults.length} 用户说=${user.slice(0, 40)}`)
 
     // 回包形状要跟真实网关一致：推荐那段**带一条编造的 id**，用来验证服务端会不会丢掉它。
     // 故意**不加 ```json 包裹**——实测真实网关就是这么回的（提示词要 JSON，它给裸数组）。
@@ -55,14 +74,66 @@ const server = http.createServer((req, res) => {
       ? JSON.stringify(parsed.response_format)
       : askedForPicks ? picksAnswer : '今晚可以煮个青菜豆腐汤，配一盘蒜蓉西兰花，清爽又省事。'
 
+    // ---------- 工具循环（D-026 第三次补充）----------
+    // 服务端把工具声明发过来时，脚本按"真实模型会怎么走"来演。判据看 role=tool 的消息数：
+    //   第 1 轮：没有任何工具结果 → 回 tool_calls（先搜菜，**两个并行调用**，与实测的真网关一致）
+    //   第 2 轮：已有工具结果 → 回 tool_calls（提议加菜），参数里**带一条编造的 id**
+    //   第 3 轮：再回喂一次 → 回正文收尾
+    // 编造的 id 是故意的：服务端必须把它丢掉、只留真实那道（这条正是本次要验的核心）。
+    const toolMode = tools.some((t) => t.function?.name === 'search_dishes')
+    const searchHit = toolResults.find((m) => /dishes/.test(String(m.content)))
+    // 真 id **从上一轮的工具结果里现取**（stub 自己编的搜索结果里放的什么，就提什么）
+    const realId = /"recipeId":"([^"]+)"/.exec(String(searchHit?.content ?? ''))?.[1] ?? ''
+    // 轮次判据按**内容**分，不按工具结果的条数：模型会并行发多个调用（实测真网关就是两个
+    // search_dishes 一起回），那一轮就有两条 tool 消息——按条数分会把第 2 轮误判成第 3 轮，
+    // 直接跳到收尾，propose 那一轮永远轮不到（这个 bug 让第一次验收红了）。
+    const proposed = toolResults.some((m) => /accepted/.test(String(m.content)))
+    const searched = toolResults.length > 0
+    const toolPlan = (!toolMode) ? null
+      : !searched ? { calls: [
+          { id: 'call_stub_1', name: 'search_dishes', args: { query: '清淡' } },
+          { id: 'call_stub_2', name: 'search_dishes', args: { query: '汤' } },
+        ] }
+      : !proposed ? { calls: [
+          { id: 'call_stub_3', name: 'propose_menu_items', args: { items: [
+            { recipeId: 'invented-by-model', mealDate: '2026-10-12', meal: 'DINNER' },
+            ...(realId ? [{ recipeId: realId, mealDate: '2026-10-12', meal: 'DINNER', note: '少放盐' }] : []),
+          ] } },
+        ] }
+      : { text: '今晚就这两道吧，一荤一素搭着刚好。要我把它们加进今天晚餐吗？' }
+
+    if (toolPlan?.calls) {
+      res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+      const frame = (delta, finish) => `data: ${JSON.stringify({
+        id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+        model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }],
+      })}\n\n`
+      res.write(frame({ role: 'assistant', content: '我看看菜谱库里有什么。' }, null))
+      // 工具调用**按碎片发**：参数一段一段来（真实上游就是这样，见 ai.client 的归并逻辑）。
+      // 一次发完的话，"参数碎片要按 index 拼起来"这条实现就没被验到。
+      toolPlan.calls.forEach((call, index) => {
+        const json = JSON.stringify(call.args)
+        res.write(frame({ tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.name, arguments: '' } }] }, null))
+        for (const piece of json.match(/.{1,8}/gs) ?? []) {
+          res.write(frame({ tool_calls: [{ index, function: { arguments: piece } }] }, null))
+        }
+      })
+      res.write(frame({}, 'tool_calls'))
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
+    }
+    if (toolPlan?.text) { /* 落到下面的正常流式分支，正文用收尾那句话 */ }
+
     // 真实服务在 stream:false 时回普通 JSON；STUB_FORCE_STREAM=1 时强制走 SSE，
     // 用来验客户端的"网关不听话照样回 SSE"降级路径
+    const finalContent = toolPlan?.text ?? content
     const useSse = parsed.stream === true || process.env.STUB_FORCE_STREAM === '1'
     if (!useSse) {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({
         id: 'chatcmpl-stub', object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: parsed.model,
-        choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+        choices: [{ index: 0, message: { role: 'assistant', content: finalContent }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       }))
       return
@@ -77,7 +148,7 @@ const server = http.createServer((req, res) => {
     // **按小段发**，别一整段塞进一个 chunk：真实模型是逐段吐的，而验收里有一条
     // "流式要分段到（不是攒成一坨）"——stub 一次发完时那条会红，看起来像产品坏了，
     // 实际是 stub 不够真实。这里按字符切几段，形状与真实上游一致。
-    for (const piece of content.match(/.{1,12}/gs) ?? []) {
+    for (const piece of finalContent.match(/.{1,12}/gs) ?? []) {
       res.write(`data: ${chunk({ content: piece }, null)}\n\n`)
     }
     res.write(`data: ${chunk({}, 'stop')}\n\n`)

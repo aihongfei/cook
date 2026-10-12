@@ -43,6 +43,22 @@ export interface ChatTurn {
   content: string
 }
 
+/**
+ * 一条"要不要加进菜单"的建议（D-026 第三次补充）。
+ *
+ * 它是**提议**不是既成事实：用户点了确认才会走 `/orders/items` 真的写进那一餐
+ * （与手点同一条接口）。所以这里不需要任何"撤销"逻辑——没点就等于没发生。
+ */
+export interface MenuProposal {
+  recipeId: string
+  name: string
+  mealDate: string
+  meal: 'LUNCH' | 'DINNER'
+  note: string
+  /** 按钮上的人话，如「今天晚餐」 */
+  when: string
+}
+
 export async function fetchAiStatus(): Promise<AiStatus> {
   const { data } = await apiClient.get<AiStatus>('/ai/status')
   return data
@@ -83,12 +99,23 @@ export function useAiChat() {
  * 与后端 ai.controller 里写的格式对应（`data: {"text":"..."}` / `data: [DONE]`）。
  *
  * 回调里的 `chunk` 是**增量**（这一小段文字），调用方负责接到已有文字后面。
+ *
+ * 三种具名事件（`event: text|status|proposals`，见后端 ai.controller）：
+ * - `text`：正文增量；
+ * - `status`：工具执行中的一句人话（"正在翻菜谱…"）。**工具轮次要好几秒**，
+ *   没有它用户只看到光标闪，像是卡住了；
+ * - `proposals`：攒好的加菜建议，抽屉里据此长出确认按钮。它在**流结束时**才到
+ *   （服务端要等模型把话说完才交），所以不要用它来结束等待——以 `[DONE]` 为准。
  */
 export async function streamAiChat(
   messages: ChatTurn[],
   handlers: {
     /** 每收到一段就调一次（增量文本） */
     onChunk: (text: string) => void
+    /** 工具执行中的状态提示（可选）：传了就显示，不传就当没有 */
+    onStatus?: (label: string) => void
+    /** 全部建议（可选）：流结束时一次性给出 */
+    onProposals?: (items: MenuProposal[]) => void
     signal?: AbortSignal
   },
 ): Promise<void> {
@@ -136,10 +163,15 @@ export async function streamAiChat(
         if (!data) continue
         if (data === '[DONE]') return
         try {
-          const payload = JSON.parse(data) as { text?: string; error?: string }
+          const payload = JSON.parse(data) as {
+            type?: string; text?: string; label?: string; items?: MenuProposal[]; error?: string
+          }
           // 头已经发出去了，中途失败是以 error 事件回来的（见后端 chatStream）
           if (payload.error) throw new StreamError(payload.error, 502)
-          if (payload.text) handlers.onChunk(payload.text)
+          // 按 type 分派而不是"猜有哪些字段"：三种事件共用一套解析（见具名事件的说明）
+          if (payload.type === 'status' && payload.label) handlers.onStatus?.(payload.label)
+          else if (payload.type === 'proposals' && Array.isArray(payload.items)) handlers.onProposals?.(payload.items)
+          else if (payload.text) handlers.onChunk(payload.text)
         } catch (error) {
           if (error instanceof StreamError) throw error
           // 半截 JSON：跳过（下一块会补全成新的一段）

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { DotLoading } from 'antd-mobile'
 import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
-import { StreamError, streamAiChat, useAiStatus, type ChatTurn } from '@/api/ai'
+import { StreamError, streamAiChat, useAiStatus, type ChatTurn, type MenuProposal } from '@/api/ai'
+import { useAddOrderItem } from '@/api/orders'
 import { toast } from '@/components/ui/toast'
 import { pickExamples } from '../ai-prompts'
 import '../../shared.scss'
@@ -16,6 +17,12 @@ import '../../shared.scss'
  *
  * 历史由前端带着（服务端不存对话）：一次会话内连续问，模型能看到上文；
  * 关掉抽屉就清空——家庭场景里问完就走，不必留一份聊天记录让人翻。
+ *
+ * **对话里就能点菜**（用户 2026-10-12 第③项）：后端给模型挂了几个工具，它会自己去菜谱库
+ * 搜真实的菜，再提一份"要不要加进菜单"的建议（`proposals` 事件）。这里做两件事：
+ * ① 工具跑的时候显示它给的短句（"正在翻菜谱…"）——那几秒本来只有光标在闪，像卡住了；
+ * ② 把建议渲染成卡片，**用户点了"加入菜单"才真写库**（走与手点同一条 `/orders/items`）。
+ * 所以卡片上给的是"加入菜单/先不用"两个按钮，而不是让模型直接改菜单。
  *
  * 示例问题每次抽一批（见 ai-prompts）：同一组问题看第二遍就没人在读了。
  */
@@ -34,6 +41,13 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
   const [tip, setTip] = useState(0)
+  // 工具执行中的短句（后端 event: status）。有它时优先显示它——它比"在翻菜谱小书…"具体
+  const [stage, setStage] = useState('')
+  // 模型提的加菜建议。**只是建议**：点了"加入菜单"才真的写进那一餐
+  const [proposals, setProposals] = useState<MenuProposal[]>([])
+  /** 已经点过确认的那几条（按 recipeId+餐次记），点过就置灰，避免重复加 */
+  const [added, setAdded] = useState<string[]>([])
+  const addItem = useAddOrderItem()
   // 用函数形式初始化：每次打开（调用方 key 重挂载）抽一批新的，且**不在渲染里现抽**
   // （在渲染里抽的话每轮渲染都换一批，用户刚要点的那个会自己跑掉）
   const [examples, setExamples] = useState(pickExamples)
@@ -67,6 +81,9 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
     const history: ChatTurn[] = [...turns, { role: 'user', content }]
     setDraft('')
     setTip(0)
+    setStage('')
+    // 上一轮的建议随提问一起清掉：它属于上一句回答，留着会让人以为"还在等你决定"
+    setProposals([])
     setPending(true)
 
     const controller = new AbortController()
@@ -76,6 +93,8 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
     try {
       await streamAiChat(history, {
         signal: controller.signal,
+        onStatus: setStage,
+        onProposals: setProposals,
         onChunk: (chunk) => {
           setTurns((current) => {
             const last = current[current.length - 1]
@@ -94,8 +113,23 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
       toast.error(error instanceof StreamError ? error.message : apiErrorMessage(error))
     } finally {
       setPending(false)
+      setStage('')
       abortRef.current = null
     }
+  }
+
+  /** 用户点了"加入菜单"：走与手点同一条接口，成功了把这张卡置灰 */
+  const confirmProposal = (item: MenuProposal) => {
+    addItem.mutate(
+      { recipeId: item.recipeId, mealDate: item.mealDate, meal: item.meal, note: item.note || undefined },
+      {
+        onSuccess: (card) => {
+          toast.success(`已把「${item.name}」加进${card.mealLabel}`)
+          setAdded((current) => [...current, `${item.recipeId}|${item.mealDate}|${item.meal}`])
+        },
+        onError: (error) => toast.error(apiErrorMessage(error)),
+      },
+    )
   }
 
   return (
@@ -141,7 +175,45 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
               {pending && turns[turns.length - 1]?.content === '' && (
                 <div className="ai__turn ai__turn--assistant ai__turn--waiting">
                   <DotLoading color="currentColor" />
-                  <span className="ai__waiting-text">{WAITING_TIPS[tip]}</span>
+                  {/* 有工具状态就先说工具在干什么：那几秒用户至少知道系统真的在动
+                      （工具轮次实测 3~5 秒一轮，两三轮就是十几秒） */}
+                  <span className="ai__waiting-text">{stage || WAITING_TIPS[tip]}</span>
+                </div>
+              )}
+
+              {/* 加菜建议：只在回答说完之后出现，且**要用户点确认才写库** */}
+              {!pending && proposals.length > 0 && (
+                <div className="ai__proposals">
+                  <div className="ai__proposals-lead">要加进菜单吗？</div>
+                  {proposals.map((item) => {
+                    const key = `${item.recipeId}|${item.mealDate}|${item.meal}`
+                    const done = added.includes(key)
+                    return (
+                      <div className={['ai__proposal', done && 'is-done'].filter(Boolean).join(' ')} key={key}>
+                        <div className="ai__proposal-main">
+                          <span className="ai__proposal-name">{item.name}</span>
+                          <span className="ai__proposal-when">{item.when}</span>
+                          {item.note && <span className="ai__proposal-note">{item.note}</span>}
+                        </div>
+                        {done ? (
+                          <span className="ai__proposal-done">已加入</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="ai__proposal-add"
+                            disabled={addItem.isPending}
+                            onClick={() => confirmProposal(item)}
+                          >
+                            加入菜单
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {/* "先不用"不给按钮：不点就是不用，多一个按钮等于多一次确认打扰 */}
+                  <button type="button" className="ai__proposal-skip" onClick={() => setProposals([])}>
+                    先不用
+                  </button>
                 </div>
               )}
             </div>

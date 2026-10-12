@@ -1,10 +1,15 @@
 import { HttpException, HttpStatus, Injectable, ServiceUnavailableException } from '@nestjs/common'
 import { PrismaService } from '../recipes/prisma.service'
-import { AiUpstreamError, chatJson, chatStream } from './ai.client'
+import { AiUpstreamError, chatJson, chatStreamEvents, type StreamEvent, type WireMessage } from './ai.client'
 import {
   AI_HINT_MAX, SUGGEST_CANDIDATES, AiReplyError, formatCandidates, parseChatMessages, parseHint, parsePicks, readAiConfig,
   type AiConfig, type CandidateDish, type ChatMessage, type SuggestedPick,
 } from './ai.rules'
+import {
+  AI_TOOLS, PROPOSALS_MAX, SEARCH_RESULTS_MAX, TOOL_PROPOSE_MENU_ITEMS, TOOL_READ_PLAN, TOOL_ROUNDS_MAX, TOOL_SEARCH_DISHES,
+  readProposals, searchResult, todayKey, toolResult,
+  type MenuProposal, type ToolCall,
+} from './ai.tools'
 
 /**
  * AI 推荐与问答（用户 2026-10-12 的新需求；口径见 D-026）。
@@ -95,29 +100,29 @@ export class AiService {
     userId: string,
     rawMessages: unknown,
     signal?: AbortSignal,
-  ): Promise<{ reply: string }> {
+  ): Promise<{ reply: string; proposals: MenuProposal[] }> {
     // 同上：先验输入（400）再验配置（503）
     const messages = parseChatMessages(rawMessages)
     const config = this.requireConfig()
     const context = await this.familyContext(userId)
 
-    const systemPrompt = [
-      '你是这个家庭的厨房助手，回答要亲切、简短（通常 3 句话内），给可执行的建议而不是泛泛而谈。',
-      '家里已有的安排（别推荐重复的菜）：',
-      context.summary || '（今天还没有安排）',
-      context.note ? `家里情况：${context.note}` : '',
-      '如果被问到与下厨、食材、营养无关的事，礼貌地把话题带回来。',
-    ].filter(Boolean).join('\n')
-
-    const reply = await this.ask(config, { systemPrompt, messages, temperature: 0.7, signal }, (text) => text.trim())
-    return { reply }
+    let reply = ''
+    let proposals: MenuProposal[] = []
+    for await (const event of this.runToolLoop(config, userId, messages, context, signal)) {
+      if (event.type === 'text') reply += event.text
+      else if (event.type === 'proposals') proposals = event.items
+    }
+    if (!reply.trim() && proposals.length === 0) {
+      throw new HttpException('AI 没说出话来，再点一次试试', HttpStatus.BAD_GATEWAY)
+    }
+    return { reply: reply.trim(), proposals }
   }
 
   /**
    * 问 AI（流式）：逐段吐出模型的话，让第一个字一出现就能上屏。
    *
-   * 为什么不把 chat 直接改成流式：**推荐**那条路要的是结构化结果（json_schema + 解析核对），
-   * 而结构化与流式叠加在网关这边不可靠（见 ai.client 的 chatStream 注释）。**问答**本来就是
+   * 为什么不把 recommend 也改成流式：**推荐**那条路要的是结构化结果（json_schema + 解析核对），
+   * 而结构化与流式叠加在网关这边不可靠（见 ai.client 的 chatStreamEvents 注释）。**问答**本来就是
    * 一段自由文字，流式天然合适——两个入口各用最稳的那条路。
    *
    * 输入与配置的校验仍在这里做：调用方（控制器）已经写出 200 与 SSE 头之后就无法改状态码了，
@@ -127,26 +132,197 @@ export class AiService {
     userId: string,
     rawMessages: unknown,
     signal?: AbortSignal,
-  ): AsyncGenerator<string> {
+  ): AsyncGenerator<ChatEvent> {
     // 同上：先验输入（400）再验配置（503）
     const messages = parseChatMessages(rawMessages)
     const config = this.requireConfig()
     const context = await this.familyContext(userId)
+    try {
+      yield* this.runToolLoop(config, userId, messages, context, signal)
+    } catch (error) {
+      // 与 ask 同一套分类：上游失败要翻成人话 + 正确状态码，不能冒成 500
+      throw mapAskError(error)
+    }
+  }
 
+  /**
+   * **工具循环**：模型要调工具就替它调，把结果喂回去让它接着说，直到它不再调为止。
+   *
+   * 这是"AI 后端改成智能体"的实质（用户 2026-10-12 第③项）——它不是某个框架的名字，
+   * 而是这一圈：**模型说要什么 → 服务端真的去查库 → 结果喂回 → 模型接着说完**。
+   * 之所以自己写而不引 pi-ai：本项目后端是 CommonJS，pi-ai 是 ESM-only 且带 70+ 传递依赖
+   * （实测 require 不了、Docker `--frozen-lockfile` 也会跟着拧），而这里要的能力只有
+   * "发 messages、收 tool_calls、喂回结果"三件事——网关已经证实支持（见 D-026 第三次补充）。
+   *
+   * 三道闸门，都是为了不让模型的话直接变成用户家的数据：
+   * - 轮数上限 `TOOL_ROUNDS_MAX`：模型可能来回打转，烧的是用户额度；
+   * - 工具的执行结果**只回给模型**，写库要等用户点确认（propose 只"提名"）；
+   * - 未知工具名一律回一句"没有这个工具"，而不是崩掉（模型偶尔会自己发明工具名）。
+   */
+  private async *runToolLoop(
+    config: AiConfig,
+    userId: string,
+    messages: ChatMessage[],
+    context: { meal: string | null; note: string; summary: string },
+    signal?: AbortSignal,
+  ): AsyncGenerator<ChatEvent> {
     const systemPrompt = [
       '你是这个家庭的厨房助手，回答要亲切、简短（通常 3 句话内），给可执行的建议而不是泛泛而谈。',
       '家里已有的安排（别推荐重复的菜）：',
       context.summary || '（今天还没有安排）',
       context.note ? `家里情况：${context.note}` : '',
+      // 实测踩过：模型会往"已做好"的那一餐里加菜，用户点下去只拿到一句
+      // 「这餐已经做好了，换个餐次再点吧」——白点一次。所以把这条规则明说，
+      // 并要求它改提别的餐次（status 就在上面的安排里，模型看得到）。
+      '上面标了「已做好」或「已取消」的那一餐**不要再加菜**（加进去会被接口拒掉），改提别的餐次或先问用户。',
+      '',
+      `今天是 ${todayKey()}。`,
+      '你要推荐或提到某道具体的菜时，**必须先调用 ${TOOL_SEARCH_DISHES} 拿到真实的菜**——你记忆里的菜名库里不一定有，编出来的菜用户点不进去。',
+      `用户想吃某道菜、或你判断该加进菜单时，调用 ${TOOL_PROPOSE_MENU_ITEMS} 把菜提出来。它只是**提议**，`
+        + '界面上会出现确认按钮，用户点了才会真的加进菜单，所以不要对用户说"已经加好了"。',
+      '如果你提到了具体的菜（不管有没有提议），在回答的最后顺带问一句要不要加进菜单，例如'
+        + '「要我把这两道加进今天晚餐吗？」——这是用户明确要的：他希望在对话里就能直接点菜。',
       '如果被问到与下厨、食材、营养无关的事，礼貌地把话题带回来。',
     ].filter(Boolean).join('\n')
 
-    try {
-      yield* chatStream(config, { systemPrompt, messages, temperature: 0.7, signal })
-    } catch (error) {
-      // 与 ask 同一套分类：上游失败要翻成人话 + 正确状态码，不能冒成 500
-      throw mapAskError(error)
+    const wire: WireMessage[] = messages.map((message) => ({ role: message.role, content: message.content }))
+    const proposals: MenuProposal[] = []
+    const proposed = new Set<string>()
+    let seenCalls = false
+    // 模型"不再要工具了"就是正常收尾。**这里用 break 而不是 return**：
+    // return 会让下面的 proposals 永远发不出去（实测验收时就是这么红的——
+    // 工具都跑了、库里也核对了，前端却一个建议都收不到）。
+    let settled = false
+
+    for (let round = 0; round < TOOL_ROUNDS_MAX; round += 1) {
+      const calls: ToolCall[] = []
+      let text = ''
+      for await (const event of chatStreamEvents(config, {
+        systemPrompt, messages: wire, tools: AI_TOOLS, temperature: 0.7, signal,
+      })) {
+        if (event.type === 'text') {
+          text += event.text
+          yield { type: 'text', text: event.text }
+        } else {
+          calls.push(...event.calls)
+        }
+      }
+      if (calls.length === 0) {
+        settled = true
+        break
+      }
+      seenCalls = true
+
+      // 助手那句"我要调工具"必须原样带回去，否则下一轮的 tool 结果上游认不出对应谁
+      wire.push({ role: 'assistant', content: text || null, tool_calls: calls })
+
+      for (const call of calls) {
+        yield { type: 'status', label: statusLabel(call.name) }
+        const outcome = await this.executeTool(call, userId, proposals, proposed)
+        wire.push({ role: 'tool', tool_call_id: call.id, content: outcome })
+      }
     }
+
+    // 轮数用完了模型可能还在要求调工具：告诉它别再调了，逼一句话收尾
+    if (!settled && seenCalls) {
+      yield { type: 'status', label: '正在收尾…' }
+      for await (const event of chatStreamEvents(config, {
+        systemPrompt: `${systemPrompt}\n\n（工具轮次已经用完，请直接根据已有信息回答，不要再调用工具。）`,
+        messages: wire,
+        temperature: 0.7,
+        signal,
+      })) {
+        if (event.type === 'text') yield { type: 'text', text: event.text }
+      }
+    }
+    if (proposals.length) yield { type: 'proposals', items: proposals }
+  }
+
+  /**
+   * 执行一次工具调用，返回**给模型看的结果**（紧凑 JSON）。
+   *
+   * 这里一个字节都不往菜单里写：`propose_menu_items` 只是把建议攒起来交给界面。
+   * 真写库的动作在用户点"加入菜单"之后走 `/orders/items`（与手点同一条路），
+   * 这样"AI 建议"与"用户点菜"在数据上没有任何区别，也就不需要额外的一套权限口径。
+   */
+  private async executeTool(
+    call: ToolCall,
+    userId: string,
+    proposals: MenuProposal[],
+    proposed: Set<string>,
+  ): Promise<string> {
+    if (call.name === TOOL_SEARCH_DISHES) {
+      const query = readStringArg(call.arguments, 'query')
+      if (!query) return toolResult({ error: 'query 不能为空，请换个关键词再搜' })
+      const rows = await this.prisma.recipe.findMany({
+        where: { searchText: { contains: query } },
+        take: SEARCH_RESULTS_MAX,
+        orderBy: { id: 'asc' },
+      })
+      return searchResult(rows.map((recipe) => ({
+        id: recipe.id,
+        name: recipe.name,
+        category: recipe.category,
+        tags: (recipe.tags as string[] | null) ?? [],
+      })), query)
+    }
+
+    if (call.name === TOOL_PROPOSE_MENU_ITEMS) {
+      const wanted = readProposalIds(call.arguments)
+      // 拿库核对：模型给的 id 可能有编的，编的一律不往界面上放
+      const known = new Map<string, string>()
+      if (wanted.length) {
+        const rows = await this.prisma.recipe.findMany({
+          where: { id: { in: wanted } },
+          select: { id: true, name: true },
+        })
+        for (const row of rows) known.set(row.id, row.name)
+      }
+      const { proposals: fresh, rejected } = readProposals(call.arguments, known, todayKey())
+      for (const item of fresh) {
+        const key = `${item.recipeId}|${item.mealDate}|${item.meal}`
+        if (proposed.has(key) || proposals.length >= PROPOSALS_MAX) continue
+        proposed.add(key)
+        proposals.push(item)
+      }
+      return toolResult({
+        accepted: fresh.map((item) => `${item.name}（${item.when}）`),
+        rejected: rejected.length ? rejected : undefined,
+        hint: fresh.length
+          ? '建议已经放到用户眼前了，等他点确认。回答里问一句要不要加进菜单即可，不要说"已经加好了"。'
+          : '这些 id 在菜谱库里不存在，请先用 search_dishes 拿到真实 id 再来提。',
+      })
+    }
+
+    if (call.name === TOOL_READ_PLAN) {
+      const days = readNumberArg(call.arguments, 'days') ?? 3
+      return toolResult({ plan: await this.currentPlan(userId, Math.max(1, Math.min(7, Math.round(days)))) })
+    }
+
+    // 模型偶尔会自己发明工具名：回一句"没有这个工具"让它换个说法，而不是崩掉整轮
+    return toolResult({ error: `没有名为 ${call.name} 的工具` })
+  }
+
+  /** 读这个家往后几天的安排（给模型看的紧凑文本） */
+  private async currentPlan(userId: string, days: number): Promise<string> {
+    const membership = await this.prisma.familyMember.findUnique({ where: { userId } })
+    if (!membership) return '（还没有加入家庭）'
+    const now = new Date()
+    const from = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+    const to = new Date(from.getTime() + days * 86_400_000)
+    const meals = await this.prisma.mealOrder.findMany({
+      where: { familyId: membership.familyId, mealDate: { gte: from, lt: to } },
+      include: { items: true },
+      orderBy: [{ mealDate: 'asc' }, { meal: 'asc' }],
+    })
+    if (meals.length === 0) return '（这几天还没有安排）'
+    return meals
+      .map((meal) => {
+        const date = meal.mealDate.toISOString().slice(0, 10)
+        const dishes = meal.items.map((item) => item.recipeName).join('、') || '还没点菜'
+        return `${date} ${meal.meal === 'LUNCH' ? '午餐' : '晚餐'}：${dishes}`
+      })
+      .join('\n')
   }
 
   /**
@@ -258,3 +434,56 @@ function mapAskError(error: unknown): unknown {
 }
 
 export { AI_HINT_MAX }
+
+/** 流式问答往外吐的事件：前端按 type 分派（正文上屏 / 状态行 / 建议卡片） */
+export type ChatEvent =
+  | { type: 'text'; text: string }
+  | { type: 'status'; label: string }
+  | { type: 'proposals'; items: MenuProposal[] }
+
+/**
+ * 工具执行期间给用户看的短句。
+ *
+ * 为什么要给这个：工具轮次是**看得见的等待**（实测每轮 3~5 秒，两轮就 10 秒），
+ * 如果界面只显示"正在输入"，用户会以为卡住了；说一句"正在翻菜谱…"性质就完全不同
+ * ——他知道系统在干活，而且干的事和他刚说的话有关。
+ */
+function statusLabel(toolName: string): string {
+  if (toolName === TOOL_SEARCH_DISHES) return '正在翻菜谱…'
+  if (toolName === TOOL_PROPOSE_MENU_ITEMS) return '正在核对这几道菜…'
+  if (toolName === TOOL_READ_PLAN) return '正在看家里这几天的安排…'
+  return '正在处理…'
+}
+
+/** 从工具参数里取一个字符串（参数是模型给的，可能非法 JSON，一律当"没给"） */
+function readStringArg(rawArguments: string, key: string): string {
+  try {
+    const value = (JSON.parse(rawArguments) as Record<string, unknown>)?.[key]
+    return typeof value === 'string' ? value.trim().slice(0, 40) : ''
+  } catch {
+    return ''
+  }
+}
+
+function readNumberArg(rawArguments: string, key: string): number | null {
+  try {
+    const value = (JSON.parse(rawArguments) as Record<string, unknown>)?.[key]
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+/** 只取出提议里的 id，拿去库里核对（其余字段交给 readProposals 处理） */
+function readProposalIds(rawArguments: string): string[] {
+  try {
+    const items = (JSON.parse(rawArguments) as { items?: unknown })?.items
+    if (!Array.isArray(items)) return []
+    return items.flatMap((item) => {
+      const id = (item as { recipeId?: unknown })?.recipeId
+      return typeof id === 'string' && id.trim() ? [id.trim()] : []
+    })
+  } catch {
+    return []
+  }
+}

@@ -81,7 +81,9 @@ function mockStream({
   replies = ['你好'],
   failWith,
   hang = false,
-}: { replies?: string[]; failWith?: string; hang?: boolean } = {}) {
+  statuses = [] as string[],
+  proposals = [] as unknown[],
+}: { replies?: string[]; failWith?: string; hang?: boolean; statuses?: string[]; proposals?: unknown[] } = {}) {
   const sent: { messages: ChatTurn[] }[] = []
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body ?? '{}')) as { messages: ChatTurn[] }
@@ -96,7 +98,16 @@ function mockStream({
     const encoder = new TextEncoder()
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
+        // 具名事件按后端的真实顺序发：先 status（工具在跑），正文流完，最后才是 proposals
+        for (const label of statuses) {
+          controller.enqueue(encoder.encode(`event: status\ndata: ${JSON.stringify({ type: 'status', label })}\n\n`))
+        }
         for (const reply of replies) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: reply })}\n\n`))
+        // 建议**只在第一问给**：否则"第二问时把上一轮建议收走"这条没法验
+        // （第二问又收到一份同样的建议，界面上的卡片照样在，看不出是清过又来的）
+        if (proposals.length && sent.length === 1) {
+          controller.enqueue(encoder.encode(`event: proposals\ndata: ${JSON.stringify({ type: 'proposals', items: proposals })}\n\n`))
+        }
         if (!hang) {
           controller.enqueue(encoder.encode('data: [DONE]\n\n'))
           controller.close()
@@ -276,4 +287,86 @@ it('问答边收边显示（流式），再问时把上文一起带上', async (
       { role: 'user', content: '那冻起来行吗' },
     ],
   })
+})
+
+// ---------------------------------------------------------------------------
+// 对话内点菜（用户 2026-10-12 第③项 / D-026 第三次补充）。
+// 要盯住三件事，每一件都是"看起来对、其实是坑"的地方：
+// ① 工具跑的时候要显示后端给的那句人话（不然那几秒只有光标在闪）；
+// ② 建议必须**等用户点确认**才写库——模型说"加好了"不算数，它只负责提名；
+// ③ 提问时要清掉上一轮的建议（留着会让人以为还在等他决定）。
+// ---------------------------------------------------------------------------
+
+const PROPOSAL = {
+  recipeId: 'r-tomato', name: '番茄炒蛋', mealDate: '2026-10-12', meal: 'DINNER', note: '', when: '今天晚餐',
+}
+
+it('工具执行中显示后端给的短句（不是干等光标）', async () => {
+  // 让流一直开着，好停在"工具在跑"的那一刻观察
+  const { sent } = mockStream({ replies: [], hang: true, statuses: ['正在翻菜谱…'] })
+  renderSheet(<AiChatSheet visible onClose={() => {}} />)
+
+  const input = await screen.findByPlaceholderText(/肉怎么去腥/)
+  fireEvent.change(input, { target: { value: '今晚想吃清淡的' } })
+  fireEvent.click(screen.getByText('问'))
+
+  expect(await screen.findByText('正在翻菜谱…')).toBeTruthy()
+  expect(sent).toHaveLength(1)
+})
+
+it('建议卡片：点「加入菜单」才真的写库，写的是那条建议的日期与餐次', async () => {
+  const { post } = mockApi()
+  mockStream({ replies: ['给你配了两道清淡的。'], proposals: [PROPOSAL] })
+  renderSheet(<AiChatSheet visible onClose={() => {}} />)
+
+  const input = await screen.findByPlaceholderText(/肉怎么去腥/)
+  fireEvent.change(input, { target: { value: '今晚想吃清淡的' } })
+  fireEvent.click(screen.getByText('问'))
+
+  // 建议出现在回答之后，且带"哪一餐"的人话
+  expect(await screen.findByText('要加进菜单吗？')).toBeTruthy()
+  expect(screen.getByText('番茄炒蛋')).toBeTruthy()
+  expect(screen.getByText('今天晚餐')).toBeTruthy()
+  // **还没点之前一个字都不能写库**
+  expect(post).not.toHaveBeenCalledWith('/orders/items', expect.anything())
+
+  fireEvent.click(screen.getByText('加入菜单'))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/orders/items', {
+    recipeId: 'r-tomato', mealDate: '2026-10-12', meal: 'DINNER', note: undefined,
+  }))
+  // 点过之后按钮换成"已加入"，避免重复点
+  expect(await screen.findByText('已加入')).toBeTruthy()
+})
+
+it('「先不用」把建议收起来（不写库）', async () => {
+  const { post } = mockApi()
+  mockStream({ replies: ['想吃就加吧。'], proposals: [PROPOSAL] })
+  renderSheet(<AiChatSheet visible onClose={() => {}} />)
+
+  const input = await screen.findByPlaceholderText(/肉怎么去腥/)
+  fireEvent.change(input, { target: { value: '今晚想吃清淡的' } })
+  fireEvent.click(screen.getByText('问'))
+  fireEvent.click(await screen.findByText('先不用'))
+
+  await waitFor(() => expect(screen.queryByText('要加进菜单吗？')).toBeNull())
+  expect(post).not.toHaveBeenCalledWith('/orders/items', expect.anything())
+})
+
+it('再问一句时上一轮的建议要收走（它属于上一句回答）', async () => {
+  const { sent } = mockStream({ replies: ['先这样。'], proposals: [PROPOSAL] })
+  renderSheet(<AiChatSheet visible onClose={() => {}} />)
+
+  const input = await screen.findByPlaceholderText(/肉怎么去腥/)
+  fireEvent.change(input, { target: { value: '今晚吃什么' } })
+  fireEvent.click(screen.getByText('问'))
+  expect(await screen.findByText('要加进菜单吗？')).toBeTruthy()
+
+  // 第二次提问：桩这次不再给建议，所以卡片应当消失（而不是留在那儿继续等确认）
+  fireEvent.change(input, { target: { value: '那明天呢' } })
+  const sendBtn = screen.getByText('问') as HTMLButtonElement
+  await waitFor(() => expect(sendBtn.disabled).toBe(false))
+  fireEvent.click(sendBtn)
+
+  await waitFor(() => expect(sent).toHaveLength(2))
+  await waitFor(() => expect(screen.queryByText('要加进菜单吗？')).toBeNull())
 })
