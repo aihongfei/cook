@@ -2,8 +2,18 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import {
-  CAPABILITY, can, useCreateFamily, useFamily, useFamilyOptions, useJoinFamily, useLeaveFamily,
-  useRemoveMember, useResetInviteCode, useUpdateFamily, useUpdateMemberRole, type FamilyRole,
+  CAPABILITY,
+  can,
+  useCreateFamily,
+  useFamily,
+  useFamilyOptions,
+  useJoinFamily,
+  useLeaveFamily,
+  useRemoveMember,
+  useResetInviteCode,
+  useUpdateFamily,
+  useUpdateMemberRole,
+  type FamilyRole,
 } from '@/api/family'
 import { useMe } from '@/api/auth'
 import Page from '@/components/ui/Page'
@@ -52,7 +62,8 @@ export default function FamilyPage() {
   const memberLimit = options.data?.memberLimit ?? data?.memberLimit ?? 10
   // 家庭页不在底部 Tab 里，没有返回入口用户就只能改地址栏回去，所以按来源给一个
   const requestedFrom = location.state?.from
-  const from = typeof requestedFrom === 'string' && requestedFrom in FAMILY_ENTRIES ? requestedFrom : '/mine'
+  const from =
+    typeof requestedFrom === 'string' && requestedFrom in FAMILY_ENTRIES ? requestedFrom : '/mine'
   const back = (
     <Link className="page-back" to={from} style={{ paddingInline: 'var(--spacing-page)' }}>
       ← {FAMILY_ENTRIES[from]}
@@ -75,10 +86,16 @@ export default function FamilyPage() {
   }
 
   /** 统一收口：成功给一句话，失败把后端话术显示出来（不各自 try/catch） */
-  const submit = (mutate: (handlers: { onSuccess: () => void; onError: (error: unknown) => void }) => void, success: string) => {
+  const submit = (
+    mutate: (handlers: { onSuccess: () => void; onError: (error: unknown) => void }) => void,
+    success: string,
+  ) => {
     setError('')
     setNotice('')
-    mutate({ onSuccess: () => setNotice(success), onError: (err) => setError(apiErrorMessage(err)) })
+    mutate({
+      onSuccess: () => setNotice(success),
+      onError: (err) => setError(apiErrorMessage(err)),
+    })
   }
 
   if (family.isPending) {
@@ -106,20 +123,38 @@ export default function FamilyPage() {
             一个人建，其他人凭邀请码加入。
           </p>
 
-          {error && <p className="family-error" role="alert">{error}</p>}
-          {notice && <p className="mine-notice" role="status">{notice}</p>}
+          {error && (
+            <p className="family-error" role="alert">
+              {error}
+            </p>
+          )}
+          {notice && (
+            <p className="mine-notice" role="status">
+              {notice}
+            </p>
+          )}
 
           <div className="family-card">
             <div className="family-card__title">我来建一个家</div>
             <label className="family-field">
               <span>家庭名（不填就用「{me.data?.nickname ?? '我'}的家」）</span>
-              <input value={name} maxLength={32} placeholder="小满一家" onChange={(event) => setName(event.target.value)} />
+              <input
+                value={name}
+                maxLength={32}
+                placeholder="小满一家"
+                onChange={(event) => setName(event.target.value)}
+              />
             </label>
             <button
               type="button"
               className="family-primary"
               disabled={createFamily.isPending}
-              onClick={() => submit(cb => createFamily.mutate({ name: name.trim() || undefined }, cb), '家建好了，把邀请码发给家里人吧')}
+              onClick={() =>
+                submit(
+                  (cb) => createFamily.mutate({ name: name.trim() || undefined }, cb),
+                  '家建好了，把邀请码发给家里人吧',
+                )
+              }
             >
               {createFamily.isPending ? '正在建家…' : '创建家庭'}
             </button>
@@ -142,7 +177,9 @@ export default function FamilyPage() {
               type="button"
               className="family-primary"
               disabled={joinFamily.isPending || inviteInput.trim().length !== 6}
-              onClick={() => submit(cb => joinFamily.mutate(inviteInput.trim(), cb), '加入成功，欢迎回家')}
+              onClick={() =>
+                submit((cb) => joinFamily.mutate(inviteInput.trim(), cb), '加入成功，欢迎回家')
+              }
             >
               {joinFamily.isPending ? '正在加入…' : '加入家庭'}
             </button>
@@ -168,11 +205,16 @@ export default function FamilyPage() {
           <div className="family-head__main">
             <div className="family-head__name">{data.name}</div>
             <div className="family-head__meta">
-              {data.memberCount}/{memberLimit} 位成员 · 我是{options.data?.roles.find(r => r.value === data.myRole)?.label ?? data.myRole}
+              {data.memberCount}/{memberLimit} 位成员 · 我是
+              {options.data?.roles.find((r) => r.value === data.myRole)?.label ?? data.myRole}
             </div>
           </div>
           {mayEditFamily && (
-            <button type="button" className="btn-ghost" onClick={() => setEditingName((value) => !value)}>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => setEditingName((value) => !value)}
+            >
               {editingName ? '取消' : '改家庭名'}
             </button>
           )}
@@ -180,13 +222,18 @@ export default function FamilyPage() {
 
         {editingName && (
           <div className="family-rename">
-            <input value={name} maxLength={32} placeholder={data.name} onChange={(event) => setName(event.target.value)} />
+            <input
+              value={name}
+              maxLength={32}
+              placeholder={data.name}
+              onChange={(event) => setName(event.target.value)}
+            />
             <button
               type="button"
               className="family-primary"
               disabled={updateFamily.isPending || !name.trim()}
               onClick={() => {
-                submit(cb => updateFamily.mutate({ name: name.trim() }, cb), '家庭名已更新')
+                submit((cb) => updateFamily.mutate({ name: name.trim() }, cb), '家庭名已更新')
                 setEditingName(false)
               }}
             >
@@ -195,31 +242,49 @@ export default function FamilyPage() {
           </div>
         )}
 
-        {error && <p className="family-error" role="alert">{error}</p>}
-        {notice && <p className="mine-notice" role="status">{notice}</p>}
+        {error && (
+          <p className="family-error" role="alert">
+            {error}
+          </p>
+        )}
+        {notice && (
+          <p className="mine-notice" role="status">
+            {notice}
+          </p>
+        )}
 
-        <div className="family-invite">
-          <div className="family-invite__main">
-            <div className="family-invite__label">邀请码</div>
-            <div className="family-invite__code">{data.inviteCode}</div>
-          </div>
-          <div className="family-invite__actions">
-            <button type="button" className="btn-ghost" onClick={() => { void copyInvite() }}>
-              复制
-            </button>
-            {mayResetInvite && (
+        <div className="block-with-tip">
+          <div className="family-invite">
+            <div className="family-invite__main">
+              <div className="family-invite__label">邀请码</div>
+              <div className="family-invite__code">{data.inviteCode}</div>
+            </div>
+            <div className="family-invite__actions">
               <button
                 type="button"
                 className="btn-ghost"
-                disabled={resetInvite.isPending}
-                onClick={() => submit(cb => resetInvite.mutate(undefined, cb), '换好了，旧邀请码已经作废')}
+                onClick={() => {
+                  void copyInvite()
+                }}
               >
-                换一个
+                复制
               </button>
-            )}
+              {mayResetInvite && (
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={resetInvite.isPending}
+                  onClick={() =>
+                    submit((cb) => resetInvite.mutate(undefined, cb), '换好了，旧邀请码已经作废')
+                  }
+                >
+                  换一个
+                </button>
+              )}
+            </div>
           </div>
+          {!mayResetInvite && <p className="family-hint">邀请码只有掌勺人能换。</p>}
         </div>
-        {!mayResetInvite && <p className="family-hint">邀请码只有掌勺人能换。</p>}
 
         <SectionTitle title="家人" />
 
@@ -243,20 +308,27 @@ export default function FamilyPage() {
                     onChange={(event) => {
                       const role = event.target.value as FamilyRole
                       submit(
-                        cb => updateRole.mutate({ userId: member.userId, role }, cb),
+                        (cb) => updateRole.mutate({ userId: member.userId, role }, cb),
                         role === 'OWNER' ? `已把掌勺人交给${member.nickname}` : '角色已调整',
                       )
                     }}
                   >
-                    {(options.data?.roles ?? []).map(role => (
-                      <option key={role.value} value={role.value}>{role.label}</option>
+                    {(options.data?.roles ?? []).map((role) => (
+                      <option key={role.value} value={role.value}>
+                        {role.label}
+                      </option>
                     ))}
                   </select>
                   <button
                     type="button"
                     className="family-member__remove"
                     disabled={removeMember.isPending}
-                    onClick={() => submit(cb => removeMember.mutate(member.userId, cb), `已把${member.nickname}移出家庭`)}
+                    onClick={() =>
+                      submit(
+                        (cb) => removeMember.mutate(member.userId, cb),
+                        `已把${member.nickname}移出家庭`,
+                      )
+                    }
                   >
                     移出
                   </button>
@@ -268,26 +340,33 @@ export default function FamilyPage() {
 
         <SectionTitle title="共享设置" />
 
-        <div className="family-shared">
-          <div className="family-shared__main">
-            <div className="family-shared__title">家庭共享</div>
-            <div className="family-shared__sub">
-              {data.shared ? '家里人互相能看到菜单与点单' : '已关闭：各自看各自的'}
+        <div className="block-with-tip">
+          <div className="family-shared">
+            <div className="family-shared__main">
+              <div className="family-shared__title">家庭共享</div>
+              <div className="family-shared__sub">
+                {data.shared ? '家里人互相能看到菜单与点单' : '已关闭：各自看各自的'}
+              </div>
             </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={data.shared}
+              aria-label="家庭共享开关"
+              className={`family-switch${data.shared ? 'is-on' : ''}`}
+              disabled={!mayEditFamily || updateFamily.isPending}
+              onClick={() =>
+                submit(
+                  (cb) => updateFamily.mutate({ shared: !data.shared }, cb),
+                  data.shared ? '已关闭家庭共享' : '已开启家庭共享',
+                )
+              }
+            >
+              <span className="family-switch__dot" />
+            </button>
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={data.shared}
-            aria-label="家庭共享开关"
-            className={`family-switch${data.shared ? ' is-on' : ''}`}
-            disabled={!mayEditFamily || updateFamily.isPending}
-            onClick={() => submit(cb => updateFamily.mutate({ shared: !data.shared }, cb), data.shared ? '已关闭家庭共享' : '已开启家庭共享')}
-          >
-            <span className="family-switch__dot" />
-          </button>
+          {!mayEditFamily && <p className="family-hint">共享开关只有掌勺人能改。</p>}
         </div>
-        {!mayEditFamily && <p className="family-hint">共享开关只有掌勺人能改。</p>}
 
         {/* 掌勺人家里还有人时不能一走了之（否则这个家没有管理员）——直接说清怎么办，不让点进去撞错误 */}
         {isOwner && data.memberCount > 1 ? (
@@ -308,7 +387,9 @@ export default function FamilyPage() {
                 : '退出后要重新用邀请码才能回来。确定吗？'}
             </p>
             <div className="family-confirm__actions">
-              <button type="button" className="btn-ghost" onClick={() => setConfirming(false)}>再想想</button>
+              <button type="button" className="btn-ghost" onClick={() => setConfirming(false)}>
+                再想想
+              </button>
               <button
                 type="button"
                 className="family-leave"
@@ -318,7 +399,8 @@ export default function FamilyPage() {
                   setConfirming(false)
                   setError('')
                   leaveFamily.mutate(undefined, {
-                    onSuccess: (result) => setNotice(result.disbanded ? '家庭已解散' : '已退出家庭'),
+                    onSuccess: (result) =>
+                      setNotice(result.disbanded ? '家庭已解散' : '已退出家庭'),
                     onError: (err) => setError(apiErrorMessage(err)),
                   })
                   void wasDisband

@@ -147,6 +147,23 @@
   padding: 10px 16px;
 }
 
+/*
+ * 放进 .block-with-tip 的块：外边距交给容器统一管（容器用 flex gap 定间隙），
+ * 这样"说明与上下各 12px"不会因邻居是块、是标题还是按钮而变。
+ * 必须在这里显式清零，不能只靠 ui.scss 的 `.block-with-tip > *`：
+ * 页面样式在组件样式**之后**加载，单类选择器打平局时页面里的 margin 会覆盖容器规则。
+ */
+.block-with-tip > .family-invite,
+.block-with-tip > .family-shared,
+.block-with-tip > .family-hint {
+  margin: 0;
+}
+
+/* 紧跟说明之后的"退出/解散"按钮：让容器决定间距，不再叠加自己的 22px 上外边距 */
+.block-with-tip + .family-leave {
+  margin-top: 0;
+}
+
 .family-invite {
   display: flex;
   align-items: center;
@@ -183,8 +200,9 @@
   gap: 6px;
 }
 
+/* 单独出现时的间距；在 .block-with-tip 里由容器统一负责（见 ui.scss） */
 .family-hint {
-  margin: 0 var(--spacing-page) 10px;
+  margin: 0 var(--spacing-page) 12px;
   font-size: 12px;
   color: var(--color-ink-2);
 }
