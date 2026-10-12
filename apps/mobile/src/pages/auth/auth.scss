@@ -1,0 +1,170 @@
+/* 登录 / 注册页：沿用暖橙手绘风，居中卡片，无底部 Tab */
+
+.auth {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 100%;
+  padding: 34px var(--spacing-page) calc(var(--spacing-page) + 24px);
+  background:
+    radial-gradient(120% 60% at 50% 0%, var(--color-cream-2) 0%, transparent 62%),
+    var(--color-cream);
+}
+
+.auth__hero {
+  margin-top: 12px;
+  text-align: center;
+}
+
+.auth__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 62px;
+  height: 62px;
+  margin-bottom: 12px;
+  font-size: 22px;
+  color: var(--color-paper);
+  background: var(--color-brick);
+  border-radius: 20px;
+  box-shadow: var(--shadow-card);
+  transform: rotate(-4deg);
+}
+
+.auth__title {
+  margin: 0;
+  font-size: 26px;
+  color: #6e3a1c;
+}
+
+.auth__sub {
+  margin: 8px auto 0;
+  max-width: 300px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--color-ink-2);
+}
+
+.auth__card {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 18px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.auth__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth__field > span {
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+
+.auth__field input {
+  padding: 11px 13px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-ink);
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 13px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.auth__field input:focus {
+  border-color: var(--color-focus-line);
+  box-shadow: var(--shadow-focus);
+}
+
+.auth__avatars {
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.auth__avatars > legend {
+  padding: 0;
+  margin-bottom: 7px;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+
+.auth__avatars-row {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.auth__avatars-row::-webkit-scrollbar {
+  display: none;
+}
+
+.auth__avatar {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  font-size: 20px;
+  background: var(--color-cream-2);
+  border: 1.5px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.auth__avatar.is-active {
+  background: var(--color-peach);
+  border-color: var(--color-brand);
+}
+
+.auth__error {
+  margin: 0;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: var(--color-brick);
+  background: #fdece5;
+  border-radius: 12px;
+}
+
+.auth__submit {
+  margin-top: 3px;
+  padding: 13px;
+  font-size: 15px;
+  color: var(--color-paper);
+  cursor: pointer;
+  background: var(--color-brand);
+  border: 0;
+  border-radius: 15px;
+  box-shadow: var(--shadow-card);
+}
+
+.auth__submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.auth__switch {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+  text-align: center;
+}
+
+.auth__switch a {
+  color: var(--color-brand);
+  text-decoration: underline;
+}
+
+.auth__hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-ink-3);
+  text-align: center;
+}

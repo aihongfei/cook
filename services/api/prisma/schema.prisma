@@ -17,6 +17,37 @@ model AppMeta {
   updatedAt DateTime @updatedAt
 }
 
+/// 账号（F2-01/02/03）：账号 + 密码登录，未登录不可使用（D-008）。
+/// 密码只存 scrypt 派生结果，格式 `scrypt$N$r$p$salt$hash`（自描述，便于日后换参数或算法）。
+/// 口味/忌口档案（M8）与家庭成员关系（F2-05）后续都挂在这个 id 上。
+model User {
+  id           String         @id @default(cuid())
+  account      String         @unique @db.VarChar(64)
+  nickname     String         @db.VarChar(32)
+  /// emoji 头像（与手绘风一致，见 apps/mobile 的 me__avatar）
+  avatar       String         @default("🐰") @db.VarChar(16)
+  passwordHash String         @db.VarChar(255)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  refreshTokens RefreshToken[]
+
+  @@index([createdAt])
+}
+
+/// 刷新令牌：只存 sha256 摘要（泄库也无法直接使用），支持过期与吊销（退出登录即吊销）。
+model RefreshToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique @db.VarChar(64)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
 /// JSON collections retain ordered ingredients, nested step text and source notes.
 /// origin and sourceKey isolate imported records from future user-created recipes.
 model Recipe {

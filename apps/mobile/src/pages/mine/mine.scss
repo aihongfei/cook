@@ -1,0 +1,118 @@
+/* 我的页里新增的资料编辑与退出登录（其余样式沿用 shared.scss 的 .me / .rows） */
+
+.mine-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin: 10px var(--spacing-page) 0;
+  padding: 14px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.mine-edit__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mine-edit__field > span,
+.mine-edit__avatars > legend {
+  padding: 0;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+
+.mine-edit__field input {
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-ink);
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 12px;
+  outline: none;
+}
+
+.mine-edit__field input:focus {
+  border-color: var(--color-focus-line);
+  box-shadow: var(--shadow-focus);
+}
+
+.mine-edit__avatars {
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.mine-edit__row {
+  display: flex;
+  gap: 7px;
+  margin-top: 7px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.mine-edit__row::-webkit-scrollbar {
+  display: none;
+}
+
+.mine-edit__avatar {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  font-size: 18px;
+  background: var(--color-cream-2);
+  border: 1.5px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.mine-edit__avatar.is-active {
+  background: var(--color-peach);
+  border-color: var(--color-brand);
+}
+
+.mine-edit__save {
+  padding: 11px;
+  font-size: 14px;
+  color: var(--color-paper);
+  cursor: pointer;
+  background: var(--color-brand);
+  border: 0;
+  border-radius: 13px;
+}
+
+.mine-edit__save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mine-notice {
+  margin: 10px var(--spacing-page) 0;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+  background: var(--color-cream-2);
+  border-radius: 12px;
+}
+
+.mine-signout {
+  display: block;
+  width: calc(100% - var(--spacing-page) * 2);
+  padding: 13px;
+  margin: 22px var(--spacing-page) 0;
+  font-size: 14px;
+  color: var(--color-brick);
+  cursor: pointer;
+  background: transparent;
+  border: 1.5px solid var(--color-focus-line);
+  border-radius: 14px;
+}
+
+.mine-signout:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

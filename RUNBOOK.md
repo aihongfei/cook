@@ -317,7 +317,69 @@ cd /d C:\Users\Administrator\Desktop\cook\services\api
 pnpm run test:http        :: 可用 BASE_URL 覆盖，默认 http://127.0.0.1:3000/api
 ```
 
-**实测结果**：**18/18 通过**。覆盖：分页结构与总数（28 条 / 首页 12 条）、第二页不重叠、搜索命中（菜名/配料/标签、别名「番茄炒鸡」）、品类×菜系交叉筛选（素菜×家常=7）、`/filters` 返回 4 品类、无结果 200 + total=0、详情含配料/步骤/来源许可与固定 commit、未知 id 404、非法查询（`page=0`/`page=99999`/`pageSize=1000`/重复参数/未知参数）400。
+**实测结果**：**18/18 通过**。覆盖：分页结构与 pageSize、第二页不重叠、搜索命中菜名/配料/标签（含"只在配料里出现的关键词"）、品类×菜系交叉筛选（结果必须同时满足两个条件）、`/filters` 返回 4 品类、无结果 200 + total=0、详情含配料/步骤/来源四要素、未知 id 404、非法查询（`page=0`/`page=99999`/`pageSize=1000`/重复参数/未知参数）400。
+
+> **订正（2026-10-12）**：本脚本原有 4 条断言写的是 HowToCook 种子时期的**固定数字**（总数 28、别名"番茄炒鸡"命中西红柿炒鸡蛋、素菜×家常=7、许可 Unlicense + 40 位 commit）。换数据源（种子弃用 → 第三方 API 聚合）后这些断言**实际长期失败（14/18）**，而本文档仍写着 18/18 —— 属于"历史结果当成了当前证据"。现已全部改为**行为断言**（不绑定会随数据规模变化的数字，也不绑定具体数据源），换源不会再误报。
+
+---
+
+## R-010 注册登录接口与验收（✅ 已验证，2026-10-12）
+
+**前置：`JWT_SECRET` 必须先在 `.env` 里设好**（≥32 字符；没设或太短后端**直接启动失败**，这是刻意的——避免拿"开发默认密钥"上生产）。
+
+```bash
+# 生成一个随机密钥写进 .env（不要把值贴进任何文档/聊天）
+openssl rand -base64 48
+```
+
+`.env` 需要（示例见 `.env.example`，**值只写在 `.env`**）：
+
+| 变量 | 用途 |
+| --- | --- |
+| `JWT_SECRET` | 签发 access token 的密钥，**必填、≥32 字符** |
+| `JWT_ACCESS_TTL_SECONDS` | access token 有效期，默认 7200（2 小时） |
+
+**接口一览**（前缀 `/api`）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/auth/register` | 注册（`account`/`password`/`nickname`/`avatar`），直接返回令牌 |
+| POST | `/auth/login` | 登录，**限流 8 次/分**；密码错与账号不存在返回同一句话 |
+| POST | `/auth/refresh` | 用刷新令牌换新令牌（**轮换：旧的立即吊销**） |
+| POST | `/auth/logout` | 退出（吊销该刷新令牌） |
+| GET | `/auth/me` | 当前账号（**需 Bearer token**） |
+| PATCH | `/auth/me` | 改昵称/头像（头像须在白名单内） |
+| GET | `/auth/options` | 注册口径：账号长度、密码规则、头像白名单（前端不硬编码规则） |
+
+**验收**：
+
+```bash
+pnpm --dir services/api run test          # 单测（含密码哈希/规则/令牌轮换）
+pnpm --dir services/api run test:http:auth # HTTP 验收：真实请求，20 项
+pnpm --dir apps/mobile exec vitest run     # 前端 19 项（含 401 自动续期、守卫跳转）
+```
+
+> **注意（限流窗口）**：登录限流按 IP 计数且存在服务内存里，**连着跑两遍 `test:http:auth` 时第二遍会被第一遍的窗口拦成 429**。脚本已内置处理：先探测一次，若已限流就等窗口过期再跑（打印等待提示）。手工连续试登录失败时看到 429 属预期，等 1 分钟即可。
+>
+> **注意（容器代码是构建产物）**：改了后端代码必须 `docker compose up -d --build api` 再验收，否则验的是旧代码（曾因此出现"注册时选的头像没生效"，实际容器里根本没有该字段的支持）。
+
+---
+
+## R-011 数据库迁移与用户表（✅ 已验证，2026-10-12）
+
+```bash
+docker compose exec api npx prisma migrate deploy   # 容器启动时也会自动执行
+```
+
+- 迁移文件：`prisma/migrations/`（`20261012021730_init` 菜谱、`20261012032044_recipe_image_mirror` 图片自托管、`auth_users` 用户与刷新令牌）。
+- 查用户（示例，**不要在生产库上随手改**）：
+
+```bash
+docker compose exec mysql mysql --default-character-set=utf8mb4 -uroot -p -e \
+  "SELECT account, nickname, avatar, createdAt FROM cook.User ORDER BY createdAt DESC LIMIT 5;"
+```
+
+> `--default-character-set=utf8mb4` 必须带上，否则中文昵称与 emoji 头像在终端里显示成 `???`（数据本身没问题）。
 
 
 ---

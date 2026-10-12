@@ -25,14 +25,16 @@ cook/
 │     │  ├─ fonts/           # 手写字体 ZCOOL KuaiLe（woff2）
 │     │  └─ img/             # 笔绘素材：hero / 菜品 / cat-1..5 / banner / logo-t
 │     ├─ src/
-│     │  ├─ api/             # client.ts（axios 实例 + 拦截器）、recipes.ts（菜谱接口与查询 hooks）
+│     │  ├─ api/             # client.ts（axios 实例 + token 注入 + 401 单飞续期 + 统一错误文案）、
+│     │  │                   # recipes.ts（菜谱接口与查询 hooks）、auth.ts（注册登录接口与 hooks）
 │     │  ├─ components/      # icons/（SVG 图标）、ui/（Page/SectionTitle/Chips/Pill/EmptyState/FilterTabs/BottomSheet/Toast/反馈/Skeleton）
 │     │  ├─ config/          # tabs.ts（底部 5 Tab 定义）
 │     │  ├─ data/            # demo.ts（M0 占位数据；今日安排仍标注为示例）
 │     │  ├─ layouts/         # TabLayout（外壳 + 底部导航）
-│     │  ├─ pages/           # kitchen/ recipes/（列表 + 详情）/ order/ discover/ fridge/ mine/ + shared.scss
-│     │  ├─ router/          # index.tsx（路由表，含 /recipes、/recipes/:id）
-│     │  ├─ stores/          # recipe-filters.ts（zustand persist：仅品类/菜系偏好）
+│     │  ├─ pages/           # kitchen/ recipes/（列表 + 详情）/ auth/（登录、注册、auth.scss）
+│     │  │                   # / order/ discover/ fridge/ mine/ + shared.scss
+│     │  ├─ router/          # index.tsx（路由表）、RequireAuth.tsx（未登录跳 /login 并记住来源页）
+│     │  ├─ stores/          # recipe-filters.ts（仅品类/菜系偏好）、auth.ts（token/refreshToken/user，persist）
 │     │  ├─ styles/          # tailwind.css（@theme static token）、index.scss（字体 + 基础 + 聚焦态）
 │     │  └─ theme/           # tokens.ts（token 的 TS 视图）
 │     └─ .env.example
@@ -40,14 +42,17 @@ cook/
 │  └─ api/                   # ✅ 后端（NestJS 12 + Prisma 6 + MySQL 8），容器化
 │     ├─ Dockerfile          # 多阶段构建（node:24-alpine）
 │     ├─ docker-entrypoint.sh# 启动时 prisma migrate deploy → node dist/main
-│     ├─ prisma/             # schema.prisma（provider=mysql）+ migrations/（20261012021730_init）
-│     ├─ seeds/              # howtocook.json（28 道种子，固定 commit + Unlicense）
-│     ├─ scripts/            # verify-recipes-http.cjs（接口 HTTP 验收）
-│     ├─ tests/              # node:test：解析器 / 导入幂等 / 查询与校验
+│     ├─ prisma/             # schema.prisma（Recipe / User / RefreshToken）+ migrations/
+│     │                      # （20261012021730_init、20261012032044_recipe_image_mirror、auth_users）
+│     ├─ seeds/              # howtocook.json（28 道种子）——已弃用为数据来源，保留为历史实现
+│     ├─ scripts/            # verify-recipes-http.cjs、verify-auth-http.cjs（HTTP 验收脚本）
+│     ├─ tests/              # node:test：解析器 / 导入幂等 / 查询与校验 / 密码哈希与账号规则
 │     ├─ src/
 │     │  ├─ main.ts          # HOST/PORT 可配置（容器内 0.0.0.0）
-│     │  ├─ app.module.ts
+│     │  ├─ app.module.ts    # 全局限流守卫（Throttler）+ 各业务模块
 │     │  ├─ modules/health/  # 健康检查
+│     │  ├─ modules/auth/    # 注册登录：controller / service / jwt 配置与守卫 /
+│     │  │                   # password.service.ts（scrypt 哈希与校验）/ account.rules.ts（账号·密码·头像白名单）
 │     │  ├─ modules/recipes/ # 菜谱：controller / query / provider（可插拔）/ howtocook 解析器 / importer
 │     │  │  └─ sources/      # 外部数据源适配器：recipe-source.ts（归一规则）、jisu / uapis / jumdata.source.ts
 │     │  ├─ modules/media/   # 图片自托管：media.storage.ts（S3 客户端 / 桶准备 / 上传 / 对外地址拼接）
@@ -68,15 +73,16 @@ cook/
 | 前端构建产物 | `apps/mobile/dist` | ✅ 已验证（`pnpm run build`） |
 | 后端 API | 容器 `cook-api-1` · `http://127.0.0.1:3000/api`（宿主映射） | ✅ 已验证（`docker compose up -d`） |
 | 后端接口文档 | `http://127.0.0.1:3000/api/docs` | ✅ Swagger |
-| 数据库 | 容器 `cook-mysql-1` · MySQL 8.4 · `127.0.0.1:3306` · 库名 `cook` | ✅ 已建库建表（迁移 `20261012021730_init` + `20261012032044_recipe_image_mirror`），数据在命名卷 `cook_mysql-data` |
+| 数据库 | 容器 `cook-mysql-1` · MySQL 8.4 · `127.0.0.1:3306` · 库名 `cook` | ✅ 已建库建表（迁移 `20261012021730_init` + `20261012032044_recipe_image_mirror` + `auth_users`），数据在命名卷 `cook_mysql-data` |
 | 对象存储（菜谱图片） | 容器 `cook-minio-1`（**自建镜像 `cook-minio`**，源码 `services/minio/Dockerfile`）· S3 API `http://127.0.0.1:9000` · 控制台 `http://127.0.0.1:9001` · 桶 `cook-media`（公开只读）· 数据卷 `minio-data` 挂在 `/data` | ✅ 已验证：健康检查 healthy、598 个对象 / 8.9 MiB、图片直连 200、匿名读 200 |
 | 容器网络 | compose 网络 `cook_default`；容器内互访用服务名 `mysql` / `api` / `minio` | ✅ |
 
 ## 配置
 
 - 前端环境变量前缀 `VITE_`；模板见 `apps/mobile/.env.example`。**打包 APK 前需把 `VITE_API_BASE_URL` 指向服务器地址**（本机开发指向 `http://127.0.0.1:3000/api`）。
-- compose 用根目录 `.env`（模板 `.env.example`）：`MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` / `MYSQL_PORT` / `API_PORT` / `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` / `MINIO_PORT` / `MINIO_CONSOLE_PORT` / `MEDIA_S3_BUCKET` / `MEDIA_BASE_URL` / `NPM_REGISTRY` / `CORS_ORIGIN`。
-- 后端环境变量见 `services/api/.env.example`（`DATABASE_URL` / `PORT` / `HOST` / `CORS_ORIGIN` + 图片自托管的 `MEDIA_S3_*` / `MEDIA_BASE_URL`）。宿主机连容器库用 `127.0.0.1`，容器内连库由 compose 覆盖为服务名 `mysql`。
+- compose 用根目录 `.env`（模板 `.env.example`）：`MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` / `MYSQL_PORT` / `API_PORT` / `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` / `MINIO_PORT` / `MINIO_CONSOLE_PORT` / `MEDIA_S3_BUCKET` / `MEDIA_BASE_URL` / `JWT_SECRET` / `NPM_REGISTRY` / `CORS_ORIGIN`。
+- 后端环境变量见 `services/api/.env.example`（`DATABASE_URL` / `PORT` / `HOST` / `CORS_ORIGIN` + 图片自托管的 `MEDIA_S3_*` / `MEDIA_BASE_URL` + 登录鉴权的 `JWT_SECRET` / `JWT_ACCESS_TTL_SECONDS`）。宿主机连容器库用 `127.0.0.1`，容器内连库由 compose 覆盖为服务名 `mysql`。
+- **`JWT_SECRET` 必填且 ≥32 字符**：缺失或过短后端**直接启动失败**（刻意不给默认值，防止"开发默认密钥"上生产）。生成：`openssl rand -base64 48`。
 - **图片地址**：接口返回的图片 URL = `MEDIA_BASE_URL` + `imageKey`（如 `http://127.0.0.1:9000/cook-media/recipes/<hash>.jpg`）。**`MEDIA_BASE_URL` 必须是浏览器/APK 能访问到的地址**——本机开发写回环，部署到服务器时改成域名或公网 IP，写错了页面就无图。
 - **包管理器**：前后端统一用 **pnpm 12**（原 npm 锁文件归档在 `history/`）。**密钥（数据库密码、第三方 API key 等）一律放 `.env`，不写入文档、不入库、不进对话记录。**
 - **CORS**：后端只放行 `CORS_ORIGIN`（默认 `http://127.0.0.1:5173`）。换端口起前端必须同步加白名单，否则页面显示"暂时连不上厨房"。**APK 走 WebView，其 Origin 与网页不同，接入 M14 时需一并放行。**

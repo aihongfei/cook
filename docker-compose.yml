@@ -83,6 +83,8 @@ services:
       HOST: 0.0.0.0
       # 前端在宿主机跑 Vite(5173)，因此必须放行该来源；移动端 APK 走 WebView，Origin 为 capacitor:// 需一并放行
       CORS_ORIGIN: ${CORS_ORIGIN:-http://127.0.0.1:5173,http://localhost:5173}
+      # 登录令牌签名密钥（F2-02）：从根 .env 传入；容器内不设默认值，没配就启动失败
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 里设置 JWT_SECRET（至少 32 个字符）}
       # 接口返回图片时拼的对外前缀。必须是**浏览器能访问到的地址**——
       # 本机开发写宿主机回环；部署到服务器时改成域名或公网 IP（写错了图片就打不开）。
       MEDIA_BASE_URL: ${MEDIA_BASE_URL:-http://127.0.0.1:9000/cook-media}
