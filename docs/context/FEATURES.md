@@ -54,7 +54,7 @@
 | F0-02 | 路由与底部 Tab 框架  | react-router 5 Tab：厨房/订单/发现/冰箱/我的，全部路由已验证                                                                                                          | P0  | ✅   |
 | F0-03 | 设计系统与主题 Token | `@theme static` 输出全部 token；手写字体 ZCOOL KuaiLe 接入                                                                                                    | P0  | ✅   |
 | F0-04 | 移动端适配框架       | 390 基准、`viewport-fit=cover`、`env(safe-area-inset-*)`                                                                                               | P0  | ✅   |
-| F0-05 | 通用组件库         | Page / SectionTitle / Chips / Pill / EmptyState / BottomSheet / Toast·Dialog / Skeleton / **FilterTabs（antd-mobile Tabs 封装）** 均已做并接入真实页面 | P0  | ✅   |
+| F0-05 | 通用组件库         | Page / SectionTitle / Chips / Pill / EmptyState / BottomSheet / Toast·Dialog / Skeleton / **FilterTabs（antd-mobile Tabs 封装）** 均已做并接入真实页面；**抽屉进出与换页、新消息都带动效**（D-027） | P0  | ✅   |
 | F0-06 | 图标与插画资源体系     | 5 个 Tab SVG 图标 + 草枝 + 笔绘素材（hero/菜品/分类/横幅/品牌字）落库到 `public/img`                                                                                      | P0  | ✅   |
 | F0-07 | 客户端缓存层        | TanStack Query 请求缓存 + `stores/recipe-filters.ts` 仅持久化品类/菜系偏好；搜索词与菜谱内容不落盘（不做离线库，见 D-016）                                                      | P0  | ✅   |
 | F0-08 | 后端脚手架         | NestJS 12 + Prisma 6 + `/api/health` + Swagger(`/api/docs`)；首个迁移已应用                                                                                | P0  | ✅   |

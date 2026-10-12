@@ -189,9 +189,13 @@ it('每次重新打开抽屉都是干净的一份（上次写的备注不会留�
   fireEvent.change(note, { target: { value: '上次留下的备注' } })
   expect((note as HTMLInputElement).value).toBe('上次留下的备注')
 
-  // 关掉再开：抽屉不做"清状态"的 effect，靠每次打开换 key 重挂载
+  // 关掉再开：抽屉不做"清状态"的 effect，靠每次打开换 key 重挂载。
+  // 遮罩要等一帧才挂上（它跟着抽屉一起淡入，见 antd-mobile 的 Mask），出现前点不到
+  await waitFor(() => expect(document.querySelector('.adm-mask')).not.toBeNull())
   fireEvent.click(document.querySelector('.adm-mask') as Element)
-  await waitFor(() => expect(screen.queryByPlaceholderText('如：给小满做的生日面')).toBeNull())
+  // 再等它真的卸掉：收起要播完退场动画（见 BottomSheet），动画没播完那一格还在，
+  // 这时点开按钮不会重挂载——上次的备注就会被当成"没清掉"（并行跑全量时红过）
+  await waitFor(() => expect(screen.queryByPlaceholderText('如：给小满做的生日面')).toBeNull(), { timeout: 3000 })
   fireEvent.click(openButton)
 
   const reopened = await screen.findByPlaceholderText('如：给小满做的生日面')

@@ -329,6 +329,9 @@
   line-height: 1.7;
   white-space: pre-wrap;
   border-radius: 12px;
+  /* 新气泡轻轻浮上来。只在挂载那一刻播一次，所以旧气泡不会跟着抖
+     （用户 2026-10-12：「整个系统都是不要生硬的」） */
+  animation: ai-in 0.18s ease-out;
 }
 
 .ai__turn--user {
@@ -373,6 +376,25 @@
 
   50% {
     opacity: 0;
+  }
+}
+
+@keyframes ai-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai__turn,
+  .ai__proposals {
+    animation: none;
   }
 }
 
@@ -433,6 +455,8 @@
   background: var(--color-paper);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
+  /* 回答说完才出现的建议卡：凭空"冒"出来太硬，给一次淡入 */
+  animation: ai-in 0.2s ease-out;
 }
 
 .ai__proposals-lead { font-size: 12.5px; color: var(--color-ink-2); }

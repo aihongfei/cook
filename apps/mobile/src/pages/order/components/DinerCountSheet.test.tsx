@@ -126,7 +126,9 @@ it('提交把人数发到那一餐的接口，成功后提示并关抽屉', asyn
     expect(post).toHaveBeenCalledWith('/orders/meals/2026-10-12-DINNER/diners', { dinerCount: 6 }),
   )
   expect(await screen.findByText('这餐按 6 人算')).toBeTruthy()
-  expect(onClose).toHaveBeenCalled()
+  // onClose 要**等**：现在收起会先播完退场动画（见 BottomSheet），不是点完立刻回调。
+  // 直接断言的话是"跑得快就绿"的竞态（并行跑全量时真红过一次）
+  await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: 2000 })
 })
 
 it('清除发 null 而不是 0（0 会被后端拒，也容易被误当成"0 个人"）', async () => {

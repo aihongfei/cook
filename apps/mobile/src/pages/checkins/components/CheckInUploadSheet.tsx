@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { apiErrorMessage } from '@/api/client'
 import { shrinkImage, useCheckInStats, useUploadCheckIn } from '@/api/checkins'
-import BottomSheet from '@/components/ui/BottomSheet'
+import BottomSheet, { type BottomSheetHandle } from '@/components/ui/BottomSheet'
 import { toast } from '@/components/ui/toast'
 
 /**
@@ -30,6 +30,9 @@ export default function CheckInUploadSheet({
   const stats = useCheckInStats()
   const upload = useUploadCheckIn()
   const fileRef = useRef<HTMLInputElement>(null)
+  // 收起走抽屉自己的退场动画（见 BottomSheet 里那段 ⚠️）：直接调 onClose 会让抽屉"啪"地消失
+  const sheet = useRef<BottomSheetHandle>(null)
+  const closeSheet = () => (sheet.current ? sheet.current.close() : onClose())
 
   const [preview, setPreview] = useState<string | null>(null)
   const [note, setNote] = useState('')
@@ -62,7 +65,7 @@ export default function CheckInUploadSheet({
         onSuccess: (created) => {
           toast.success(created.mealKey ? '成品照已上传，家里人能看到啦' : '打卡成功，家里人能看到啦')
           onUploaded?.()
-          onClose()
+          closeSheet()
         },
         onError: (error) => toast.error(apiErrorMessage(error)),
       },
@@ -70,7 +73,7 @@ export default function CheckInUploadSheet({
   }
 
   return (
-    <BottomSheet visible={visible} title="打卡拍照" onClose={onClose}>
+    <BottomSheet ref={sheet} visible={visible} title="打卡拍照" onClose={onClose}>
       <p className="checkin-sheet__hint">拍下今天做的那道菜。家里的每个人都能看到，一起攒这本相册。</p>
 
       <input

@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { apiErrorMessage } from '@/api/client'
 import { can, useFamily } from '@/api/family'
 import { useAddOrderItem, useOrderOptions, type MealSlot } from '@/api/orders'
-import BottomSheet from '@/components/ui/BottomSheet'
+import BottomSheet, { type BottomSheetHandle } from '@/components/ui/BottomSheet'
 import { toast } from '@/components/ui/toast'
 import { nextMealDefaults } from '../next-meal'
 import type { PlanTarget } from '../plan-target'
@@ -42,6 +42,9 @@ export default function OrderDishSheet({
   const [chosenDay, setChosenDay] = useState<string | null>(null)
   const [chosenMeal, setChosenMeal] = useState<MealSlot | null>(null)
   const [note, setNote] = useState('')
+  // 收起走抽屉自己的退场动画（见 BottomSheet 里那段 ⚠️）：直接调 onClose 会让抽屉"啪"地消失
+  const sheet = useRef<BottomSheetHandle>(null)
+  const closeSheet = () => (sheet.current ? sheet.current.close() : onClose())
 
   /*
    * 默认值在渲染时推导，而不是用 useEffect 写状态：
@@ -67,7 +70,7 @@ export default function OrderDishSheet({
         onSuccess: (card) => {
           const dayLabel = days.find((option) => option.value === card.date)?.label ?? card.date
           toast.success(`已加入${dayLabel}${card.mealLabel}，等掌勺人安排`)
-          onClose()
+          closeSheet()
         },
         onError: (error) => toast.error(apiErrorMessage(error)),
       },
@@ -75,7 +78,7 @@ export default function OrderDishSheet({
   }
 
   return (
-    <BottomSheet visible={visible} title={`想吃「${recipeName}」？`} onClose={onClose}>
+    <BottomSheet ref={sheet} visible={visible} title={`想吃「${recipeName}」？`} onClose={onClose}>
       {!family.data ? (
         // 没家庭就没法点菜（点单是家庭内的协作）——直接把去路说清楚，不让点下去撞错误
         <p className="order-sheet__hint">

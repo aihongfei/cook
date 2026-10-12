@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { apiErrorMessage } from '@/api/client'
 import { useSetDinerCount, type MealCard } from '@/api/orders'
-import BottomSheet from '@/components/ui/BottomSheet'
+import BottomSheet, { type BottomSheetHandle } from '@/components/ui/BottomSheet'
 import { toast } from '@/components/ui/toast'
 
 /**
@@ -22,6 +22,9 @@ export default function DinerCountSheet({
   onClose: () => void
 }) {
   const setDiners = useSetDinerCount()
+  // 收起走抽屉自己的退场动画（见 BottomSheet 里那段 ⚠️）：直接调 onClose 会让抽屉"啪"地消失
+  const sheet = useRef<BottomSheetHandle>(null)
+  const closeSheet = () => (sheet.current ? sheet.current.close() : onClose())
   // 初值给「现在的人数」或"点菜人数"——后者是最小合理值，多数家庭直接确认就行
   const [value, setValue] = useState(card.dinerCount ? String(card.dinerCount) : String(Math.max(1, card.ordererCount)))
 
@@ -31,7 +34,7 @@ export default function DinerCountSheet({
       {
         onSuccess: (updated) => {
           toast.success(updated.dinerCount ? `这餐按 ${updated.dinerCount} 人算` : '已清除人数设定')
-          onClose()
+          closeSheet()
         },
         onError: (error) => toast.error(apiErrorMessage(error)),
       },

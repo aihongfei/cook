@@ -843,3 +843,63 @@ pnpm --dir apps/mobile test                   # 194/194（其中对话点菜 5 �
 **前端 `ai-sheets.test.tsx`（+5 条）**：工具状态上屏、点「加入菜单」才写库（且带上建议自己的日期与餐次）、「先不用」不写库、再问一句时上一轮建议收走、等第一段字时不留空气泡。
 
 **反证 7 组全部验过会红**：后端 —— 不核对 id / 日期不收敛 / 不去重；前端 —— 不清上一轮建议 / 不显示工具状态 / 建议直接写库不等确认 / 空占位气泡照画（用户看到的那个圆圈）。
+
+---
+
+## R-021 动效：抽屉滑进滑出 + 换页淡入上浮（D-027）（✅ 已验证，2026-10-12）
+
+**触发**：用户 2026-10-12：「还有底部 ai 对话出来时要加个滑动出来，不要这种生硬的，整个系统都是不要生硬的」。
+
+### 改了什么
+
+| 位置 | 文件 | 说明 |
+| --- | --- | --- |
+| 所有底部抽屉（9 处调用） | `apps/mobile/src/components/ui/BottomSheet.tsx` | 自己管一层 `shown`：挂载后先渲染成"关着"、随即翻成"开着"，让 Popup 的 spring 有起始值（100% → 0）——入场就是从下往上滑 |
+| 写入成功后自动收起的 5 个抽屉 | `DinerCountSheet` / `FreeDishSheet` / `OrderDishSheet` / `AiSuggestSheet` / `CheckInUploadSheet` | 改成 `sheet.current.close()`：先播退场，动画结束再回调 `onClose` |
+| 换页 | `apps/mobile/src/layouts/TabLayout.tsx` + `TabLayout.scss` | 页面包一层 `key=pathname` 的容器，重播 `page-in`（0.24s 淡入 + 上浮 6px） |
+| 对话区 | `apps/mobile/src/pages/discover/discover.scss` | 新气泡与建议卡走 `ai-in` 淡入上浮 |
+| 底部 Tab | `apps/mobile/src/layouts/TabLayout.scss` | 选中横线改"缩放 + 淡入"；按下去整格缩到 0.94 |
+
+### 怎么验
+
+```bash
+# 单测（含 5 条动效契约，其中 2 条做过反证）
+pnpm --dir apps/mobile test                    # 199/199
+pnpm --dir apps/mobile exec tsc --noEmit       # exit=0
+pnpm --dir apps/mobile run lint                # 6 条警告（与改动前一致，无新增）
+
+# 浏览器里量位移：点开抽屉后每 ~30ms 读一次 .adm-popup-body 的 inline transform
+#   document.querySelector('.adm-popup-body').style.transform
+#   document.querySelector('.adm-mask') 的 opacity
+```
+
+**实测（2026-10-12，390×844 视口）**：
+
+| 动作 | 采样到的位移 / 透明度 |
+| --- | --- |
+| 打开 AI 抽屉 | `translateY` 73% → 49% → 32% → 21% → 13% → 8.4% → 0（遮罩 0.14 → 0.89 → 1） |
+| 关闭（点遮罩） | 9% → 42% → 69% → 82% → 90% → 94% → 96.6%（遮罩 1.00 → 0.01），**滑完之后内容才卸载** |
+| 换个 Tab | `page-in`：opacity 0.11 → 1、`translateY` 5.3px → 0（约 240ms） |
+| 发一句话 | 新气泡 `ai-in`：opacity 0 → 0.93 |
+
+中间那层换页容器没影响滚动：`.tab-layout__body` 的 `scrollHeight=1299 / clientHeight=644`，把 `scrollTop` 设成 400 之后确实是 400。
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| 抽屉"啪"地出现，没有滑动（用户指的就是这个） | antd-mobile 的 `Popup` 只在 `visible` **由 false 变 true** 时才播动画；而本项目的用法是"打开时才挂载、`visible` 写死 true"——spring 的初值直接等于终点，等于没动画 | 自己管一层 `shown`：先渲染成关着，下一个渲染再打开 |
+| 关闭时没有退场 | 调用方的 `onClose` 一执行就把抽屉卸载了（条件渲染的用法） | 关闭先走内部 `close()`（遮罩点击也走它），等 `afterClose`（弹簧停下那一刻）再回调 `onClose`；成功后自动收起的页面用 `ref` 拿 `close()` |
+| 抽屉卡在屏幕上关不掉 | 退场回调挂在弹簧"跑完"那一刻，**弹簧没得跑就不会回调**——刚挂载、入场第一帧还没画就被关掉时，目标值等于当前值，无动画可播 | `close()` 加兜底计时器（`EXIT_FALLBACK_MS = 420`）；"调用方自己置 false"那条路用"内容还在就重挂 Popup" |
+| 换页容器加上后短页面撑不满 | 页面根节点的 `min-height: 100%` 需要一个**高度确定**的父元素 | 容器写 `height: 100%`（不是 `auto`）；实测滚动与高度都正常 |
+| 多了个 `onClose` 竞态：并行跑全量时偶发红 | 关闭现在是"过一会儿才回调"，测试里紧跟其后的断言变成了赛跑 | 相关断言包进 `waitFor`（`DinerCountSheet` 那条 2s、打卡那条 3s），并写明原因 |
+| lint 冒出一条新告警 | `react(set-state-in-effect)` | 就地 `oxlint-disable-next-line` 并写明"这里要的就是两个渲染本身"（全站警告数没变） |
+
+### 回归测试
+
+**`apps/mobile/src/components/ui/bottom-sheet.test.tsx`（5 条，新增）**：挂载那一刻还在屏幕外（`translateY > 50`）、随后归位；关闭先退场（内容还在、`onClose` 未回调）→ 动画结束才回调；连点遮罩只回调一次；调用方置 `visible=false` 时不回调 `onClose`；`ref.close()` 走同一条退场路径。
+
+**反证 2 组都验过会红**：
+
+1. `useState(visible)`（旧的"一上来就已经开着"）→ `expected 0 to be greater than 50`（起始位移是 0 = 没有滑动）；
+2. `close()` 里立刻回调 `onClose`（旧的"没有退场"）→ `expected "vi.fn()" to not be called at all, but actually been called 1 times`。

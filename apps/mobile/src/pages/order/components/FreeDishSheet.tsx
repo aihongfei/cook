@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { apiErrorMessage } from '@/api/client'
 import { can, useFamily } from '@/api/family'
 import { useAddOrderItem, useOrderOptions, type MealSlot } from '@/api/orders'
-import BottomSheet from '@/components/ui/BottomSheet'
+import BottomSheet, { type BottomSheetHandle } from '@/components/ui/BottomSheet'
 import { toast } from '@/components/ui/toast'
 import '../order.scss'
 
@@ -29,6 +29,9 @@ export default function FreeDishSheet({
   const family = useFamily()
   const options = useOrderOptions()
   const addItem = useAddOrderItem()
+  // 收起走抽屉自己的退场动画（见 BottomSheet 里那段 ⚠️）：直接调 onClose 会让抽屉"啪"地消失
+  const sheet = useRef<BottomSheetHandle>(null)
+  const closeSheet = () => (sheet.current ? sheet.current.close() : onClose())
 
   const days = options.data?.dayOptions ?? []
   const meals = options.data?.meals ?? []
@@ -57,7 +60,7 @@ export default function FreeDishSheet({
         onSuccess: (card) => {
           const dayLabel = days.find((option) => option.value === card.date)?.label ?? card.date
           toast.success(`已把「${trimmed}」加进${dayLabel}${card.mealLabel}`)
-          onClose()
+          closeSheet()
         },
         onError: (error) => toast.error(apiErrorMessage(error)),
       },
@@ -65,7 +68,7 @@ export default function FreeDishSheet({
   }
 
   return (
-    <BottomSheet visible={visible} title="自己写一道" onClose={onClose}>
+    <BottomSheet ref={sheet} visible={visible} title="自己写一道" onClose={onClose}>
       {!family.data ? (
         <p className="order-sheet__hint">点菜是给家里人看的。先创建家庭或用邀请码加入，再写这道菜。</p>
       ) : !mayOrder ? (

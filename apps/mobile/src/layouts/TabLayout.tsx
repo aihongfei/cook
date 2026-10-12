@@ -29,7 +29,14 @@ export default function TabLayout() {
   return (
     <div className="tab-layout">
       <main ref={bodyRef} className="tab-layout__body">
-        <Outlet />
+        {/*
+          key=pathname：换页时把这一层重挂载一次，让入场动画重新播。不这么做的话新页面只是
+          "啪"地替换掉旧页面（用户 2026-10-12：「整个系统都是不要生硬的」）——CSS 动画只在
+          元素挂载时播一次，同一个 DOM 节点换了内容不会重播。
+        */}
+        <div className="tab-layout__page" key={pathname}>
+          <Outlet />
+        </div>
       </main>
 
       <nav className="tab-bar">

@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DotLoading } from 'antd-mobile'
-import BottomSheet from '@/components/ui/BottomSheet'
+import BottomSheet, { type BottomSheetHandle } from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { useAiSuggest, useAiStatus, type SuggestedPick } from '@/api/ai'
@@ -47,6 +47,9 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
   // （值用不上，但白抽了）。**注意**两者在界面上的行为一样——反证验过，写成后者测试照样绿；
   // 真正会让按钮自己跳的是"不进 state、渲染时现抽"，那种写法反证会红（见 ai-sheets.test）。
   const [quickHints, setQuickHints] = useState(pickHints)
+  // 收起走抽屉自己的退场动画（见 BottomSheet 里那段 ⚠️）：直接调 onClose 会让抽屉"啪"地消失
+  const sheet = useRef<BottomSheetHandle>(null)
+  const closeSheet = () => (sheet.current ? sheet.current.close() : onClose())
 
   // 等结果时轮播阶段提示。复位写在**发起请求的事件里**（见 ask）而不是这里：
   // 在 effect 里 setState 会多一轮渲染，也会被 react-hooks 的 set-state-in-effect 拦下
@@ -80,7 +83,7 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
       {
         onSuccess: (card) => {
           toast.success(`已把「${pick.name}」加进${card.mealLabel}`)
-          onClose()
+          closeSheet()
         },
         onError: (error) => toast.error(apiErrorMessage(error)),
       },
@@ -88,7 +91,7 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
   }
 
   return (
-    <BottomSheet visible={visible} title="AI 帮你想" onClose={onClose}>
+    <BottomSheet ref={sheet} visible={visible} title="AI 帮你想" onClose={onClose}>
       {status.data && !status.data.configured ? (
         // 未配置就把话说清楚：怎么配、配完会怎样。不给假推荐。
         <p className="ai__tip">

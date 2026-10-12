@@ -15,6 +15,36 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/*
+ * 换页时淡入 + 轻轻上浮（动画在 TabLayout.tsx 里靠 key=pathname 重播）。
+ *
+ * `height: 100%` 不是装饰：页面根节点（`.page` / `.pscreen`）里有 `min-height: 100%`，
+ * 那需要一个**高度确定**的父元素才生效。夹了这一层却把它写成 auto 的话，
+ * 短内容页面就撑不满了（这一层必须当"透明的"，不改变任何原本的布局语义）。
+ */
+.tab-layout__page {
+  height: 100%;
+  animation: page-in 0.24s ease-out;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-layout__page {
+    animation: none;
+  }
+}
+
 .tab-bar {
   position: relative;
   flex: 0 0 auto;
@@ -35,23 +65,40 @@
   font-size: 10.5px;
   color: var(--color-ink-3);
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    transform 0.12s ease;
+}
+
+/* 按下时缩一点：触屏上"点没点着"全靠这一下（其他按钮也是这么做，见各页的 :active） */
+.tab-bar__item:active {
+  transform: scale(0.94);
 }
 
 .tab-bar__item.is-active {
   color: var(--color-brand);
 }
 
+/*
+ * 选中那条小横线：用"缩放 + 淡入"而不是直接换背景色——换背景是硬切，切换 Tab 时
+ * 那一下会显得很跳（用户 2026-10-12：「整个系统都是不要生硬的」）。
+ */
 .tab-bar__bar {
   width: 18px;
   height: 3px;
   margin-top: 1px;
   border-radius: 2px;
-  background: transparent;
+  background: var(--color-brand);
+  opacity: 0;
+  transform: scaleX(0.3);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
 }
 
 .tab-bar__item.is-active .tab-bar__bar {
-  background: var(--color-brand);
+  opacity: 1;
+  transform: none;
 }
 
 /* 两角的手绘草枝 */
