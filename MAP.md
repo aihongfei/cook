@@ -39,6 +39,7 @@ cook/
 │     │  │                   # / family/（家庭与成员 + family.scss）/ order/（点菜单 + components/OrderDishSheet
 │     │  │                   # 点菜抽屉 + order.scss）/ checkins/（家庭打卡墙 + components/CheckInUploadSheet
 │     │  │                   # 打卡上传抽屉 + checkins.scss）/ discover/ fridge/ mine/ + shared.scss
+│     │  │                   # kitchen/components/：HeroBanner / CategoryRow（配 category-icons.ts 的品类→素材查表）/ TodayMeals
 │     │  ├─ router/          # index.tsx（路由表）、RequireAuth.tsx（未登录跳 /login 并记住来源页）
 │     │  ├─ stores/          # recipe-filters.ts（仅品类/菜系偏好）、auth.ts（token/refreshToken/user，persist）
 │     │  ├─ styles/          # tailwind.css（@theme static token）、index.scss（字体 + 基础 + 聚焦态）
