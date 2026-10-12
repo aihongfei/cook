@@ -16,7 +16,9 @@ import FamilyPage from './FamilyPage'
 const clients: QueryClient[] = []
 
 function renderFamily(entry: string | { pathname: string; state?: unknown } = '/family') {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
@@ -44,24 +46,62 @@ function familyFixture(overrides: Partial<Family> = {}): Family {
     memberCount: 2,
     memberLimit: 10,
     myRole: 'OWNER',
-    myCapabilities: ['order.create', 'menu.manage', 'menu.confirm', 'member.manage', 'invite.reset', 'family.edit'],
+    myCapabilities: [
+      'order.create',
+      'menu.manage',
+      'menu.confirm',
+      'member.manage',
+      'invite.reset',
+      'family.edit',
+    ],
     members: [
-      { userId: 'u1', nickname: '妈妈', avatar: '🍳', role: 'OWNER', joinedAt: new Date().toISOString(), isMe: true },
-      { userId: 'u2', nickname: '小满', avatar: '🐰', role: 'EATER', joinedAt: new Date().toISOString(), isMe: false },
+      {
+        userId: 'u1',
+        nickname: '妈妈',
+        avatar: '🍳',
+        role: 'OWNER',
+        joinedAt: new Date().toISOString(),
+        isMe: true,
+      },
+      {
+        userId: 'u2',
+        nickname: '小满',
+        avatar: '🐰',
+        role: 'EATER',
+        joinedAt: new Date().toISOString(),
+        isMe: false,
+      },
     ],
     ...overrides,
   }
 }
 
 /** 让 /auth/me 与 /family 各返回各自的数据（页面同时用了这两个接口） */
-function mockGet({ family, me = { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🍳', email: null, createdAt: new Date().toISOString() } }: { family: Family | null; me?: unknown }) {
+function mockGet({
+  family,
+  me = {
+    id: 'u1',
+    account: 'mama',
+    nickname: '妈妈',
+    avatar: '🍳',
+    email: null,
+    createdAt: new Date().toISOString(),
+  },
+}: {
+  family: Family | null
+  me?: unknown
+}) {
   vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
     if (url === '/family') return Promise.resolve({ data: family } as never)
     if (url === '/family/options') {
       return Promise.resolve({
         data: {
           roles: [
-            { value: 'OWNER', label: '掌勺人', capabilities: ['member.manage', 'invite.reset', 'family.edit'] },
+            {
+              value: 'OWNER',
+              label: '掌勺人',
+              capabilities: ['member.manage', 'invite.reset', 'family.edit'],
+            },
             { value: 'COOK', label: '帮厨', capabilities: ['menu.manage'] },
             { value: 'EATER', label: '吃货', capabilities: ['order.create'] },
           ],
@@ -84,7 +124,14 @@ beforeEach(() => {
   useAuth.getState().setSession({
     token: 'test-token',
     refreshToken: 'test-refresh',
-    user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🍳', email: null, createdAt: new Date().toISOString() },
+    user: {
+      id: 'u1',
+      account: 'mama',
+      nickname: '妈妈',
+      avatar: '🍳',
+      email: null,
+      createdAt: new Date().toISOString(),
+    },
   })
 })
 
@@ -131,7 +178,12 @@ it('掌勺人看到邀请码、成员角色控件与共享开关', async () => {
   expect(screen.getByLabelText('设置 小满 的角色')).toBeTruthy()
   expect(screen.getByRole('button', { name: '移出' })).toBeTruthy()
   expect(screen.queryByLabelText('设置 妈妈 的角色')).toBeNull()
-  expect(screen.getByRole('switch', { name: '家庭共享开关' }).getAttribute('aria-checked')).toBe('true')
+  const sharedSwitch = screen.getByRole('switch', { name: '家庭共享开关' })
+  expect(sharedSwitch.getAttribute('aria-checked')).toBe('true')
+  // 类名必须分成两个 class：写成 `family-switch${...}` 漏空格会拼成 `family-switchis-on`，
+  // 基础样式（position: relative 等）整块失效，圆点会飘到视口左上角——真出过这个 bug。
+  expect(sharedSwitch.classList.contains('family-switch')).toBe(true)
+  expect(sharedSwitch.classList.contains('is-on')).toBe(true)
 })
 
 it('普通成员看不到管理控件，且提示权限归掌勺人', async () => {
@@ -140,8 +192,22 @@ it('普通成员看不到管理控件，且提示权限归掌勺人', async () =
       myRole: 'EATER',
       myCapabilities: ['order.create'],
       members: [
-        { userId: 'u1', nickname: '妈妈', avatar: '🍳', role: 'OWNER', joinedAt: new Date().toISOString(), isMe: false },
-        { userId: 'u2', nickname: '小满', avatar: '🐰', role: 'EATER', joinedAt: new Date().toISOString(), isMe: true },
+        {
+          userId: 'u1',
+          nickname: '妈妈',
+          avatar: '🍳',
+          role: 'OWNER',
+          joinedAt: new Date().toISOString(),
+          isMe: false,
+        },
+        {
+          userId: 'u2',
+          nickname: '小满',
+          avatar: '🐰',
+          role: 'EATER',
+          joinedAt: new Date().toISOString(),
+          isMe: true,
+        },
       ],
     }),
   })
@@ -156,14 +222,18 @@ it('普通成员看不到管理控件，且提示权限归掌勺人', async () =
   expect(screen.getByText('邀请码只有掌勺人能换。')).toBeTruthy()
   expect(screen.getByText('共享开关只有掌勺人能改。')).toBeTruthy()
   // 共享开关即使渲染了也是禁用状态
-  expect((screen.getByRole('switch', { name: '家庭共享开关' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((screen.getByRole('switch', { name: '家庭共享开关' }) as HTMLButtonElement).disabled).toBe(
+    true,
+  )
 })
 
 it('掌勺人家里还有人时不显示退出按钮（避免撞后端 409）', async () => {
   mockGet({ family: familyFixture() })
   renderFamily()
 
-  expect(await screen.findByText('你是掌勺人：把「掌勺人」交给一位家人后，才能退出这个家。')).toBeTruthy()
+  expect(
+    await screen.findByText('你是掌勺人：把「掌勺人」交给一位家人后，才能退出这个家。'),
+  ).toBeTruthy()
   expect(screen.queryByRole('button', { name: '解散家庭' })).toBeNull()
 })
 
@@ -171,10 +241,21 @@ it('解散家庭要二次确认：取消不请求，确认才解散', async () =
   mockGet({
     family: familyFixture({
       memberCount: 1,
-      members: [{ userId: 'u1', nickname: '妈妈', avatar: '🍳', role: 'OWNER', joinedAt: new Date().toISOString(), isMe: true }],
+      members: [
+        {
+          userId: 'u1',
+          nickname: '妈妈',
+          avatar: '🍳',
+          role: 'OWNER',
+          joinedAt: new Date().toISOString(),
+          isMe: true,
+        },
+      ],
     }),
   })
-  const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { left: true, disbanded: true } } as never)
+  const post = vi
+    .spyOn(apiClient, 'post')
+    .mockResolvedValue({ data: { left: true, disbanded: true } } as never)
   renderFamily()
 
   fireEvent.click(await screen.findByRole('button', { name: '解散家庭' }))
@@ -214,8 +295,22 @@ it('转让掌勺人要二次确认：确认后自己降为帮厨', async () => {
       myRole: 'COOK',
       myCapabilities: ['order.create', 'menu.manage', 'menu.confirm'],
       members: [
-        { userId: 'u1', nickname: '妈妈', avatar: '🍳', role: 'COOK', joinedAt: new Date().toISOString(), isMe: true },
-        { userId: 'u2', nickname: '小满', avatar: '🐰', role: 'OWNER', joinedAt: new Date().toISOString(), isMe: false },
+        {
+          userId: 'u1',
+          nickname: '妈妈',
+          avatar: '🍳',
+          role: 'COOK',
+          joinedAt: new Date().toISOString(),
+          isMe: true,
+        },
+        {
+          userId: 'u2',
+          nickname: '小满',
+          avatar: '🐰',
+          role: 'OWNER',
+          joinedAt: new Date().toISOString(),
+          isMe: false,
+        },
       ],
     }),
   } as never)
@@ -242,15 +337,24 @@ it('普通角色调整（帮厨/吃货）不打扰用户，直接生效', async 
 
 it('切换共享开关会调用接口并在成功后更新文案', async () => {
   mockGet({ family: familyFixture({ shared: true }) })
-  const patch = vi.spyOn(apiClient, 'patch').mockResolvedValue({ data: familyFixture({ shared: false }) } as never)
+  const patch = vi
+    .spyOn(apiClient, 'patch')
+    .mockResolvedValue({ data: familyFixture({ shared: false }) } as never)
   renderFamily()
 
   fireEvent.click(await screen.findByRole('switch', { name: '家庭共享开关' }))
   await waitFor(() => expect(patch).toHaveBeenCalledWith('/family', { shared: false }))
   // 结果用 toast 提示（不再在页面里插一段提示文字把内容顶下去）
   expect(await screen.findByText('已关闭家庭共享')).toBeTruthy()
-  // 缓存被最新家庭替换后，开关状态跟着变
-  await waitFor(() => expect(screen.getByRole('switch', { name: '家庭共享开关' }).getAttribute('aria-checked')).toBe('false'))
+  // 缓存被最新家庭替换后，开关状态跟着变（视觉态靠 is-on 类，两个 class 都要在）
+  await waitFor(() =>
+    expect(screen.getByRole('switch', { name: '家庭共享开关' }).getAttribute('aria-checked')).toBe(
+      'false',
+    ),
+  )
+  const sharedSwitch = screen.getByRole('switch', { name: '家庭共享开关' })
+  expect(sharedSwitch.classList.contains('family-switch')).toBe(true)
+  expect(sharedSwitch.classList.contains('is-on')).toBe(false)
 })
 
 it('返回入口按来源显示：从厨房进来就回厨房', async () => {
@@ -273,7 +377,9 @@ it('来源不在白名单时不乱跳，仍回"我的"', async () => {
   mockGet({ family: familyFixture() })
   renderFamily({ pathname: '/family', state: { from: 'https://evil.example.com' } })
 
-  expect((await screen.findByRole('link', { name: '← 返回我的' })).getAttribute('href')).toBe('/mine')
+  expect((await screen.findByRole('link', { name: '← 返回我的' })).getAttribute('href')).toBe(
+    '/mine',
+  )
 })
 
 it('can() 只看后端下发的能力清单（前端不自己推角色）', () => {

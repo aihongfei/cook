@@ -110,7 +110,9 @@ export default function MinePage() {
                   <button
                     type="button"
                     key={item}
-                    className={`mine-edit__avatar${item === avatar ? 'is-active' : ''}`}
+                    className={['mine-edit__avatar', item === avatar && 'is-active']
+                      .filter(Boolean)
+                      .join(' ')}
                     aria-pressed={item === avatar}
                     aria-label={`选择头像 ${item}`}
                     onClick={() => setAvatar(item)}

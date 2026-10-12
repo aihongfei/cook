@@ -378,7 +378,7 @@ export default function FamilyPage() {
               role="switch"
               aria-checked={data.shared}
               aria-label="家庭共享开关"
-              className={`family-switch${data.shared ? 'is-on' : ''}`}
+              className={['family-switch', data.shared && 'is-on'].filter(Boolean).join(' ')}
               disabled={!mayEditFamily || updateFamily.isPending}
               onClick={() =>
                 submit(
