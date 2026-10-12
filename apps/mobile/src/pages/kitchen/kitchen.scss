@@ -80,15 +80,25 @@
   border: 0;
 }
 
-/* 分类：5 个独立按钮 */
+/* 分类：每格固定宽度（= 设计稿五格布局的单格尺寸），不随分类数量拉伸 */
 .cats {
   display: flex;
   gap: 7px;
   padding: 18px var(--spacing-page) 2px;
+  /* 分类数量来自接口（/api/recipes/filters），数量会变：
+     固定单格尺寸后，数量少时不撑满整行、数量超过 5 个时横向滚动而不是被压扁 */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.cats::-webkit-scrollbar {
+  display: none;
 }
 
 .cats__item {
-  flex: 1;
+  /* 固定为"五格"的单格宽度：(可用宽度 − 4 个间距) ÷ 5 */
+  flex: 0 0 auto;
+  width: calc((100% - 4 * 7px) / 5);
   display: flex;
   flex-direction: column;
   gap: 5px;

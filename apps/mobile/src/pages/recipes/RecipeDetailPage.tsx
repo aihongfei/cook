@@ -33,7 +33,10 @@ export default function RecipeDetailPage() {
             <h1>{recipe.name}</h1>
             {recipe.aliases.length > 0 && <p>也叫：{recipe.aliases.join('、')}</p>}
             <div className="recipe-detail__tags">
-              {[recipe.category, recipe.cuisine, ...recipe.tags].filter(Boolean).map((tag, index) => <span key={`${tag}-${index}`}>{tag}</span>)}
+              {/* 源站标签里常带着品类词（如"汤""包子"），与前面的品类/菜系重复，展示时去重 */}
+              {[recipe.category, recipe.cuisine, ...recipe.tags]
+                .filter((tag, index, all) => Boolean(tag) && all.indexOf(tag) === index)
+                .map(tag => <span key={tag}>{tag}</span>)}
             </div>
             <p>{caloriesLabel(recipe)} · 辣度 {recipe.spiciness}</p>
           </header>

@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common'
 import { Prisma, Recipe as RecipeRow } from '@prisma/client'
+import { publicImageUrl } from '../media/media.storage'
 import { Ingredient, Recipe, RecipeFilters, RecipePage, RecipeProvider, RecipeQuery, RecipeSource, RecipeSummary } from './recipe.types'
 import { PrismaService } from './prisma.service'
 
 function summary(row: RecipeRow): RecipeSummary {
-  return { id: row.id, name: row.name, image: row.image, category: row.category, cuisine: row.cuisine,
+  // 已备份到自托管存储的用自托管地址（第三方链接会过期），没备份的才回退源站直链
+  return { id: row.id, name: row.name, image: publicImageUrl(row.imageKey, row.image), category: row.category, cuisine: row.cuisine,
     tags: row.tags as string[], calories: row.calories, caloriesEstimated: row.caloriesEstimated }
 }
 

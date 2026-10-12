@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PrismaClient } from '@prisma/client'
 import { importRecipes, seedData } from '../src/modules/recipes/recipe.importer'
@@ -9,12 +8,39 @@ import { SeedBundle } from '../src/modules/recipes/recipe.types'
 import { BuiltinRecipeProvider } from '../src/modules/recipes/builtin-recipe.provider'
 import { PrismaService } from '../src/modules/recipes/prisma.service'
 
-// Tests create independent temporary databases; the application's database is never used.
+// 测试使用独立的 MySQL 测试库（cook_test），不碰应用库（cook）。
+// 前置：MySQL 容器已启动（`docker compose up -d mysql`）——见 RUNBOOK R-007。
+// 换 MySQL 前这里是"临时 SQLite 文件 + 灌迁移 SQL"，迁移改为 MySQL 方言后那条路不再可行。
+const TEST_DB_NAME = process.env.TEST_DB_NAME ?? 'cook_test'
+const TEST_DB_URL =
+  process.env.TEST_DATABASE_URL ?? `mysql://root:cook_root_dev@127.0.0.1:3306/${TEST_DB_NAME}`
+const ADMIN_URL = process.env.TEST_DB_ADMIN_URL ?? 'mysql://root:cook_root_dev@127.0.0.1:3306/mysql'
+
+let schemaReady: Promise<void> | null = null
+
+/** 建测试库并把提交里的迁移应用上去（与应用库同一份迁移，避免方言漂移） */
+function ensureSchema(): Promise<void> {
+  schemaReady ??= (async () => {
+    const admin = new PrismaClient({ datasourceUrl: ADMIN_URL })
+    try {
+      await admin.$executeRawUnsafe(`CREATE DATABASE IF NOT EXISTS \`${TEST_DB_NAME}\``)
+    } finally {
+      await admin.$disconnect()
+    }
+    execFileSync(process.execPath, ['./node_modules/prisma/build/index.js', 'migrate', 'deploy'], {
+      env: { ...process.env, DATABASE_URL: TEST_DB_URL },
+      stdio: 'ignore',
+    })
+  })()
+  return schemaReady
+}
+
 async function database(): Promise<PrismaClient> {
-  const directory = await mkdtemp(join(tmpdir(), 'yushan-recipes-test-'))
-  const client = new PrismaClient({ datasourceUrl: `file:${join(directory, 'test.db').replace(/\\/g, '/')}` })
-  const sql = await readFile('prisma/migrations/20261011151646_recipes/migration.sql', 'utf8')
-  for (const statement of sql.split(';').filter(s => s.trim())) await client.$executeRawUnsafe(statement)
+  await ensureSchema()
+  const client = new PrismaClient({ datasourceUrl: TEST_DB_URL })
+  // 每个用例从空表开始（迁移记录保留，不影响后续 deploy）
+  await client.recipe.deleteMany({})
+  await client.appMeta.deleteMany({})
   return client
 }
 
