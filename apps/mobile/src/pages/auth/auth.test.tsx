@@ -47,7 +47,7 @@ it('登录成功后写入登录态并跳转到厨房', async () => {
       token: 'access-1',
       refreshToken: 'refresh-1',
       expiresIn: 7200,
-      user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🐰', createdAt: new Date().toISOString() },
+      user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🐰', email: null, createdAt: new Date().toISOString() },
     },
   } as never)
 
@@ -93,7 +93,7 @@ it('注册时两次密码不一致直接拦下，不发请求', () => {
 it('已登录访问登录页会直接进厨房（不会绕回登录）', () => {
   useAuth.getState().setSession({
     token: 'access-1', refreshToken: 'refresh-1',
-    user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🐰', createdAt: new Date().toISOString() },
+    user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🐰', email: null, createdAt: new Date().toISOString() },
   })
   renderAt('/login')
   expect(screen.getByText('厨房')).toBeTruthy()
@@ -102,7 +102,7 @@ it('已登录访问登录页会直接进厨房（不会绕回登录）', () => {
 it('刷新令牌可用时自动续期并更新登录态', async () => {
   useAuth.getState().setSession({
     token: 'expired', refreshToken: 'refresh-1',
-    user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🐰', createdAt: new Date().toISOString() },
+    user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🐰', email: null, createdAt: new Date().toISOString() },
   })
   // refreshSession 走裸 axios（不带拦截器），这里替换全局实现的 post
   const axios = await import('axios')
@@ -117,7 +117,7 @@ it('刷新令牌可用时自动续期并更新登录态', async () => {
 it('刷新失败时清空登录态（守卫据此跳登录页）', async () => {
   useAuth.getState().setSession({
     token: 'expired', refreshToken: 'stale',
-    user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🐰', createdAt: new Date().toISOString() },
+    user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🐰', email: null, createdAt: new Date().toISOString() },
   })
   const axios = await import('axios')
   vi.spyOn(axios.default, 'post').mockRejectedValue(new Error('401') as never)
