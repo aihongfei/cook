@@ -64,6 +64,8 @@ export interface MealCard {
   dishes: DishLine[]
   items: OrderItemView[]
   mineCount: number
+  /** 掌勺人设定的就餐人数（M4 / F4-05）；null = 还没定 */
+  dinerCount: number | null
   /** 这一餐的成品照张数（F9-08）；按可见范围算，看不到的不计入 */
   photoCount: number
   nextActions: NextAction[]
@@ -75,6 +77,27 @@ export interface OrderBoard {
   /** 各状态的数量（切筛选前就拿到，切换时不会互相清空） */
   counts: Record<string, number>
   scope: 'family' | 'mine'
+}
+
+/** 今日安排的一行（M4 / F4-01）：厨房页用来显示"这餐到哪一步了" */
+export interface TodayMealRow {
+  meal: MealSlot
+  label: string
+  /** none=还没人点；open=收集中/已安排/准备中；settled=已做好/已取消 */
+  state: 'none' | 'open' | 'settled'
+  status: OrderStatus | null
+  statusLabel: string
+  dishes: string[]
+  dishCount: number
+  ordererCount: number
+  dinerCount: number | null
+  mealKey: string
+  photoCount: number
+}
+
+export interface TodayBoard {
+  date: string
+  rows: TodayMealRow[]
 }
 
 export interface OrderOptions {
@@ -94,6 +117,19 @@ export async function fetchOrders(options: {
       ...(options.status && options.status !== 'ALL' ? { status: options.status } : {}),
     },
   })
+  return data
+}
+
+export async function fetchToday(): Promise<TodayBoard> {
+  const { data } = await apiClient.get<TodayBoard>('/orders/today')
+  return data
+}
+
+export async function setDinerCount(mealKey: string, dinerCount: number | null): Promise<MealCard> {
+  const { data } = await apiClient.post<MealCard>(
+    `/orders/meals/${encodeURIComponent(mealKey)}/diners`,
+    { dinerCount },
+  )
   return data
 }
 
@@ -194,6 +230,23 @@ function recount(cards: MealCard[]): Record<string, number> {
     counts[status] = cards.filter((card) => card.status === status).length
   }
   return counts
+}
+
+/** 今日安排（厨房页）：没加入家庭时不请求（后端会 404） */
+export function useTodayBoard(options: { enabled?: boolean } = {}) {
+  const token = useAuth((state) => state.token)
+  return useQuery({
+    queryKey: ['orders', 'today'],
+    queryFn: fetchToday,
+    enabled: Boolean(token) && options.enabled !== false,
+    staleTime: 15_000,
+  })
+}
+
+export function useSetDinerCount() {
+  return useOrderMutation((input: { mealKey: string; dinerCount: number | null }) =>
+    setDinerCount(input.mealKey, input.dinerCount),
+  )
 }
 
 export const useAddOrderItem = () => useOrderMutation(addOrderItem)

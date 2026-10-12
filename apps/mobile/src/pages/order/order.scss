@@ -219,3 +219,82 @@
   border: 1.5px dashed #de9057;
   border-radius: 12px;
 }
+
+/* 就餐人数（M4 / F4-05）：一行文字按钮，不抢流转按钮的注意力 */
+.order-card__diners {
+  display: block;
+  width: 100%;
+  padding: 7px 0 0;
+  margin-top: 2px;
+  font-family: inherit;
+  font-size: 12px;
+  color: #8a7259;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+/* 人数抽屉里的加减 */
+.diners-stepper {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  margin: 14px 0 4px;
+}
+
+.diners-stepper__btn {
+  width: 42px;
+  height: 42px;
+  font-size: 20px;
+  color: var(--color-brand);
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1.5px solid #de9057;
+  border-radius: 50%;
+
+  &:disabled {
+    color: var(--color-ink-3);
+    cursor: default;
+    border-color: var(--color-line);
+  }
+}
+
+.diners-stepper__input {
+  width: 74px;
+  height: 46px;
+  font-family: inherit;
+  font-size: 22px;
+  color: #6e3a1c;
+  text-align: center;
+  background: transparent;
+  border: 0;
+}
+
+.diners-stepper__unit {
+  font-size: 13px;
+  color: var(--color-ink-3);
+}
+
+.diners-stepper__hint {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: #b4571f;
+  text-align: center;
+}
+
+.diners-stepper__clear {
+  display: block;
+  margin: 12px auto 0;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+  background: none;
+  border: 0;
+}

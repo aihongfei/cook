@@ -5,8 +5,9 @@ import { publicImageUrl } from '../media/media.storage'
 import { PrismaService } from '../recipes/prisma.service'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
-  aggregateItems, canAddItem, dateKey, isAllowedTransition, mealKeyOf, nextActionsFor, parseMealDate,
-  parseMealKey, parseNote, parseSlot, parseStatus, photoVisibleTo, revivedStatus, visibleToMember, dayOptions, type AggregateItem,
+  aggregateItems, canAddItem, dateKey, dateOnly, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount, parseMealDate,
+  parseMealKey, parseNote, parseSlot, parseStatus, photoVisibleTo, revivedStatus, todayKey, todayMealState, visibleToMember,
+  dayOptions, type AggregateItem, type TodayMealRow,
 } from './orders.rules'
 
 /**
@@ -47,6 +48,8 @@ export interface MealCardView {
   dishes: ReturnType<typeof aggregateItems>['dishes']
   items: OrderItemView[]
   mineCount: number
+  /** 掌勺人设定的就餐人数（M4 / F4-05）；null = 还没定 */
+  dinerCount: number | null
   /** 这一餐的成品照张数（F9-08）。按视图范围算：看不到的照片不计入（见 cardFromRow 说明） */
   photoCount: number
   nextActions: { status: OrderStatus; label: string; needsConfirm: boolean }[]
@@ -210,6 +213,71 @@ export class OrdersService {
     return this.cardFromRow(row, viewerId, role, family.shared)
   }
 
+  /**
+   * 设定就餐人数（M4 / F4-05）：含**没点菜只吃饭的家人**，所以它和"有几个人点了菜"是两回事。
+   * 需要 `menu.manage`（与安排菜单同一批人）。传 null/空 = 清除设定。
+   */
+  async setDiners(userId: string, mealKey: string, raw: unknown): Promise<MealCardView> {
+    const count = parseDinerCount(raw)
+    const { familyId } = await this.requireCapability(userId, CAPABILITIES.MENU_MANAGE)
+
+    const { mealDate, meal } = parseMealKey(mealKey)
+    const mealOrder = await this.prisma.mealOrder.findUnique({ where: { familyId_mealDate_meal: { familyId, mealDate, meal } } })
+    if (!mealOrder) throw new NotFoundException('这一餐还没有人点菜')
+
+    await this.prisma.mealOrder.update({ where: { id: mealOrder.id }, data: { dinerCount: count } })
+    return this.card(mealOrder.id, userId)
+  }
+
+  /**
+   * 今日安排（M4 / F4-01）：厨房页那一块。
+   *
+   * 只回**今天**的两餐（午餐、晚餐），没点菜的那一餐也给一行（`state: 'none'`）——
+   * 首页要能一眼看出"晚饭还没人点"，而不是让那一行凭空消失。
+   * 可见性沿用列表那一套（共享关闭 + 吃货 → 只看自己参与的餐次）。
+   */
+  async today(userId: string): Promise<{ date: string; rows: TodayMealRow[] }> {
+    const { familyId, role } = await this.requireMember(userId)
+    const family = await this.requireFamily(familyId)
+    const date = todayKey()
+
+    const rows = await this.prisma.mealOrder.findMany({
+      where: { familyId, mealDate: dateOnly(date) },
+      include: MEAL_ORDER_INCLUDE,
+    })
+    const byMeal = new Map(rows.map(row => [row.meal, row]))
+    const scope = visibleToMember(family.shared, role)
+
+    const output = MEAL_SLOTS.map((slot): TodayMealRow => {
+      const row = byMeal.get(slot)
+      const base = {
+        meal: slot,
+        label: MEAL_LABEL[slot],
+        mealKey: `${date}-${slot}`,
+        dinerCount: row?.dinerCount ?? null,
+      }
+      if (!row) {
+        return { ...base, state: 'none', status: null, statusLabel: '还没人点', dishes: [], dishCount: 0, ordererCount: 0, photoCount: 0 }
+      }
+      const card = this.cardFromRow(row, userId, role, family.shared)
+      // 共享关闭时吃货看不到别人点的菜，那一餐对他就是"没有内容"——
+      // 但**不能谎报成"还没人点"**（那会让人以为没人张罗，实际是别人点了不给他看）。
+      const hiddenFromMe = scope === 'mine' && card.mineCount === 0
+      return {
+        ...base,
+        state: hiddenFromMe ? 'none' : todayMealState(row.status),
+        status: row.status,
+        statusLabel: hiddenFromMe ? '还没人点' : STATUS_LABEL[row.status],
+        dishes: hiddenFromMe ? [] : card.dishes.map(dish => dish.count > 1 ? `${dish.name} ×${dish.count}` : dish.name),
+        dishCount: hiddenFromMe ? 0 : card.dishCount,
+        ordererCount: hiddenFromMe ? 0 : card.ordererCount,
+        photoCount: card.photoCount,
+      }
+    })
+
+    return { date, rows: output }
+  }
+
   /** 点单口径（免登录可读，与 /family/options 同理）：前端不硬编码餐次、状态与可选日期 */
   options() {
     return {
@@ -251,6 +319,7 @@ export class OrdersService {
         createdAt: item.createdAt.toISOString(),
       })),
       mineCount: aggregated.mineCount,
+      dinerCount: row.dinerCount,
       nextActions: nextActionsFor(role, row.status),
       submittedAt: row.createdAt.toISOString(),
     }
@@ -307,6 +376,7 @@ function emptyCard(mealDate: Date, meal: MealSlot): MealCardView {
     dishes: [],
     items: [],
     mineCount: 0,
+    dinerCount: null,
     photoCount: 0,
     nextActions: [],
     submittedAt: new Date().toISOString(),

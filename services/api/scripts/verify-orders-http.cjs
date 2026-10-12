@@ -411,11 +411,86 @@ async function main() {
   const longNote = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: TODAY, meal: 'LUNCH', note: '辣'.repeat(121) } })
   check('备注超长（>120 字）→ 400', longNote.status === 400, `${longNote.status}`)
 
-  const missingMeal = await callWithRetry('GET', '/orders/meals/2027-01-01-DINNER', { token: mama.token })
-  check('未点过菜的餐次查不到（流转时 → 404）', missingMeal.status === 404, `${missingMeal.status}`)
+  // 注意不能写成 `GET /orders/meals/...`：那个路由压根不存在，404 来自"路由未匹配"，
+  // 就算这一餐真的存在也会通过——是个永远绿的假断言。真要走服务层的"餐次不存在"分支。
+  const missingMeal = await callWithRetry('POST', '/orders/meals/2027-01-01-DINNER/status', { token: mama.token, body: { status: 'PLANNED' } })
+  check('未点过菜的餐次流转 → 404（服务层"这一餐还没有人点菜"）', missingMeal.status === 404, `${missingMeal.status} ${missingMeal.body?.message ?? ''}`)
 
   const badKey = await callWithRetry('POST', '/orders/meals/not-a-key/status', { token: mama.token, body: { status: 'PLANNED' } })
   check('畸形的餐次标识 → 400', badKey.status === 400, `${badKey.status}`)
+
+  // ---------- 今日安排与就餐人数（M4 / F4-01、F4-05） ----------
+  // 这一段自建自己需要的状态（往今天午餐点一道菜），不依赖前面的用例留下了什么
+  const todayBoard = await callWithRetry('GET', '/orders/today', { token: mama.token })
+  check(
+    '今日安排永远给两行（午/晚餐），日期是今天（没点菜的那餐也要在，首页才看得出"晚饭还没人点"）',
+    todayBoard.status === 200
+      && todayBoard.body?.rows?.length === 2
+      && todayBoard.body.rows.map(r => r.meal).join(',') === 'LUNCH,DINNER'
+      && todayBoard.body?.date === TODAY,
+    `${todayBoard.status} date=${todayBoard.body?.date} rows=${JSON.stringify((todayBoard.body?.rows ?? []).map(r => `${r.meal}:${r.state}`))}`,
+  )
+  check(
+    '"还没人点"的行不编内容：没有菜名、道数为 0、状态为 null（不能拿别人的菜充数，也不能造一条假菜）',
+    (todayBoard.body?.rows ?? []).every(r => (r.status === null
+      ? r.state === 'none' && r.dishCount === 0 && (r.dishes ?? []).length === 0 && r.statusLabel === '还没人点'
+      : true)),
+    JSON.stringify((todayBoard.body?.rows ?? []).filter(r => r.status === null).map(r => ({ meal: r.meal, dishes: r.dishes, statusLabel: r.statusLabel }))),
+  )
+  check(
+    '今日安排里的就餐人数默认是 null（还没定），不是 0',
+    (todayBoard.body?.rows ?? []).every(r => r.dinerCount === null),
+    JSON.stringify((todayBoard.body?.rows ?? []).map(r => r.dinerCount)),
+  )
+
+  // 自建一餐：今天午餐（前面的用例只用过晚餐与明天，午餐此时是空的）
+  const lunchSeed = await callWithRetry('POST', '/orders/items', {
+    token: son.token,
+    body: { recipeId: dishA.id, mealDate: TODAY, meal: 'LUNCH' },
+  })
+  if (lunchSeed.status !== 201 && lunchSeed.status !== 200) throw new Error(`今日安排前置点菜失败：${lunchSeed.status} ${JSON.stringify(lunchSeed.body)}`)
+
+  const boardWithLunch = await callWithRetry('GET', '/orders/today', { token: mama.token })
+  const lunchRow = (boardWithLunch.body?.rows ?? []).find(r => r.meal === 'LUNCH')
+  check(
+    '点过菜的那行带上菜名、状态与 mealKey（点进去就是这一餐）',
+    Boolean(lunchRow)
+      && lunchRow.mealKey === `${TODAY}-LUNCH`
+      && (lunchRow.dishes ?? []).length === 1
+      && lunchRow.dishes[0] === dishA.name
+      && lunchRow.status === 'PENDING'
+      && lunchRow.state === 'open',
+    JSON.stringify(lunchRow),
+  )
+
+  const dinersByEater = await callWithRetry('POST', `/orders/meals/${TODAY}-LUNCH/diners`, { token: son.token, body: { dinerCount: 4 } })
+  check('吃货设就餐人数 → 403（与安排菜单同一批人，需 menu.manage）', dinersByEater.status === 403, `${dinersByEater.status}`)
+
+  const dinersSet = await callWithRetry('POST', `/orders/meals/${TODAY}-LUNCH/diners`, { token: mama.token, body: { dinerCount: 4 } })
+  check(
+    '掌勺人设就餐人数 4 → 200 且卡片带回来（含没点菜只吃饭的家人，与"几人点了"是两回事）',
+    dinersSet.status === 200 && dinersSet.body?.dinerCount === 4 && dinersSet.body?.ordererCount === 1,
+    `${dinersSet.status} dinerCount=${dinersSet.body?.dinerCount} ordererCount=${dinersSet.body?.ordererCount}`,
+  )
+  const todayAfterSet = await callWithRetry('GET', '/orders/today', { token: mama.token })
+  check(
+    '今日安排读得到刚设的人数',
+    (todayAfterSet.body?.rows ?? []).find(r => r.meal === 'LUNCH')?.dinerCount === 4,
+    JSON.stringify((todayAfterSet.body?.rows ?? []).map(r => `${r.meal}:${r.dinerCount}`)),
+  )
+
+  const dinersZero = await callWithRetry('POST', `/orders/meals/${TODAY}-LUNCH/diners`, { token: mama.token, body: { dinerCount: 0 } })
+  check('就餐人数 0 → 400（0 个人吃饭没有意义，不能拿它当"未设定"）', dinersZero.status === 400, `${dinersZero.status} ${dinersZero.body?.message ?? ''}`)
+  const dinersFraction = await callWithRetry('POST', `/orders/meals/${TODAY}-LUNCH/diners`, { token: mama.token, body: { dinerCount: 2.5 } })
+  check('就餐人数小数 → 400', dinersFraction.status === 400, `${dinersFraction.status}`)
+  const dinersTooMany = await callWithRetry('POST', `/orders/meals/${TODAY}-LUNCH/diners`, { token: mama.token, body: { dinerCount: 999 } })
+  check('就餐人数超上限（>50）→ 400', dinersTooMany.status === 400, `${dinersTooMany.status}`)
+
+  const dinersCleared = await callWithRetry('POST', `/orders/meals/${TODAY}-LUNCH/diners`, { token: mama.token, body: { dinerCount: null } })
+  check('传 null 清除设定（回到"还没定"而不是 0）', dinersCleared.status === 200 && dinersCleared.body?.dinerCount === null, `${dinersCleared.status} dinerCount=${dinersCleared.body?.dinerCount}`)
+
+  const dinersMissing = await callWithRetry('POST', '/orders/meals/2027-01-01-LUNCH/diners', { token: mama.token, body: { dinerCount: 3 } })
+  check('给没点菜的餐设人数 → 404（服务层"这一餐还没有人点菜"）', dinersMissing.status === 404, `${dinersMissing.status}`)
 
   for (const item of results) {
     console.log(`${item.ok ? '✅' : '❌'} ${item.name}${item.detail ? `  — ${item.detail}` : ''}`)

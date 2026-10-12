@@ -165,6 +165,8 @@ model MealOrder {
   mealDate  DateTime    @db.Date
   meal      MealSlot
   status    OrderStatus @default(PENDING)
+  /// 就餐人数（M4 / F4-05）：含没点菜只吃饭的家人，由掌勺人/帮厨设定；null = 还没定
+  dinerCount Int?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   items     OrderItem[]

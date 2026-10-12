@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { useFamily } from '@/api/family'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
+import DinerCountSheet from './components/DinerCountSheet'
 import {
   useOrders,
   useRemoveOrderItem,
@@ -68,6 +69,8 @@ export default function OrderPage() {
   const [filter, setFilter] = useState<string>('ALL')
   const [pending, setPending] = useState<PendingAction>(null)
   const [uploadMealKey, setUploadMealKey] = useState<string | null>(null)
+  // 正在定人数的餐（M4 / F4-05）：null = 抽屉关着
+  const [dinersFor, setDinersFor] = useState<MealCard | null>(null)
 
   // 没加入家庭就别请求点单接口（后端会 404）：等 family 查询回来再决定
   const orders = useOrders(scope, filter, { enabled: Boolean(family.data) })
@@ -266,6 +269,16 @@ export default function OrderPage() {
               <span>{formatSubmittedAt(card.submittedAt)}</span>
             </div>
 
+            {/* 就餐人数（M4 / F4-05）：含没点菜只吃饭的家人，所以和"N 人点了"分开显示。
+                能到这一餐的人才看得到；没定就写"还没定"，别显示 0。 */}
+            <button type="button" className="order-card__diners" onClick={() => setDinersFor(card)}>
+              🍚{' '}
+              {card.dinerCount
+                ? `${card.dinerCount} 人吃（${card.ordererCount} 人点了）`
+                : '还没定几个人吃'}
+              {card.nextActions.length > 0 && ' · 改'}
+            </button>
+
             {/* 成品照（F9-08）：只有做好的那一餐才给这个入口——照片是"做出来了"的证据。
                 已传过的显示张数，并给一个"去看看"的入口（照片都在打卡墙那一餐下） */}
             {card.status === 'DONE' && (
@@ -320,6 +333,8 @@ export default function OrderPage() {
           onClose={() => setUploadMealKey(null)}
         />
       )}
+
+      {dinersFor && <DinerCountSheet card={dinersFor} onClose={() => setDinersFor(null)} />}
 
       <ConfirmDialog
         open={pending !== null}

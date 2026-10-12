@@ -5,6 +5,7 @@ import { OrdersService } from './orders.service'
 
 interface AddItemBody { recipeId?: string; mealDate?: string; meal?: string; note?: string }
 interface StatusBody { status?: string }
+interface DinersBody { dinerCount?: number | null }
 
 @ApiTags('orders')
 @Controller('orders')
@@ -34,6 +35,13 @@ export class OrdersController {
     return this.orders.list(userId, { family: family === undefined ? undefined : family === 'true', status })
   }
 
+  @Get('today')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '今日安排：今天午/晚餐各自的进度（M4 / F4-01）' })
+  async today(@CurrentUserId() userId: string) {
+    return this.orders.today(userId)
+  }
+
   @Post('items')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '点菜（需 order.create；已安排的餐不能再加）（F3-01/05）' })
@@ -46,6 +54,14 @@ export class OrdersController {
   @ApiOperation({ summary: '撤回自己点的一份菜（仅待确认阶段）（F3-05）' })
   async removeItem(@CurrentUserId() userId: string, @Param('id') id: string) {
     return this.orders.removeItem(userId, id)
+  }
+
+  @Post('meals/:mealKey/diners')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '设定这一餐的就餐人数（需 menu.manage；传 null 清除）（M4 / F4-05）' })
+  async setDiners(@CurrentUserId() userId: string, @Param('mealKey') mealKey: string, @Body() body: DinersBody) {
+    return this.orders.setDiners(userId, mealKey, body?.dinerCount)
   }
 
   @Post('meals/:mealKey/status')

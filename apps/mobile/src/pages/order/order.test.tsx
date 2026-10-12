@@ -126,6 +126,8 @@ function cardFixture(overrides: Partial<MealCard> = {}): MealCard {
       },
     ],
     mineCount: 1,
+    // 就餐人数（M4 / F4-05）：null = 掌勺人还没定
+    dinerCount: null,
     // 成品照张数（F9-08）：后端按可见范围算好，前端只显示
     photoCount: 0,
     // 后端按角色算好的下一步（前端只负责渲染，不自己推状态机）
@@ -485,4 +487,28 @@ it('还没做好的卡片上没有成品照入口（照片是"做出来了"的�
   expect(await screen.findByText('准备中')).toBeTruthy()
   expect(screen.queryByRole('button', { name: /成品照/ })).toBeNull()
   expect(screen.queryByText(/张成品照，去看看/)).toBeNull()
+})
+
+it('卡片上显示就餐人数；没定过就说"还没定"，不显示 0 人', async () => {
+  mockGet({ boards: { family: boardFixture([cardFixture({ mealKey: 'd1', dinerCount: null, ordererCount: 2 })]) } })
+  renderOrder()
+
+  const line = await screen.findByRole('button', { name: /还没定几个人吃/ })
+  expect(line.textContent).not.toContain('0 人吃')
+})
+
+it('定过人数就同时给出"几人吃"与"几人点了"（前者含没点菜只吃饭的家人，两者不是一回事）', async () => {
+  mockGet({ boards: { family: boardFixture([cardFixture({ mealKey: 'd2', dinerCount: 5, ordererCount: 2 })]) } })
+  renderOrder()
+
+  expect(await screen.findByRole('button', { name: /5 人吃（2 人点了）/ })).toBeTruthy()
+})
+
+it('点人数那行会打开定人数的抽屉', async () => {
+  mockGet({ boards: { family: boardFixture([cardFixture({ mealKey: 'd3', dinerCount: 3 })]) } })
+  renderOrder()
+
+  fireEvent.click(await screen.findByRole('button', { name: /3 人吃/ }))
+  expect(await screen.findByText('定几个人吃')).toBeTruthy()
+  expect(screen.getByRole('button', { name: '就这么多人' })).toBeTruthy()
 })

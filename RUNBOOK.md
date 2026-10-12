@@ -545,6 +545,36 @@ pnpm --dir services/api run test:http:orders   # 50 项，真实请求
 | GET | `/checkins/stats` | 我的/全家的热力图（18 周、周一在前、5 档）+ 连续天数 + 可挂的「已做好」餐 | 登录 + 属于家庭 |
 | GET | `/checkins/photos/:id?e=<epoch>&s=<签名>` | 读照片字节 | **三道门：登录令牌 + 签名 + 同家庭**，缺一不可 |
 
+---
+
+## R-016 今日安排与就餐人数（M4 / F4-01、F4-05）（✅ 已验证，2026-10-12）
+
+| 方法 | 路径 | 说明 | 需要的能力 |
+| --- | --- | --- | --- |
+| GET | `/orders/today` | 今日安排：**永远给午/晚两行**（没点菜的那行 `state=none`、`statusLabel=还没人点`） | 登录 + 属于家庭 |
+| POST | `/orders/meals/:mealKey/diners` | 设这一餐的就餐人数，body `{ dinerCount: 3 }`；传 `null`/空 = **清除设定** | `menu.manage` |
+
+**今日安排的一行长这样**（前端不硬编码状态文案）：
+
+```json
+{ "meal": "DINNER", "label": "晚餐", "state": "open", "status": "PENDING", "statusLabel": "待确认",
+  "dishes": ["番茄炒蛋 ×2"], "dishCount": 2, "ordererCount": 1, "dinerCount": 4,
+  "mealKey": "2026-10-12-DINNER", "photoCount": 2 }
+```
+
+- `state` 三值：`none` 还没人点 / `open` 收集中·已安排·准备中 / `settled` 已做好·已取消（取消了不催人重做）。
+- **`dinerCount` 与 `ordererCount` 是两回事**：前者含**没点菜只吃饭的家人**（老人、小孩、客人），由掌勺人手填；后者是"有几个人点了菜"。
+- **不引入 0**：`null` 才表示"还没定"；`dinerCount: 0` 直接 **400**（0 个人吃饭没有意义，拿它当哨兵早晚被误读）。
+
+```bash
+pnpm --dir services/api run test:http:orders   # 62 项，真实请求（原 50 + M4 新增 12）
+```
+
+**实测结果**：**62/62 通过**。M4 新增的部分覆盖：两行永远都在、日期是今天、没点菜的行不编内容（`dishes=[]`、`dishCount=0`、`status=null`）、人数默认 `null` 不是 0、点过菜的行带上菜名与 `mealKey`、吃货设人数 403、掌勺人设人数 200 且回读到卡片与今日安排、0/小数/超上限 400、`null` 清除、给没点菜的餐设人数 404。
+
+> **顺手修掉一条永远绿的假断言**：原本有一条 `GET /orders/meals/2027-01-01-DINNER` 期望 404——**这个路由压根不存在**，404 来自"路由未匹配"，那一餐就算真的存在也会通过。已改成走真正的流转接口（`POST /orders/meals/:id/status`），验的是服务层的「这一餐还没有人点菜」。**教训：断言 404 时要确认它来自业务分支，不是路由没匹配。**
+
+
 **照片为什么不直接塞进 `<img src>`**：私有桶（`MEDIA_S3_PRIVATE_BUCKET`，默认 `cook-checkins`）不设公开读。签名只能证明"链接是我们发的"，不能证明"看的人是这家人"——只靠签名的话，链接被转发出去谁都能看别人家的照片。所以前端带 `Authorization` 取回字节再转 blob 显示（`<img>` 带不上请求头）。已实测：
 
 | 场景 | 实测结果 |

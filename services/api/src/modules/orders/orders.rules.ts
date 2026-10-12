@@ -104,6 +104,57 @@ export function visibleToMember(shared: boolean, role: FamilyRole): 'family' | '
   return shared || role !== 'EATER' ? 'family' : 'mine'
 }
 
+/** 就餐人数上限：一顿饭 50 个人已经远超"家庭"的语义，再大多半是填错了 */
+export const DINER_COUNT_MAX = 50
+
+/**
+ * 就餐人数（M4 / F4-05）：正整数，或显式传 null/空表示**清除设定**（库里该列可空）。
+ * 不把"清除"编码成 0：0 个人吃饭没有意义，用它当哨兵以后一定会有人误当成真值。
+ */
+export function parseDinerCount(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === '') return null
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(value)) throw new BadRequestException('就餐人数要填整数')
+  if (value < 1 || value > DINER_COUNT_MAX) {
+    throw new BadRequestException(`就餐人数要在 1～${DINER_COUNT_MAX} 之间`)
+  }
+  return value
+}
+
+/**
+ * 今日安排（M4 / F4-01）：厨房页那一块的文案与落点。
+ *
+ * 首页只要"今天两餐现在到哪一步了"，不需要点单卡的细节，所以这里给的是精简视图。
+ * 三种行状态：
+ * - `none`    还没人点 → 引导去菜谱；
+ * - `open`    收集中 / 已安排 / 准备中 → 点进点菜单；
+ * - `settled` 已做好 / 已取消 → 只回看，不再引导（取消了不催人重做，那是用户自己的决定）。
+ */
+export type TodayMealState = 'none' | 'open' | 'settled'
+
+export interface TodayMealRow {
+  meal: MealSlot
+  label: string
+  state: TodayMealState
+  status: OrderStatus | null
+  statusLabel: string
+  dishes: string[]
+  dishCount: number
+  /** 有几个人点了菜（去重）。注意这不是"就餐人数"，见下面 dinerCount 的说明 */
+  ordererCount: number
+  /** 掌勺人设定的就餐人数；null = 还没定（前端据此提示"定一下人数"） */
+  dinerCount: number | null
+  mealKey: string
+  /** 该餐的成品照张数（M9 / F9-08） */
+  photoCount: number
+}
+
+export function todayMealState(status: OrderStatus | null): TodayMealState {
+  if (!status) return 'none'
+  if (status === 'DONE' || status === 'CANCELED') return 'settled'
+  return 'open'
+}
+
 /**
  * 打卡照片对这个人可见吗（F9-08 的成品照张数用它计数，口径与 checkins 模块一致，见 D-023）。
  *

@@ -22,15 +22,8 @@ export interface Dish {
   note?: string
 }
 
-export interface Meal {
-  key: 'breakfast' | 'lunch' | 'dinner'
-  name: string
-  dishes: string[]
-  status: 'done' | 'planned' | 'collecting'
-  statusText: string
-}
-
-/** 注意：点单页（/order）在 M3 已换成真实接口（api/orders.ts），订单示例数据与 OrderRecord 已删除。 */
+/** 注意：点单页（/order）在 M3、厨房页的今日安排在 M4 都已换成真实接口（api/orders.ts），
+ *  订单示例数据与今日三餐的示例数据（OrderRecord / todayMeals）都已删除。 */
 
 /** 分类（图标为笔绘水彩方块，顺序与 cat-1..5 对应） */
 export const categories: Category[] = [
@@ -39,31 +32,6 @@ export const categories: Category[] = [
   { id: 'meat', name: '荤菜', image: '/img/cat-3.png' },
   { id: 'veg', name: '素菜', image: '/img/cat-4.png' },
   { id: 'soup', name: '汤羹', image: '/img/cat-5.png' },
-]
-
-/** 今日三餐 */
-export const todayMeals: Meal[] = [
-  {
-    key: 'breakfast',
-    name: '早餐',
-    dishes: ['小米南瓜粥', '水煮蛋'],
-    status: 'done',
-    statusText: '已完成',
-  },
-  {
-    key: 'lunch',
-    name: '午餐',
-    dishes: ['番茄炒蛋', '清炒菜心', '家常米饭'],
-    status: 'planned',
-    statusText: '菜单已确定',
-  },
-  {
-    key: 'dinner',
-    name: '晚餐',
-    dishes: ['红烧排骨', '凉拌黄瓜', '小米南瓜粥'],
-    status: 'collecting',
-    statusText: '正在收集想吃的菜',
-  },
 ]
 
 /** 今日推荐 */

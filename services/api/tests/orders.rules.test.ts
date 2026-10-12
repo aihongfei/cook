@@ -22,7 +22,10 @@ import {
   parseNote,
   parseSlot,
   parseStatus,
+  parseDinerCount,
   photoVisibleTo,
+  todayMealState,
+  DINER_COUNT_MAX,
   revivedStatus,
   visibleToMember,
 } from '../src/modules/orders/orders.rules'
@@ -274,4 +277,32 @@ test('共享关闭：吃货只看得到自己传的照片（张数也不能漏�
 test('共享关闭不影响掌勺人/帮厨（他们要做饭，得看得见成品照）', () => {
   assert.equal(photoVisibleTo(false, 'OWNER', 'u1', 'u2'), true)
   assert.equal(photoVisibleTo(false, 'COOK', 'u1', 'u2'), true)
+})
+
+// ---------- 就餐人数与今日安排（M4 / F4-01、F4-05） ----------
+
+test('就餐人数收正整数，空值表示清除设定（不是 0）', () => {
+  assert.equal(parseDinerCount(3), 3)
+  assert.equal(parseDinerCount('4'), 4, '表单传字符串也要收')
+  assert.equal(parseDinerCount(null), null)
+  assert.equal(parseDinerCount(undefined), null)
+  assert.equal(parseDinerCount(''), null, '空字符串同样是清除')
+})
+
+test('就餐人数拒绝 0、负数、小数与超上限（0 个人吃饭没有意义，不能当哨兵）', () => {
+  assert.throws(() => parseDinerCount(0), BadRequestException)
+  assert.throws(() => parseDinerCount(-1), BadRequestException)
+  assert.throws(() => parseDinerCount(2.5), BadRequestException)
+  assert.throws(() => parseDinerCount('三个'), BadRequestException)
+  assert.throws(() => parseDinerCount(DINER_COUNT_MAX + 1), BadRequestException)
+  assert.equal(parseDinerCount(DINER_COUNT_MAX), DINER_COUNT_MAX, '上限本身要收')
+})
+
+test('今日安排的行状态：没点菜单独一类，已做好/已取消归为"settled"', () => {
+  assert.equal(todayMealState(null), 'none', '还没人点')
+  assert.equal(todayMealState('PENDING'), 'open')
+  assert.equal(todayMealState('PLANNED'), 'open')
+  assert.equal(todayMealState('COOKING'), 'open')
+  assert.equal(todayMealState('DONE'), 'settled')
+  assert.equal(todayMealState('CANCELED'), 'settled', '取消了就不再引导（那是用户自己的决定）')
 })

@@ -174,6 +174,43 @@
   border-top: 1px solid var(--color-line);
 }
 
+/* 有菜的那一行整行可点（落到点菜单）；链接触感但不画下划线 */
+.today-meals__row--link {
+  color: inherit;
+  text-decoration: none;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.today-meals__main {
+  min-width: 0;
+}
+
+.today-meals__status-line {
+  padding: 8px 0;
+}
+
+.today-meals__empty {
+  padding: 4px 0 2px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.today-meals__link {
+  display: block;
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--color-brand);
+}
+
+/* 还没人点：中性灰，别用"进行中"的颜色催人 */
+.is-none {
+  color: var(--color-ink-3);
+}
+
 .today-meals__label {
   flex: 0 0 44px;
   font-size: 13.5px;
