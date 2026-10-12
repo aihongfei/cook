@@ -56,7 +56,8 @@ cook/
 │     │                      # meal_orders、check_ins、meal_diner_count、favorites）
 │     ├─ seeds/              # howtocook.json（28 道种子）——已弃用为数据来源，保留为历史实现
 │     ├─ scripts/            # verify-recipes-http.cjs、verify-auth-http.cjs、verify-family-http.cjs、
-│     │                      # verify-orders-http.cjs、verify-checkins-http.cjs、verify-favorites-http.cjs（HTTP 验收脚本）
+│     │                      # verify-orders-http.cjs、verify-checkins-http.cjs、verify-favorites-http.cjs、
+│     │                      # verify-discover-http.cjs（HTTP 验收脚本）
 │     ├─ tests/              # node:test：解析器 / 导入幂等 / 查询与校验 / 密码哈希与账号规则 / 点单规则
 │     ├─ src/
 │     │  ├─ main.ts          # HOST/PORT 可配置（容器内 0.0.0.0）
@@ -71,6 +72,7 @@ cook/
 │     │  ├─ modules/checkins/# 打卡：controller / service / checkins.rules.ts（大小·备注·魔术字节·热力图·连续
 │     │  │                   # 天数——纯规则）/ checkins.signature.ts（照片短链签名与校验）
 │     │  ├─ modules/favorites/# 收藏（M1 F1-09）：controller / service / favorites.rules.ts（id 校验、上限判定）
+│     │  ├─ modules/discover/ # 决策引擎（M5 F5-02）：controller / service / discover.rules.ts（按餐去重、合分排序）
 │     │  ├─ modules/mail/    # 发信通道（可插拔）：console（开发，写日志）/ smtp（真发信）
 │     │  ├─ modules/recipes/ # 菜谱：controller / query / provider（可插拔）/ howtocook 解析器 / importer
 │     │  │  └─ sources/      # 外部数据源适配器：recipe-source.ts（归一规则）、jisu / uapis / jumdata.source.ts

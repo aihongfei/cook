@@ -6,6 +6,7 @@ import { AiModule } from './modules/ai/ai.module'
 import { AuthModule } from './modules/auth/auth.module'
 import { CheckInsModule } from './modules/checkins/checkins.module'
 import { CombosModule } from './modules/combos/combos.module'
+import { DiscoverModule } from './modules/discover/discover.module'
 import { FamilyModule } from './modules/family/family.module'
 import { FavoritesModule } from './modules/favorites/favorites.module'
 import { HealthModule } from './modules/health/health.module'
@@ -32,6 +33,7 @@ import { RecipesModule } from './modules/recipes/recipes.module'
     OrdersModule,
     CombosModule,
     FavoritesModule,
+    DiscoverModule,
     CheckInsModule,
     RecipesModule,
   ],

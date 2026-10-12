@@ -547,3 +547,161 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+/* 家人最爱（M5 / F5-02）：一列"我们家做过/收过的菜"，每行带一句理由。
+ * 与本周菜单同一套卡片语汇（.card + 小胶囊出路），所以能直接摞在它上面。 */
+
+.picks__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.picks__title {
+  font-size: 15px;
+  color: #6e3a1c;
+}
+
+.picks__links {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* 与 .weekplan__more 同一套"可点"语汇（用户 2026-10-12 指出过纯文字看不出来能点） */
+.picks__more {
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #c4652a;
+  text-decoration: none;
+  background: rgb(224 123 57 / 9%);
+  border: 1px solid #e2a06c;
+  border-radius: 999px;
+}
+
+.picks__more:active {
+  transform: scale(0.94);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .picks__more:active {
+    transform: none;
+  }
+}
+
+.picks__status-line {
+  padding: 6px 0;
+}
+
+.picks__scope {
+  margin: 6px 0 0;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-2);
+  background: rgb(224 123 57 / 7%);
+  border-radius: 10px;
+}
+
+.picks__empty {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.picks__link-text {
+  margin-left: 4px;
+  color: #c4652a;
+  text-decoration: none;
+  border-bottom: 1px solid currentcolor;
+}
+
+.picks__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.picks__item {
+  display: flex;
+  /* 名次圆牌与菜名垂直居中对齐；不设 align-items 时圆牌会被图片高度拉到顶 */
+  align-items: center;
+  gap: 8px;
+}
+
+.picks__rank {
+  flex: 0 0 auto;
+  width: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #c4652a;
+  text-align: center;
+}
+
+.picks__link {
+  display: flex;
+  /* 一行：图 + 名字/理由。min-width:0 让长菜名能省略号截断而不是把行撑破 */
+  flex: 1 1 auto;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 4px;
+  text-decoration: none;
+  border-radius: 10px;
+}
+
+.picks__link:active {
+  background: rgb(224 123 57 / 8%);
+}
+
+.picks__pic {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+}
+
+.picks__pic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.picks__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.picks__name {
+  overflow: hidden;
+  font-size: 13.5px;
+  color: var(--color-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picks__reason {
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+.picks__more-line {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}

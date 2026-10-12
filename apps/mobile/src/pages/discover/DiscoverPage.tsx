@@ -5,6 +5,7 @@ import Page from '@/components/ui/Page'
 import { toast } from '@/components/ui/toast'
 import { apiErrorMessage } from '@/api/client'
 import { fetchRandomRecipe } from '@/api/recipes'
+import FamilyPicks from './components/FamilyPicks'
 import WeekPlan from './components/WeekPlan'
 import AiSuggestSheet from './components/AiSuggestSheet'
 import AiChatSheet from './components/AiChatSheet'
@@ -97,6 +98,10 @@ export default function DiscoverPage() {
             <span className="stats__label">临期</span>
           </div>
         </div>
+
+        {/* 家人最爱（F5-02）：排在"本周菜单"之后——先看"这几天吃什么"（当下要办的），
+            再看"我们家平时吃什么"（回顾与找灵感）。 */}
+        <FamilyPicks />
 
         <WeekPlan />
       </div>
