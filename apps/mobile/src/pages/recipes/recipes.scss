@@ -2,6 +2,9 @@
   max-width: 760px;
   padding: calc(18px + var(--safe-top)) var(--spacing-page) 24px;
   margin: 0 auto;
+  /* 右上角插画的锚点（其他页是 .pscreen，见 ui.scss 的 `.corner-art`）。
+     锚在容器而不是 .recipes-heading，是为了让插画落在与别的页**同一个高度**上 */
+  position: relative;
 }
 
 /* 返回键自带 16px 栏距（见 ui.scss 的 .page-back），而本容器已经有了，抵消一次。
@@ -11,6 +14,11 @@
 }
 
 .recipes-heading {
+  /* ⚠️ 这里**不能写 position**：写了插画就锚在这条标题带上、跟着它往下排，
+     变成"装饰压住搜索框"或者"为了不压而撑高标题带"（两个坑都踩过，见 ui.scss 文件头那段） */
+  /* 给右上角插画留出横向位置（标题是 h1，比 .ptitle 大，留白按它算） */
+  padding-right: 88px;
+
   h1 { margin: 12px 0 8px; font-size: 27px; color: #6e3a1c; }
   p { margin: 0 0 20px; font-size: 13px; color: var(--color-ink-3); }
 }
@@ -187,3 +195,6 @@
 }
 
 .recipe-source-link { display: inline-block; padding: 8px 0; margin-top: 6px; font-size: 13px; color: #b45f30; text-decoration: underline; text-underline-offset: 4px; }
+
+/* 菜谱小书的角落插画：位置统一由 ui.scss 的 `.corner-art` 决定（锚在 .recipes-page 上），
+   这里不再单独覆盖 top —— 之前那条 `top: 20px` 会把它又拽回标题带里 */

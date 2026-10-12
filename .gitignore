@@ -27,6 +27,10 @@ yarn-error.log*
 *.db-journal
 services/api/prisma/*.db
 
+# 图片生成的中间产物（原图与重试件，单张 1~3MB）
+# 真正进应用的成品在 apps/mobile/public/img/corner/，是压缩过的 256~384px PNG
+generated-images/
+
 # 测试与覆盖率
 coverage/
 test-results/

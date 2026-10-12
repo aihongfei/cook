@@ -5,6 +5,7 @@ import { logout, useAuthOptions, useMe, useUpdateProfile } from '@/api/auth'
 import { useCheckInStats } from '@/api/checkins'
 import { useFamily } from '@/api/family'
 import Heatmap from '@/components/ui/Heatmap'
+import PageHeader from '@/components/ui/PageHeader'
 import Page from '@/components/ui/Page'
 import { toast } from '@/components/ui/toast'
 import SectionTitle from '@/components/ui/SectionTitle'
@@ -82,7 +83,7 @@ export default function MinePage() {
   return (
     <Page>
       <div className="pscreen">
-        <div className="ptitle">我的</div>
+        <PageHeader title="我的" art="mine" />
 
         <div className="me">
           <div className="me__avatar">{user?.avatar ?? '🐰'}</div>

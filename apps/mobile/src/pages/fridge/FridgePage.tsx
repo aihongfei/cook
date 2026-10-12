@@ -1,3 +1,4 @@
+import PageHeader from '@/components/ui/PageHeader'
 import Page from '@/components/ui/Page'
 import SectionTitle from '@/components/ui/SectionTitle'
 import '../shared.scss'
@@ -19,8 +20,7 @@ export default function FridgePage() {
   return (
     <Page>
       <div className="pscreen">
-        <div className="ptitle">我的冰箱</div>
-        <div className="psub">食材管理助手，让每一餐更新鲜</div>
+        <PageHeader title="我的冰箱" subtitle="食材管理助手，让每一餐更新鲜" art="fridge" />
 
         <div className="aicta">
           <div className="aicta__icon">📷</div>

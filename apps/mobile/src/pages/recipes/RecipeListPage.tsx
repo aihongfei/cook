@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { recipeErrorMessage, useRecipeFilters as useFilterOptions, useRecipes } from '@/api/recipes'
 import FilterTabs from '@/components/ui/FilterTabs'
+import CornerArt from '@/components/ui/CornerArt'
 import Page from '@/components/ui/Page'
 import { useRecipeFilters } from '@/stores/recipe-filters'
 import DishCard from '@/pages/kitchen/components/DishCard'
@@ -70,6 +71,7 @@ export default function RecipeListPage() {
     <Page>
       <div className="recipes-page">
         <header className="recipes-heading">
+          <CornerArt name="recipes" />
           <Link to="/kitchen" className="page-back">← 厨房</Link>
           <h1>菜谱小书</h1>
           <p>一菜一味，把日子煮得暖暖的</p>

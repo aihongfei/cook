@@ -15,6 +15,7 @@ import {
 import Chips from '@/components/ui/Chips'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
+import PageHeader from '@/components/ui/PageHeader'
 import Page from '@/components/ui/Page'
 import { STATUS_TONE } from '@/components/ui/status-tone'
 import { toast } from '@/components/ui/toast'
@@ -151,8 +152,7 @@ export default function OrderPage() {
   return (
     <Page>
       <div className="pscreen">
-        <div className="ptitle">家宴点菜单</div>
-        <div className="psub">记录大家想吃什么，也记录每顿饭的回应</div>
+        <PageHeader title="家宴点菜单" subtitle="记录大家想吃什么，也记录每顿饭的回应" art="order" />
 
         <div className="segmented">
           <button

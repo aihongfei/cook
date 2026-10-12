@@ -692,3 +692,93 @@ pnpm --dir services/api run test:http:ai     # 13/13
 | 500 的详情只有 `{"model":"deepseek-v4.1-flash"}` | 错误体形状多变，取错了字段 | `safeErrorText` 按 `error.message` → 顶层 `message` → 原文依次退 |
 
 > **密钥纪律**：任何验证输出、日志、文档里都不得出现 key 值。`/ai/status` 只回 `configured` 与模型名（HTTP 断言里钉死了"不含 `sk-`、不含 `apiKey`/`baseUrl` 字段"）。日志只记模型名与状态码。
+
+## R-019 页面右上角的角落插画（用户新增需求）（✅ 已验证，2026-10-12）
+
+**要验证什么**：除首页（厨房）外的各页右上角原本是空的（用户 2026-10-12：「每个页的右上角都有点空」）。补上插画后要同时满足三件事——**不压住任何可点元素**、**不给自己造出空档**（用户随后说「间隙太大」「图片往上放点」）、**各页位置一致**。
+
+### 图怎么来的（`image-generation` 技能）
+
+```bash
+python3 "$HOME/.agents/skills/image-generation/scripts/generate_image.py" \
+  --prompt "<完整提示词>" --output generated-images/corner-<页>.png \
+  --background transparent --timeout 300
+```
+
+- **密钥纪律照旧**：脚本从本机私有配置读 key，**不打印、不写入仓库、不进对话**（用户环境里图片网关 `api.ymeng.cc` 可达，与本项目 AI 网关的连通性互不影响）。
+- **提示词要点**（7 张一套风格）：透明底、手绘水彩、暖棕描边、奶油白/焦糖橘/橄榄绿、纸纹、单主体、方形构图、**明确写 no sticker border / no glow / no halo / no coloured fringing**、不要文字与水印。
+- **⚠️ 透明底会翻车**：第一次生成的碗那版带一圈红/黄彩边和白色贴纸感描边，直接贴上去很脏。**必须重新生成并在提示词里排除 halo**，不要事后抠图（抠不干净，边缘留灰）。生成后抽查边缘 alpha：
+  ```bash
+  magick <图>.png -crop 256x6+0+0 +repage -alpha extract -format "顶边alpha均值=%[fx:mean]\n" info:  # 期望 0
+  ```
+- **⚠️ 生成不稳**：本轮 7 张里有 2 张、后续 1 张报 `IncompleteRead` / `SSL: UNEXPECTED_EOF_WHILE_READING`（网络读一半断）。**脚本要带重试**，不要当成提示词问题去改提示词。
+- **统一处理**（产出 384px 左右、`-colors 256`）：
+  ```bash
+  magick <原图>.png -trim +repage -resize 384x384 -background none -gravity center \
+    -extent 384x384 -strip -colors 256 -define png:compression-level=9 \
+    apps/mobile/public/img/corner/<页>.png
+  ```
+  `-colors 256` 把单张从 ~150KB 压到 ~40KB，130px 显示下肉眼无差（并排比过）。`-trim` 裁掉透明边再补成正方，7 张的"视觉大小"才接近。
+- **中间产物进 `.gitignore`**：`generated-images/` 单张 1~3MB，只有压缩后的 `public/img/corner/*.png` 入库。
+
+### 版面契约（这块改了三版，别再退回前两版）
+
+- **锚点＝页面容器，不是页头**。`.corner-art` 是 `position: absolute`，挂的容器是 `.pscreen`（订单/发现/冰箱/我的/打卡/家庭）与 `.recipes-page`（菜谱小书），**两者都必须 `position: relative`**。
+- **`.page-head` 上不能写 `position`**，也不能给自己 `min-height`。写了它就成为插画锚点，于是只剩两条错路：
+  - ① 插画跟着页头往下排 → 探出页头压住下方按钮（家庭页「改家庭名」、订单页「只看我的」被压过）；
+  - ② 给页头加 `min-height` 把插画兜住 → 没有副标题的页（家庭/我的）平白多出二十几像素，卡片被推下去（用户：「间隙太大」）。
+- **七页统一 84×84**（旋转 4°，视觉外框约 90），贴容器顶边、`right: 4px`；页头 `padding-right: 98px` 只负责横向让位。**没有页面级例外**。
+- **尺寸的硬上限来自页头下方最近的实内容**：`/order` 的分段控件顶边在 **y=87**（可点），插画下沿不能过它。要改大先量这个值，别无脑调。
+- **⚠️ 看着"太大/太小"多数不是尺寸问题，是主体占画布的比例问题**。同一个 84px 框里，主体占画布 37% 的（家庭的小房子）和占 98% 的（相机特写）看起来差着将近一倍。所以换图之后**先量这一项**再决定动不动 CSS：
+  ```bash
+  magick <图>.png -alpha extract -threshold 50% -format "%@" info:   # 实心主体外框
+  ```
+  七张的目标区间是**实心主体占画布宽 37%~59%**（当前：家庭 37 / 发现 42 / 冰箱 45 / 我的 50 / 订单 52 / 打卡 56 / 菜谱 59）。新图不在这个区间就调 `-resize` 的尺寸再 `-extent` 补透明边，**不要**去改 `.corner-art` 的宽高。
+
+### 验收命令（浏览器实测）
+
+```js
+// 每页都该拿到 []：既没压住可点元素，也没压住标题
+[...document.querySelectorAll('button,a,input,select,textarea,[role="button"],[role="tab"]')]
+  .filter(el => { const b = el.getBoundingClientRect(); const r = document.querySelector('.corner-art').getBoundingClientRect()
+    return Math.min(r.right,b.right)-Math.max(r.left,b.left) > 0 && Math.min(r.bottom,b.bottom)-Math.max(r.top,b.top) > 0 })
+```
+
+### 实测结果（2026-10-12，390×844）
+
+| 页面 | 插画外框（含旋转） | 压到按钮 | 压到标题 | 页头高度 |
+| --- | --- | --- | --- | --- |
+| /discover | [299,-3,90,90] | 无 | 无 | 55（标题+副标题） |
+| /order | [299,-3,90,90] | 无 | 无 | 55 |
+| /fridge | [299,-3,90,90] | 无 | 无 | 55 |
+| /family | [299,-3,90,90] | 无 | 无 | 32（只有标题） |
+| /mine | [299,-3,90,90] | 无 | 无 | 32 |
+| /recipes | [299,-3,90,90] | 无 | 无 | （三行标题带，天然够高） |
+| /checkins | [299,-3,90,90] | 无 | 无 | 55 |
+
+七页页头高度与加插画之前**完全一致**（有副标题 55 / 无副标题 32），即没有为插画多留一像素；七页插画落在**同一坐标** `[299,-3,90,90]`。`/kitchen` 刻意不放（首屏已有 HeroBanner 大图，再放会撞）；`/recipes/:id` 顶部是整幅成品图，没有空位。
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| 家庭/订单/打卡三页插画压住真按钮 | 插画 84px 比页头（无副标题只有 32px）还高，贴页头往下排就探到 y≈93 的分段控件上 | 锚点从页头改成页面容器 |
+| 改完「间隙太大」「图片往上放点」 | 给页头加 `min-height: 70px` 兜住插画，没有副标题的页就多出 38px 空档 | 去掉 `min-height`；页头只留横向 `padding-right`，高度回自然值 |
+| 中途把三页改成 `withAction`（插画左移） | **误判了碰撞方向**：碰撞是纵向的，左移既没解决纵向重叠，又把插画从"右上角"挪开 50px，等于制造新的空白 | 撤销 `withAction`；它只该留给"右上角确实有按钮"的页面 |
+| 一度把所有页换成 3:2 横构图大插画（130×86） | **看错了用户的范围**——原话只说打卡墙那张小，其余页是满意的 | 全部退回（横构图那版留在 `generated-images/`，已忽略入库） |
+| 给打卡墙单独放大到 116×116，用户回「太大了，和其他页对比一下」 | **把"图太小"直接归因成"框太小"**。真正的原因是那张相机图的构图松散（相机只占画布一小块），不是框不够大。换了顶满画框的特写后又矫枉过正（实心占 98%） | 删掉页面级例外，七页统一 84；改为**调图不调框**：重做后的相机再 `-resize 220 -extent 384`，把实心主体压到 56%，落进其他页的区间 |
+| 第一版碗带白色贴纸描边 + 红黄彩边 | 生成时没有明确排除 halo | 提示词里写 no halo/fringing 后重生成；不靠事后抠图 |
+| 菜谱小书的 `.recipes-heading .corner-art { top: 20px }` 覆盖失效 | 该覆盖是给旧锚点写的，换成容器锚点后会把插画拽回标题带 | 删掉该覆盖，位置统一由 `.corner-art` 决定 |
+| 生成报 `IncompleteRead` / `SSL: UNEXPECTED_EOF_WHILE_READING` | 网络读到一半断（不是提示词问题） | 脚本带重试（本轮 3 张靠重试拿到） |
+
+### 回归测试
+
+`apps/mobile/src/components/ui/corner-art.test.tsx`（6 条）：
+
+1. 每个用到的插画名都**真的有图**（写错一个字母在界面上只是破图标，只有肉眼能发现）；
+2. `.corner-art` 必须 `pointer-events: none`（它绝不能吃掉点击）；
+3. **版面契约**：`.page-head` / `.recipes-heading` 不得有 `position`、不得有 `min-height`，`.pscreen` 与 `.recipes-page` 必须是定位元素；
+4. 渲染出来的 `alt` 为空、`aria-hidden`（纯装饰，不该被读屏念出来）；
+5. `withAction` 只加一个类。
+
+反证 4 组都验过会变红：插画名写错、删掉 `pointer-events`、给 `.page-head` 加回 `position`、去掉 `.pscreen` 的 `position`。

@@ -19,6 +19,7 @@ import { useMe } from '@/api/auth'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { readBackLink } from '@/pages/back-link'
 import Page from '@/components/ui/Page'
+import PageHeader from '@/components/ui/PageHeader'
 import { toast } from '@/components/ui/toast'
 import SectionTitle from '@/components/ui/SectionTitle'
 import { useAuth } from '@/stores/auth'
@@ -108,7 +109,7 @@ export default function FamilyPage() {
       <Page>
         <div className="pscreen">
           {back}
-          <div className="ptitle">家庭</div>
+          <PageHeader title="家庭" art="family" />
           <p className="family-loading">正在读取家庭信息…</p>
         </div>
       </Page>
@@ -121,7 +122,7 @@ export default function FamilyPage() {
       <Page>
         <div className="pscreen">
           {back}
-          <div className="ptitle">家庭</div>
+          <PageHeader title="家庭" art="family" />
           <p className="family-lead">
             建一个家，把家里人拉进来：菜单、点菜、冰箱都跟着这个家庭走。
             <br />
@@ -217,7 +218,7 @@ export default function FamilyPage() {
     <Page>
       <div className="pscreen">
         {back}
-        <div className="ptitle">家庭</div>
+        <PageHeader title="家庭" art="family" />
 
         <div className="family-head">
           <div className="family-head__main">

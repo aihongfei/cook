@@ -7,6 +7,7 @@ import CheckInPhoto from '@/components/ui/CheckInPhoto'
 import EmptyState from '@/components/ui/EmptyState'
 import { readBackLink } from '@/pages/back-link'
 import Page from '@/components/ui/Page'
+import PageHeader from '@/components/ui/PageHeader'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
 import CheckInUploadSheet from './components/CheckInUploadSheet'
 import './checkins.scss'
@@ -46,8 +47,7 @@ export default function CheckInPage() {
     <Page>
       <div className="pscreen">
         <Link className="page-back" to={back.to}>← {back.label}</Link>
-        <div className="ptitle">家庭打卡墙</div>
-        <div className="psub">做好一道菜就拍一张，攒着看特别有成就感</div>
+        <PageHeader title="家庭打卡墙" subtitle="做好一道菜就拍一张，攒着看特别有成就感" art="checkins" />
 
         <div className="segmented">
           <button

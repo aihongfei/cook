@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import PageHeader from '@/components/ui/PageHeader'
 import Page from '@/components/ui/Page'
 import { toast } from '@/components/ui/toast'
 import { apiErrorMessage } from '@/api/client'
@@ -48,8 +49,7 @@ export default function DiscoverPage() {
   return (
     <Page>
       <div className="pscreen">
-        <div className="ptitle">发现</div>
-        <div className="psub">今天不知道吃什么，交给它</div>
+        <PageHeader title="发现" subtitle="今天不知道吃什么，交给它" art="discover" />
 
         {/* 一张卡装下"今天吃什么"的全部出路：随机摇一道 / 让 AI 挑 / 直接问 AI */}
         <section className="today">
