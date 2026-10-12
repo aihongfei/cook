@@ -101,3 +101,8 @@
   - 错误写法 `` className={`family-switch${on ? 'is-on' : ''}`} `` 会拼成 **`family-switchis-on`** —— 一个不存在的类名。后果比"少个修饰类"严重得多：**基础类的样式整块失效**。共享开关因此丢了 `position: relative`，里面绝对定位的白色圆点失去定位父级，飘到视口左上角 (3px, 3px) 变成一个莫名的白圈（用户截图报来）；确认弹窗那次则是砖红确认键变成普通色。
   - 安全写法：`className={['family-switch', on && 'is-on'].filter(Boolean).join(' ')}`（数组拼接）；或把空格写进条件串里 `` `${a}${on ? ' is-on' : ''}` ``（项目里 `Chips`/`MinePage`/`OrderPage` 用的是这种）。**优先数组拼接**——分隔符不落在字符串字面量里，格式化工具重排不会丢，diff 里也看得见。
   - 配套要求：**条件类名要有测试断言**。只断言 `aria-checked` 与文案发现不了（交互与语义都对，坏的只有视觉），要直接断言 `classList.contains('family-switch')` 与 `classList.contains('is-on')`。家庭页那两条用例就是这么加的，并验证过"把 bug 放回去确实会失败"。
+- **抽屉/弹层不做"打开时清状态"的 effect**（2026-10-12 定，两个抽屉都照此实现）：
+  - 曾经写过 `useEffect(() => { if (!visible) return; setPreview(null); setNote(''); setMealKey(preset) }, [visible, preset])`。问题：① 多一次渲染（打开瞬间先闪一下上次的残留值）；② 异步来的 options 要额外处理时序；③ oxlint 的 `react(set-state-in-effect)` 会拦。
+  - 现在的做法：**状态只在首次挂载时按 props 初始化，每次打开由调用方换 `key` 让它重挂载**（`OrderDishSheet` 由 `RecipeDetailPage` 用 `orderSheetSeq` 换 key，`CheckInUploadSheet` 由 `CheckInPage` 用 `uploadSeq` 换 key）。调用方若是条件渲染（`{open && <Sheet …/>}`），本身就已经是"每次打开都是新的"。
+  - 配套要求：**要有一条"关掉再开是干净的一份"的用例**，否则以后有人把 `key` 删了不会有任何测试报警。打卡抽屉那条用例验证过"去掉 key 确实会失败"。
+- **"浏览器能力"类改动必须有一次真实浏览器/真机实测**（2026-10-12 定，见 `RISKS.md` R-21）：jsdom 不解码图片、不实现 canvas，单测会**静默走降级分支**而看起来"通过"。打卡缩图那条链路在单测里全是假 `Image`/假 canvas；真实数值（2400×1600 → 1600×1067 / 43KB）是在浏览器里测的。

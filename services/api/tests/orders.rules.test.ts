@@ -3,6 +3,7 @@ import test from 'node:test'
 import { BadRequestException } from '@nestjs/common'
 import {
   ACTION_LABEL,
+  todayKey,
   ALLOWED_TRANSITIONS,
   MEAL_SLOTS,
   NOTE_MAX_LENGTH,
@@ -21,6 +22,7 @@ import {
   parseNote,
   parseSlot,
   parseStatus,
+  photoVisibleTo,
   revivedStatus,
   visibleToMember,
 } from '../src/modules/orders/orders.rules'
@@ -145,6 +147,30 @@ test('餐次标识可解析且拒绝畸形输入', () => {
   }
 })
 
+test('「今天」按服务器本地日历算，不用 UTC（北京时间凌晨不会算成昨天）', () => {
+  const previous = process.env.TZ
+  process.env.TZ = 'Asia/Shanghai'
+  try {
+    // 北京时间 2026-10-13 01:00 = UTC 2026-10-12 17:00
+    const earlyMorning = new Date('2026-10-12T17:00:00Z')
+    assert.equal(todayKey(earlyMorning), '2026-10-13', '凌晨 1 点必须算今天，而不是 UTC 的昨天')
+    assert.equal(dateKey(earlyMorning), '2026-10-12', '已入库的日期仍按 UTC 读回（两者口径不同是刻意的）')
+
+    // 可选日期也要跟着本地日历走
+    const options = dayOptions(earlyMorning)
+    assert.deepEqual(options.map(o => o.value), ['2026-10-13', '2026-10-14'])
+    assert.equal(parseMealDate('2026-10-13', earlyMorning) instanceof Date, true, '凌晨仍能点"今天"')
+    assert.throws(() => parseMealDate('2026-10-12', earlyMorning), BadRequestException, '不能再点"昨天"')
+
+    // 北京时间同一天的晚上，仍应是同一天（两边一致）
+    const lateEvening = new Date('2026-10-13T15:30:00Z') // 北京 23:30
+    assert.equal(todayKey(lateEvening), '2026-10-13')
+  } finally {
+    if (previous === undefined) delete process.env.TZ
+    else process.env.TZ = previous
+  }
+})
+
 test('日期只取日期部分（不带时区漂移）', () => {
   // 传 UTC 零点，避免"当天变成前一天/后一天"
   const parsed = dateOnly('2026-10-13')
@@ -231,4 +257,21 @@ test('没人点菜时卡片是空的（而不是报错）', () => {
   assert.deepEqual(card.orderers, [])
   assert.equal(card.dishCount, 0)
   assert.equal(card.mineCount, 0)
+})
+
+// ---------- 成品照张数的可见范围（F9-08 与 D-023 对齐） ----------
+
+test('共享开着：同一家的照片互相可见（掌勺人与吃货都是）', () => {
+  assert.equal(photoVisibleTo(true, 'EATER', 'u1', 'u2'), true)
+  assert.equal(photoVisibleTo(true, 'OWNER', 'u1', 'u2'), true)
+})
+
+test('共享关闭：吃货只看得到自己传的照片（张数也不能漏出别人的）', () => {
+  assert.equal(photoVisibleTo(false, 'EATER', 'u1', 'u1'), true, '自己传的还看得见')
+  assert.equal(photoVisibleTo(false, 'EATER', 'u1', 'u2'), false, '别人传的不计数')
+})
+
+test('共享关闭不影响掌勺人/帮厨（他们要做饭，得看得见成品照）', () => {
+  assert.equal(photoVisibleTo(false, 'OWNER', 'u1', 'u2'), true)
+  assert.equal(photoVisibleTo(false, 'COOK', 'u1', 'u2'), true)
 })

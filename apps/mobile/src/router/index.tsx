@@ -4,6 +4,7 @@ import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage'
 import LoginPage from '@/pages/auth/LoginPage'
 import RegisterPage from '@/pages/auth/RegisterPage'
 import ResetPasswordPage from '@/pages/auth/ResetPasswordPage'
+import CheckInPage from '@/pages/checkins/CheckInPage'
 import FamilyPage from '@/pages/family/FamilyPage'
 import DiscoverPage from '@/pages/discover/DiscoverPage'
 import FridgePage from '@/pages/fridge/FridgePage'
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
       { path: 'discover', element: <DiscoverPage /> },
       { path: 'fridge', element: <FridgePage /> },
       { path: 'mine', element: <MinePage /> },
+      { path: 'checkins', element: <CheckInPage /> },
       { path: 'family', element: <FamilyPage /> },
     ],
   },

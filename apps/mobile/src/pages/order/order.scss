@@ -190,3 +190,32 @@
   width: 100%;
   margin-top: 4px;
 }
+
+/* 成品照入口（F9-08）：只在「已做好」的卡片上出现，做成描边按钮不抢流转按钮的注意力 */
+.order-card__photos {
+  margin-top: 11px;
+}
+
+.order-card__photo-link {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 12px;
+  color: #8a7259;
+  text-decoration: none;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+.order-card__photo {
+  display: block;
+  width: 100%;
+  padding: 9px;
+  font-size: 12.5px;
+  color: var(--color-brand);
+  cursor: pointer;
+  background: transparent;
+  border: 1.5px dashed #de9057;
+  border-radius: 12px;
+}

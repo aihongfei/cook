@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config'
 import { APP_GUARD } from '@nestjs/core'
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler'
 import { AuthModule } from './modules/auth/auth.module'
+import { CheckInsModule } from './modules/checkins/checkins.module'
 import { FamilyModule } from './modules/family/family.module'
 import { HealthModule } from './modules/health/health.module'
 import { OrdersModule } from './modules/orders/orders.module'
@@ -25,6 +26,7 @@ import { RecipesModule } from './modules/recipes/recipes.module'
     AuthModule,
     FamilyModule,
     OrdersModule,
+    CheckInsModule,
     RecipesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

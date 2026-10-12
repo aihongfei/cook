@@ -22,7 +22,8 @@
     "mirror:images": "ts-node src/scripts/mirror-images.ts",
     "test:http:auth": "node scripts/verify-auth-http.cjs",
     "test:http:family": "node scripts/verify-family-http.cjs",
-    "test:http:orders": "node scripts/verify-orders-http.cjs"
+    "test:http:orders": "node scripts/verify-orders-http.cjs",
+    "test:http:checkins": "node scripts/verify-checkins-http.cjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.700.0",

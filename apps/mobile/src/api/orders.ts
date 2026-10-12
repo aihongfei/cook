@@ -64,6 +64,8 @@ export interface MealCard {
   dishes: DishLine[]
   items: OrderItemView[]
   mineCount: number
+  /** 这一餐的成品照张数（F9-08）；按可见范围算，看不到的不计入 */
+  photoCount: number
   nextActions: NextAction[]
   submittedAt: string
 }

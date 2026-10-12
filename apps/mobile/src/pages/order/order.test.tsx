@@ -126,6 +126,8 @@ function cardFixture(overrides: Partial<MealCard> = {}): MealCard {
       },
     ],
     mineCount: 1,
+    // 成品照张数（F9-08）：后端按可见范围算好，前端只显示
+    photoCount: 0,
     // 后端按角色算好的下一步（前端只负责渲染，不自己推状态机）
     nextActions: [
       { status: 'PLANNED', label: '选好了', needsConfirm: false },
@@ -439,4 +441,48 @@ it('还没加入家庭时给引导，不请求点单接口', async () => {
   expect(screen.getByRole('link', { name: '去创建或加入家庭' })).toBeTruthy()
   const get = apiClient.get as unknown as { mock: { calls: unknown[][] } }
   expect(get.mock.calls.some((call) => call[0] === '/orders')).toBe(false)
+})
+
+it('「已做好」的卡片显示成品照张数，并给去打卡墙看看的入口', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ mealKey: 'done-1', status: 'DONE', statusLabel: '已做好', nextActions: [], photoCount: 3 }),
+      ]),
+    },
+  })
+  renderOrder()
+
+  expect(await screen.findByText('已传 3 张成品照，去看看 →')).toBeTruthy()
+  // 已经有照片了，按钮话术变成"再传一张"（不然像在催人重复上传）
+  expect(screen.getByRole('button', { name: '📷 再传一张' })).toBeTruthy()
+})
+
+it('一张成品照都没有时只说上传，不提"去看看"（没东西可看）', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ mealKey: 'done-2', status: 'DONE', statusLabel: '已做好', nextActions: [], photoCount: 0 }),
+      ]),
+    },
+  })
+  renderOrder()
+
+  expect(await screen.findByRole('button', { name: '📷 上传这餐的成品照' })).toBeTruthy()
+  expect(screen.queryByText(/张成品照，去看看/)).toBeNull()
+})
+
+it('还没做好的卡片上没有成品照入口（照片是"做出来了"的证据）', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ mealKey: 'cooking-1', status: 'COOKING', statusLabel: '准备中' }),
+      ]),
+    },
+  })
+  renderOrder()
+
+  expect(await screen.findByText('准备中')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /成品照/ })).toBeNull()
+  expect(screen.queryByText(/张成品照，去看看/)).toBeNull()
 })

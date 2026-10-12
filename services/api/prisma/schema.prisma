@@ -37,6 +37,8 @@ model User {
   membership     FamilyMember?
   /// 这个账号点过的菜（M3）
   orderItems     OrderItem[]
+  /// 这个账号的打卡照片（M9 / F9-07）
+  checkIns       CheckIn[]
 
   @@index([createdAt])
 }
@@ -68,6 +70,8 @@ model Family {
   members    FamilyMember[]
   /// 这一家的点单（M3）
   mealOrders MealOrder[]
+  /// 这一家的打卡照片（M9 / F9-03）
+  checkIns   CheckIn[]
 
   @@index([createdAt])
 }
@@ -164,6 +168,8 @@ model MealOrder {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   items     OrderItem[]
+  /// 这一餐的成品照（M9 / F9-08）
+  checkIns  CheckIn[]
 
   /// 同一餐只有一条：并发的两次点菜不会各建一餐
   @@unique([familyId, mealDate, meal])
@@ -208,4 +214,36 @@ enum OrderStatus {
   COOKING
   DONE
   CANCELED
+}
+
+/// 打卡照片（M9 / F9-03、F9-07、F9-08；口径见 D-023）。
+///
+/// 一张照片一条记录：家庭成员都能传，同家庭一起看；照片本体存**私有桶**（不在这个表里），
+/// 这里只存对象 key 与内容哈希，对外通过签名短链（API 流式读出）访问。
+/// 可选挂在某一餐上（"这顿做好了"拍的成品照）；独立打卡则 mealOrderId 为空。
+model CheckIn {
+  id          String     @id @default(cuid())
+  familyId    String
+  family      Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  /// 上传者
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 可选：挂在"已做好"的那一餐上（F9-08）。这一餐被删时打卡保留（照片仍是人的记录）
+  mealOrderId String?
+  mealOrder   MealOrder? @relation(fields: [mealOrderId], references: [id], onDelete: SetNull)
+  /// 私有桶里的对象 key（按内容 sha256 命名，同一张图只存一份）
+  imageKey    String     @db.VarChar(512)
+  /// 图片字节的 sha256
+  imageHash   String     @db.VarChar(64)
+  /// 打卡日（只取日期部分，按服务器本地时区的日历日归一）——热力图按它聚合
+  checkDate   DateTime   @db.Date
+  /// 一句交代，如"给小满做的生日面"
+  note        String?    @db.VarChar(60)
+  createdAt   DateTime   @default(now())
+
+  /// 家庭墙按时间倒序取 + 热力图按日期聚合
+  @@index([familyId, createdAt])
+  @@index([familyId, checkDate])
+  @@index([userId, checkDate])
+  @@index([mealOrderId])
 }

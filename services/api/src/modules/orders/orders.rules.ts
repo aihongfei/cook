@@ -104,8 +104,38 @@ export function visibleToMember(shared: boolean, role: FamilyRole): 'family' | '
   return shared || role !== 'EATER' ? 'family' : 'mine'
 }
 
+/**
+ * 打卡照片对这个人可见吗（F9-08 的成品照张数用它计数，口径与 checkins 模块一致，见 D-023）。
+ *
+ * 与 `visibleToMember` 同一条线：共享开着就全家互相可见；关了则**吃货只看自己传的**
+ * （掌勺人/帮厨仍看全量）。**张数也要按这个算**，否则共享关掉后吃货能从"这餐有 3 张成品照"
+ * 这种数字上看出别人传了几张——照片藏了、数字却漏了。
+ */
+export function photoVisibleTo(shared: boolean, role: FamilyRole, viewerId: string, ownerId: string): boolean {
+  return visibleToMember(shared, role) === 'family' || viewerId === ownerId
+}
+
+/**
+ * **已被存进库的日期**（`mealDate`，UTC 零点）→ `YYYY-MM-DD`。
+ * 这类值一律用 UTC 读回：写进去时就是按 UTC 零点存的（见 `dateOnly`），用 UTC 读才能原样还原，
+ * 与部署在哪个时区无关。
+ */
 export function dateKey(value: Date): string {
   return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`
+}
+
+/**
+ * **"现在"是哪一天** → `YYYY-MM-DD`。用**服务器本地日历**（容器 TZ=Asia/Shanghai）。
+ *
+ * 这里要是用 UTC，北京时间 0:00–8:00 之间会算成前一天——用户凌晨点菜，"今天"会显示昨天，
+ * 记录也落到昨天那一餐。区分的理由：`mealDate` 是"日子"这个标量（存 UTC 零点），
+ * 而"今天"是"此刻所在地的日历日"，两者不是一回事。
+ */
+export function todayKey(now: Date = new Date()): string {
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 /** 只取日期部分：DATE 列在 MySQL 里不带时间，但传 Date 时驱动会带上 00:00:00 */
@@ -134,11 +164,14 @@ export function parseMealDate(raw: unknown, now: Date = new Date()): Date {
   return dateOnly(raw)
 }
 
-/** 可选日期（今天/明天）：接口把它下发给前端，前端不硬编码 */
+/**
+ * 可选日期（今天/明天）：接口把它下发给前端，前端不硬编码。
+ * 按**本地日历**递进（用 setDate 而不是加固定毫秒数）：跨夏令时的那一天加 24 小时会跑偏。
+ */
 export function dayOptions(now: Date = new Date()): { value: string; label: string }[] {
   return Array.from({ length: ORDER_DAY_SPAN }, (_, index) => {
-    const value = new Date(now.getTime() + index * 86_400_000)
-    return { value: dateKey(value), label: index === 0 ? '今天' : '明天' }
+    const value = new Date(now.getFullYear(), now.getMonth(), now.getDate() + index)
+    return { value: todayKey(value), label: index === 0 ? '今天' : '明天' }
   })
 }
 

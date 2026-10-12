@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { useFamily } from '@/api/family'
+import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import {
   useOrders,
   useRemoveOrderItem,
@@ -52,6 +53,8 @@ type PendingAction =
   | { kind: 'withdraw'; card: MealCard; dishName: string; itemId: string }
   | null
 
+/** 要传成品照的那一餐（F9-08）：只在「已做好」的卡片上有入口 */
+
 function formatSubmittedAt(iso: string): string {
   const date = new Date(iso)
   const pad = (value: number) => String(value).padStart(2, '0')
@@ -64,6 +67,7 @@ export default function OrderPage() {
   const [scope, setScope] = useState<'family' | 'mine'>('family')
   const [filter, setFilter] = useState<string>('ALL')
   const [pending, setPending] = useState<PendingAction>(null)
+  const [uploadMealKey, setUploadMealKey] = useState<string | null>(null)
 
   // 没加入家庭就别请求点单接口（后端会 404）：等 family 查询回来再决定
   const orders = useOrders(scope, filter, { enabled: Boolean(family.data) })
@@ -262,6 +266,21 @@ export default function OrderPage() {
               <span>{formatSubmittedAt(card.submittedAt)}</span>
             </div>
 
+            {/* 成品照（F9-08）：只有做好的那一餐才给这个入口——照片是"做出来了"的证据。
+                已传过的显示张数，并给一个"去看看"的入口（照片都在打卡墙那一餐下） */}
+            {card.status === 'DONE' && (
+              <div className="order-card__photos">
+                {card.photoCount > 0 && (
+                  <Link className="order-card__photo-link" to="/checkins" state={{ from: '/order' }}>
+                    已传 {card.photoCount} 张成品照，去看看 →
+                  </Link>
+                )}
+                <button type="button" className="order-card__photo" onClick={() => setUploadMealKey(card.mealKey)}>
+                  📷 {card.photoCount > 0 ? '再传一张' : '上传这餐的成品照'}
+                </button>
+              </div>
+            )}
+
             {card.nextActions.length > 0 && (
               <div className="order-card__actions">
                 {card.nextActions.map((action) => (
@@ -293,6 +312,14 @@ export default function OrderPage() {
           </article>
         ))}
       </div>
+
+      {uploadMealKey && (
+        <CheckInUploadSheet
+          visible
+          presetMealKey={uploadMealKey}
+          onClose={() => setUploadMealKey(null)}
+        />
+      )}
 
       <ConfirmDialog
         open={pending !== null}

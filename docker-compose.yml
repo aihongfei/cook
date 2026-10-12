@@ -97,6 +97,17 @@ services:
       # 接口返回图片时拼的对外前缀。必须是**浏览器能访问到的地址**——
       # 本机开发写宿主机回环；部署到服务器时改成域名或公网 IP（写错了图片就打不开）。
       MEDIA_BASE_URL: ${MEDIA_BASE_URL:-http://127.0.0.1:9000/cook-media}
+      # 对象存储的写入凭据（打卡照片上传用，M9）。**容器内必须显式给**：
+      # 不加这段时 mediaS3Config() 会退回 127.0.0.1:9000，而容器里的 127.0.0.1 是它自己
+      # ——不是 MinIO，上传会失败。端点用 compose 服务名 minio。
+      # 凭据复用 MinIO 的根账号（与宿主机 .env 的口径一致，见 .env.example 的说明）。
+      MEDIA_S3_ENDPOINT: ${MEDIA_S3_ENDPOINT_IN_CONTAINER:-http://minio:9000}
+      MEDIA_S3_REGION: ${MEDIA_S3_REGION:-us-east-1}
+      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:-cook-media}
+      MEDIA_S3_ACCESS_KEY: ${MINIO_ROOT_USER:?请在 .env 里设置 MINIO_ROOT_USER}
+      MEDIA_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?请在 .env 里设置 MINIO_ROOT_PASSWORD}
+      # 打卡照片的**私有桶**（不设公开读策略，只经签名接口读取，见 D-023）
+      MEDIA_S3_PRIVATE_BUCKET: ${MEDIA_S3_PRIVATE_BUCKET:-cook-checkins}
       TZ: ${TZ:-Asia/Shanghai}
     depends_on:
       mysql:

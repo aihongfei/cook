@@ -1,5 +1,6 @@
 import {
   CreateBucketCommand,
+  GetObjectCommand,
   HeadBucketCommand,
   PutBucketPolicyCommand,
   PutObjectCommand,
@@ -123,4 +124,71 @@ export async function putImage(client: S3Client, config: MediaS3Config, key: str
     // 内容按哈希命名 → 内容永不改变，可长期缓存
     CacheControl: 'public, max-age=31536000, immutable',
   }))
+}
+
+// ---- 私有桶（打卡照片，M9 / D-023）----
+
+/**
+ * 打卡照片存**另一个桶**，且**不设公开读策略**：它是家庭内的内容，不能像菜谱图那样
+ * 靠"公开读 + 内容哈希"来省事（哈希地址一旦泄漏就永久可读）。
+ * 对外只给**签名短链**，由 API 校验签名与家庭成员身份后流式读出（见 checkins 模块）。
+ */
+export const PRIVATE_MEDIA_FOLDER = 'checkins'
+
+export function privateBucketName(): string {
+  return process.env.MEDIA_S3_PRIVATE_BUCKET ?? 'cook-checkins'
+}
+
+/**
+ * 幂等地准备好私有桶：**只建桶，不写任何 bucket policy**。
+ * 注意与 `ensureBucket` 的区别——那个会加"公开只读"策略，用在菜谱图上是对的，用在这里就是错的。
+ */
+export async function ensurePrivateBucket(client: S3Client, bucket: string): Promise<{ created: boolean }> {
+  try {
+    await client.send(new HeadBucketCommand({ Bucket: bucket }))
+    return { created: false }
+  } catch {
+    await client.send(new CreateBucketCommand({ Bucket: bucket }))
+    return { created: true }
+  }
+}
+
+/** 私有桶里的对象 key，例如 `checkins/9f2c…a1.jpg` */
+export function privateMediaKey(hash: string, ext: string): string {
+  return `${PRIVATE_MEDIA_FOLDER}/${hash}.${ext.replace(/^\./, '')}`
+}
+
+/** 上传一张私有图片（key 按内容哈希 → 重复上传同一张图是幂等覆盖写） */
+export async function putPrivateImage(
+  client: S3Client,
+  bucket: string,
+  key: string,
+  body: Buffer,
+  contentType: string,
+): Promise<void> {
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: body,
+    ContentType: contentType,
+    // 内容是家庭私有的，别让中间代理长缓存（签名链接本身有有效期）
+    CacheControl: 'private, max-age=3600',
+  }))
+}
+
+/** 从私有桶读出一张图片（给签名接口用，不暴露直链） */
+export async function getPrivateImage(
+  client: S3Client,
+  bucket: string,
+  key: string,
+): Promise<{ body: Buffer; contentType: string } | null> {
+  try {
+    const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+    if (!result.Body) return null
+    const bytes = await result.Body.transformToByteArray()
+    return { body: Buffer.from(bytes), contentType: result.ContentType ?? contentTypeForKey(key) }
+  } catch {
+    // 对象不存在 / 权限不对都当作"读不到"（不把底层错误暴露给调用方）
+    return null
+  }
 }

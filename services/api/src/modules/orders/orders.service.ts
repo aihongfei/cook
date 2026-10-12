@@ -6,7 +6,7 @@ import { PrismaService } from '../recipes/prisma.service'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
   aggregateItems, canAddItem, dateKey, isAllowedTransition, mealKeyOf, nextActionsFor, parseMealDate,
-  parseMealKey, parseNote, parseSlot, parseStatus, revivedStatus, visibleToMember, dayOptions, type AggregateItem,
+  parseMealKey, parseNote, parseSlot, parseStatus, photoVisibleTo, revivedStatus, visibleToMember, dayOptions, type AggregateItem,
 } from './orders.rules'
 
 /**
@@ -47,11 +47,19 @@ export interface MealCardView {
   dishes: ReturnType<typeof aggregateItems>['dishes']
   items: OrderItemView[]
   mineCount: number
+  /** 这一餐的成品照张数（F9-08）。按视图范围算：看不到的照片不计入（见 cardFromRow 说明） */
+  photoCount: number
   nextActions: { status: OrderStatus; label: string; needsConfirm: boolean }[]
   submittedAt: string
 }
 
-type MealOrderRow = Prisma.MealOrderGetPayload<{ include: { items: { include: { user: true } } } }>
+type MealOrderRow = Prisma.MealOrderGetPayload<{ include: typeof MEAL_ORDER_INCLUDE }>
+
+/** 卡片组装要用的关联（列表与单卡共用，避免两处 include 漂移） */
+const MEAL_ORDER_INCLUDE = {
+  items: { include: { user: true }, orderBy: { createdAt: 'asc' } },
+  checkIns: { select: { userId: true } },
+} satisfies Prisma.MealOrderInclude
 
 @Injectable()
 export class OrdersService {
@@ -173,13 +181,13 @@ export class OrdersService {
     // 否则点了「待确认」之后，其它状态的徽标会全变成 0，用户就没法切回去了。
     const rows = await this.prisma.mealOrder.findMany({
       where: scoped,
-      include: { items: { include: { user: true }, orderBy: { createdAt: 'asc' } } },
+      include: MEAL_ORDER_INCLUDE,
       orderBy: [{ mealDate: 'desc' }, { meal: 'desc' }],
       take: 60,
     })
 
     const allCards = rows
-      .map(row => this.cardFromRow(row, userId, role))
+      .map(row => this.cardFromRow(row, userId, role, family.shared))
       .filter(card => (mineOnly ? card.mineCount > 0 : true))
 
     const counts: Record<string, number> = { ALL: allCards.length }
@@ -194,12 +202,12 @@ export class OrdersService {
   /** 单张卡片（点菜/撤回/流转后回传，前端据此刷新缓存） */
   async card(mealOrderId: string, viewerId: string): Promise<MealCardView> {
     const { familyId, role } = await this.requireMember(viewerId)
-    const row = await this.prisma.mealOrder.findUnique({
-      where: { id: mealOrderId },
-      include: { items: { include: { user: true }, orderBy: { createdAt: 'asc' } } },
-    })
+    const [family, row] = await Promise.all([
+      this.requireFamily(familyId),
+      this.prisma.mealOrder.findUnique({ where: { id: mealOrderId }, include: MEAL_ORDER_INCLUDE }),
+    ])
     if (!row || row.familyId !== familyId) throw new NotFoundException('这一餐不存在了')
-    return this.cardFromRow(row, viewerId, role)
+    return this.cardFromRow(row, viewerId, role, family.shared)
   }
 
   /** 点单口径（免登录可读，与 /family/options 同理）：前端不硬编码餐次、状态与可选日期 */
@@ -213,8 +221,11 @@ export class OrdersService {
 
   // ---------- 内部 ----------
 
-  private cardFromRow(row: MealOrderRow, viewerId: string, role: FamilyRole): MealCardView {
+  private cardFromRow(row: MealOrderRow, viewerId: string, role: FamilyRole, shared: boolean): MealCardView {
     const aggregated = aggregateItems(row.items as AggregateItem[], viewerId)
+    // 成品照张数与照片本身的可见范围一致：共享关闭时吃货不该从"张数"上看到别人传了几张
+    // （打卡照片的可见性口径见 D-023 与 checkins 模块）
+    const visiblePhotos = row.checkIns.filter(photo => photoVisibleTo(shared, role, viewerId, photo.userId))
     return {
       mealKey: mealKeyOf(row.mealDate, row.meal),
       date: dateKey(row.mealDate),
@@ -226,6 +237,7 @@ export class OrdersService {
       ordererCount: aggregated.orderers.length,
       dishCount: aggregated.dishCount,
       dishes: aggregated.dishes,
+      photoCount: visiblePhotos.length,
       items: row.items.map(item => ({
         id: item.id,
         recipeId: item.recipeId,
@@ -295,6 +307,7 @@ function emptyCard(mealDate: Date, meal: MealSlot): MealCardView {
     dishes: [],
     items: [],
     mineCount: 0,
+    photoCount: 0,
     nextActions: [],
     submittedAt: new Date().toISOString(),
   }

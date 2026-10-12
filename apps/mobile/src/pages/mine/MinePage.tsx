@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { logout, useAuthOptions, useMe, useUpdateProfile } from '@/api/auth'
+import { useCheckInStats } from '@/api/checkins'
 import { useFamily } from '@/api/family'
+import Heatmap from '@/components/ui/Heatmap'
 import Page from '@/components/ui/Page'
 import { toast } from '@/components/ui/toast'
 import SectionTitle from '@/components/ui/SectionTitle'
 import { useAuth } from '@/stores/auth'
 import '../shared.scss'
+import '../checkins/checkins.scss'
 import './mine.scss'
 
 const preferenceRows = [
@@ -28,6 +31,8 @@ export default function MinePage() {
   const options = useAuthOptions()
   const updateProfile = useUpdateProfile()
   const family = useFamily()
+  // 打卡统计（M9 / F9-03）：没加入家庭时不请求（后端会 404，打卡是家庭内的）
+  const checkins = useCheckInStats({ enabled: Boolean(family.data) })
 
   // 先用本地缓存的账号信息渲染，接口回来后自动替换（避免进页面就闪一下"读取中"）
   const user = me.data ?? storedUser
@@ -140,6 +145,37 @@ export default function MinePage() {
             >
               {updateProfile.isPending ? '保存中…' : '保存'}
             </button>
+          </div>
+        )}
+
+        <SectionTitle title="我的打卡" />
+
+        {family.data && checkins.data ? (
+          <div className="me-checkin">
+            <div className="me-checkin__head">
+              <span className="me-checkin__streak">
+                连续打卡 <b>{checkins.data.mine.streak}</b> 天
+              </span>
+              <span className="checkin-card__date">共 {checkins.data.mineTotal} 张</span>
+            </div>
+            <Heatmap grid={checkins.data.mine} emptyHint="还没有打卡照片：做了一道好菜就拍一张。" />
+            <p className="me-checkin__family">全家一起攒了 {checkins.data.familyTotal} 张照片</p>
+            <Link className="me-checkin__more" to="/checkins" state={{ from: '/mine' }}>
+              去打卡墙看看 →
+            </Link>
+          </div>
+        ) : (
+          <div className="rows" style={{ marginTop: 0 }}>
+            <div className="row">
+              <div className="row__icon">📷</div>
+              <div className="row__main">
+                打卡与家庭相册
+                <div className="row__sub">
+                  {family.isPending ? '正在读取…' : family.data ? '统计加载中…' : '先创建或加入家庭，才能和家人一起打卡'}
+                </div>
+              </div>
+              <span className="row__arrow">›</span>
+            </div>
           </div>
         )}
 
