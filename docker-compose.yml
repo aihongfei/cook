@@ -108,6 +108,14 @@ services:
       MEDIA_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?请在 .env 里设置 MINIO_ROOT_PASSWORD}
       # 打卡照片的**私有桶**（不设公开读策略，只经签名接口读取，见 D-023）
       MEDIA_S3_PRIVATE_BUCKET: ${MEDIA_S3_PRIVATE_BUCKET:-cook-checkins}
+      # AI 推荐与问答（D-026）：OpenAI 兼容的对话模型。**留空即视为未配置**——
+      # 前端的 AI 入口会显示"去配置"，其余功能不受影响（不静默降级到假数据）。
+      # 容器不读 services/api/.env，所以密钥要写在**根 .env**里（compose 从这里注入）。
+      AI_API_BASE: ${AI_API_BASE:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-}
+      AI_JSON_SCHEMA: ${AI_JSON_SCHEMA:-}
       TZ: ${TZ:-Asia/Shanghai}
     depends_on:
       mysql:

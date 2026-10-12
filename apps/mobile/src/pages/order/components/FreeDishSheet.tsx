@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { apiErrorMessage } from '@/api/client'
 import { can, useFamily } from '@/api/family'
-import { useAddOrderItem, useOrderOptions } from '@/api/orders'
+import { useAddOrderItem, useOrderOptions, type MealSlot } from '@/api/orders'
 import BottomSheet from '@/components/ui/BottomSheet'
 import { toast } from '@/components/ui/toast'
 import '../order.scss'
@@ -35,13 +35,15 @@ export default function FreeDishSheet({
 
   const [name, setName] = useState('')
   const [chosenDay, setChosenDay] = useState<string | null>(null)
-  const [chosenMeal, setChosenMeal] = useState<string | null>(null)
+  // 类型标成 MealSlot 而不是 string：提交时靠 `!meal` 把空值挡掉，标成 string 挡不住
+  // （类型松散时编译器帮不上忙，最后在请求体那里才报错——F3-10 就是这么漏过一次）
+  const [chosenMeal, setChosenMeal] = useState<MealSlot | null>(null)
   const [note, setNote] = useState('')
 
   // 默认落在「今天的第一餐」；用户点了别的就用用户的（与「想吃这道」不同，这里不猜"下一餐"——
   // 从点菜单进来的场景是"我现在就想记一道菜"，默认跟着列表最上面那一天最直观）
   const day = chosenDay ?? days[0]?.value ?? ''
-  const meal = chosenMeal ?? meals[0]?.value ?? ''
+  const meal: MealSlot | '' = chosenMeal ?? meals[0]?.value ?? ''
 
   const mayOrder = can(family.data, 'order.create')
   const trimmed = name.trim()

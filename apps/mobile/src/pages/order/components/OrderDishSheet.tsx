@@ -4,26 +4,15 @@ import { can, useFamily } from '@/api/family'
 import { useAddOrderItem, useOrderOptions, type MealSlot } from '@/api/orders'
 import BottomSheet from '@/components/ui/BottomSheet'
 import { toast } from '@/components/ui/toast'
+import { nextMealDefaults } from '../next-meal'
 import type { PlanTarget } from '../plan-target'
 import '../order.scss'
-
-/**
- * 默认选「下一餐」：下午 3 点前默认今天的晚饭，之后默认明天的午饭。
- * days 是后端下发的可选日期（今天/明天/后天），为空时（选项还没回来）返回空值，界面自然什么都不选。
- */
-function nextMealDefaults(days: { value: string; label: string }[]): { day: string; meal: MealSlot | null } {
-  if (days.length === 0) return { day: '', meal: null }
-  const tonight = new Date().getHours() < 15
-  return tonight
-    ? { day: days[0].value, meal: 'DINNER' }
-    : { day: days[1]?.value ?? days[0].value, meal: 'LUNCH' }
-}
 
 /**
  * 「想吃这道」：点菜入口（F3-01/05，D-022）。
  *
  * 只做一件事——把这道菜加进「某天某餐」。日期与餐次选项都由 `/orders/options` 下发，
- * 前端不硬编码（改口径不用发版）；默认选中"下一餐"，让最常见的操作一次点完。
+ * 前端不硬编码（改口径不用发版）；默认选中"下一餐"（规则见 ../next-meal，AI 推荐入口共用同一份）。
  *
  * `preset` 是本周菜单「去安排」带过来的目标（F4-02）：**它的日期必须先出现在当下下发的
  * dayOptions 里**才生效——那是个跨页路由 state，可能是昨天留下的链接（"后天"已经过期），
@@ -61,9 +50,12 @@ export default function OrderDishSheet({
    * 组件由调用方用 key 在每次打开时重挂载，所以"上次选的"不会带到下一次。
    */
   const fallback = nextMealDefaults(days)
-  const presetDay = preset && days.some((option) => option.value === preset.date) ? preset.date : null
-  const day = chosenDay ?? presetDay ?? fallback.day
-  const meal: MealSlot | '' = chosenMeal ?? (presetDay ? preset.meal : fallback.meal) ?? ''
+  // 生效的 preset 与"它的日期还有效"绑在同一个值上：拆成两个变量时编译器无法从
+  // `presetDay` 为真推出 `preset` 非空，`preset.meal` 就成了可疑访问（这也是个真实保证：
+  // 能算出 presetDay 就说明 preset 在，只是类型系统看不见这层关系）
+  const presetTarget = preset && days.some((option) => option.value === preset.date) ? preset : null
+  const day = chosenDay ?? presetTarget?.date ?? fallback.day
+  const meal: MealSlot | '' = chosenMeal ?? presetTarget?.meal ?? fallback.meal ?? ''
 
   const mayOrder = can(family.data, 'order.create')
 
@@ -93,8 +85,8 @@ export default function OrderDishSheet({
         <p className="order-sheet__hint">你在家里的角色暂时不能点菜，让掌勺人看看你的角色。</p>
       ) : (
         <>
-          {presetDay && preset && (
-            <p className="order-sheet__hint">从「本周菜单」来的：默认放进{preset.label}，也可以改。</p>
+          {presetTarget && (
+            <p className="order-sheet__hint">从「本周菜单」来的：默认放进{presetTarget.label}，也可以改。</p>
           )}
           <div className="order-sheet__group">
             <span className="order-sheet__label">哪一天</span>

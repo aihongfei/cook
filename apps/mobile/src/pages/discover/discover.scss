@@ -133,3 +133,301 @@
   flex: 0 0 auto;
   text-decoration: none;
 }
+
+/* ---- AI 入口与抽屉（M16 子集 / D-026）----
+   两个入口并排：左边是「帮你想」（要推荐就点这个），右边是「问 AI」（问事）。
+   样式独立成 .ai-* / .ai__*，不借点菜页的类名——那是另一个页面的样式表。 */
+
+.ai-entry {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.ai-entry__btn {
+  display: flex;
+  flex: 1;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+  padding: 11px 12px;
+  font: inherit;
+  text-align: left;
+  background: var(--color-paper);
+  border: 1.5px solid var(--color-line);
+  border-radius: 14px;
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+/* 主推「帮你想」：它一步就能落到菜上；问答是备选 */
+.ai-entry__btn--suggest {
+  background: var(--color-cream-2);
+  border-color: var(--color-focus-line);
+}
+
+.ai-entry__emoji {
+  flex: 0 0 auto;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.ai-entry__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.ai-entry__title {
+  font-size: 13px;
+  color: #6e3a1c;
+}
+
+.ai-entry__sub {
+  overflow: hidden;
+  font-size: 10.5px;
+  color: var(--color-ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai__lead {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+/* 未配置 / 空结果时的说明：这里要说清"没有假数据"，不是一句冷冰冰的报错 */
+.ai__tip {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--color-ink-3);
+}
+
+.ai__hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.ai__hint {
+  padding: 6px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: #6e3a1c;
+  background: var(--color-cream-2);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
+/* 输入框 + 「想几道/问」并排：家庭场景一次说完，不要两步操作 */
+.ai__ask {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.ai__note {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink);
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 12px;
+  outline: none;
+
+  &:focus {
+    border-color: var(--color-focus-line);
+    box-shadow: var(--shadow-focus);
+  }
+}
+
+.ai__go {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: #fff;
+  background: var(--color-brand);
+  border: none;
+  border-radius: 12px;
+
+  &:disabled {
+    opacity: 0.55;
+  }
+}
+
+/* 模型一次要十几秒到几十秒，明说在等什么比一个转圈更有耐心 */
+.ai__waiting {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.ai__picks {
+  margin-top: 12px;
+}
+
+.ai__pick {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+
+  & + .ai__pick {
+    border-top: 1px dashed var(--color-line);
+  }
+}
+
+.ai__pick-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+
+.ai__pick-name {
+  font-size: 13.5px;
+  color: #4a3225;
+}
+
+.ai__pick-reason {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-3);
+}
+
+.ai__pick-go {
+  flex: 0 0 auto;
+}
+
+.ai__foot {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+/* 问答：用户在右、AI 在左，气泡一眼能分清谁说的 */
+.ai__thread {
+  display: flex;
+  flex-direction: column;
+  max-height: 46vh;
+  gap: 8px;
+  margin-bottom: 10px;
+  overflow-y: auto;
+}
+
+.ai__turn {
+  max-width: 84%;
+  padding: 9px 12px;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  border-radius: 12px;
+}
+
+.ai__turn--user {
+  align-self: flex-end;
+  color: #fff;
+  background: var(--color-brand);
+}
+
+.ai__turn--assistant {
+  align-self: flex-start;
+  color: #4a3225;
+  background: var(--color-cream-2);
+}
+
+.ai__turn--waiting {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--color-ink-3);
+}
+
+.ai__waiting-text {
+  font-size: 12px;
+}
+
+/* 流式输出时闪的光标：让人一眼看出"还在写"（而不是以为答完了） */
+.ai__caret {
+  display: inline-block;
+  width: 2px;
+  height: 13px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: currentColor;
+  animation: ai-caret 0.9s steps(2, start) infinite;
+}
+
+@keyframes ai-caret {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+/* 等推荐结果时的骨架：位置先占住，界面不至于一动不动 */
+.ai__skeleton {
+  margin-top: 10px;
+  opacity: 0.75;
+}
+
+.ai__skeleton-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+
+  & + .ai__skeleton-row {
+    border-top: 1px dashed var(--color-line);
+  }
+}
+
+.ai__skeleton-line {
+  display: block;
+  height: 11px;
+  background: linear-gradient(90deg, var(--color-cream-2) 25%, var(--color-cream) 37%, var(--color-cream-2) 63%);
+  background-size: 400% 100%;
+  border-radius: 6px;
+  animation: ai-shimmer 1.4s ease infinite;
+}
+
+.ai__skeleton-line--name {
+  width: 43%;
+}
+
+.ai__skeleton-line--reason {
+  width: 72%;
+  height: 9px;
+}
+
+@keyframes ai-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: 0 0;
+  }
+}

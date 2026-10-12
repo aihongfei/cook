@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { APP_GUARD } from '@nestjs/core'
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler'
+import { AiModule } from './modules/ai/ai.module'
 import { AuthModule } from './modules/auth/auth.module'
 import { CheckInsModule } from './modules/checkins/checkins.module'
 import { FamilyModule } from './modules/family/family.module'
@@ -23,6 +24,7 @@ import { RecipesModule } from './modules/recipes/recipes.module'
     // 接口限流（R-07）：全局兜底 60 次/分钟，登录等敏感接口在控制器上用 @Throttle 收紧
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
     HealthModule,
+    AiModule,
     AuthModule,
     FamilyModule,
     OrdersModule,

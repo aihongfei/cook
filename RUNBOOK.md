@@ -632,3 +632,63 @@ pnpm --dir services/api run test:http:orders   # 77 项，真实请求（62 + F4
 **浏览器实测（真实点击，2026-10-12）**：发现页点「后天·晚餐」的「去安排」→ 落到 `/recipes` 且 `history.state.usr.plan = {date: '2026-10-14', label: '后天晚餐', meal: 'DINNER'}` → 打开一道菜 → 详情页 state 仍在 → 点「想吃这道」→ 抽屉**预选好「后天」+「晚餐」**并提示「从「本周菜单」来的：默认放进后天晚餐，也可以改」→ 提交 → toast「已加入后天晚餐，等掌勺人安排」→ 回发现页，**后天晚餐那行显示「煎烹大虾 · 人数还没定 · 待确认」**（不再是「还没安排」）。
 
 > **路由 state 要当外部输入读**：`plan` 是跨页传递的字符串，可能是昨天留下的链接（"后天"已过期）或手改的值。抽屉里**预设日期必须落在当下下发的 `dayOptions` 内**才生效，否则回落"下一餐"——不预选一个提交必被拒的日期。四个反证都验过会变红：去掉过期守卫、去掉空行占位、菜单卡漏传 `plan`、`readPlanTarget` 不做校验。
+
+## R-018 AI 推荐与问答（M16 子集 / D-026）（✅ 已验证，2026-10-12）
+
+**要验证什么**：AI 两条路（`suggest` 推荐 / `chat` 问答 + `chat/stream` 流式）在**没配 / 配了**两种状态下的行为，以及"不静默降级、不泄露密钥、模型编造的 id 会被丢掉"这几条底线。
+
+### 前置：AI 配置（密钥只放 `.env`）
+
+容器**不读** `services/api/.env`，Docker 跑时密钥写在**根目录 `.env`**（compose 从这里注入）：
+
+```bash
+# .env（不入库）——值由用户提供，不要写进文档、不要贴进对话
+AI_API_BASE=https://opencode.ai/zen/go/v1
+AI_API_KEY=oc_sk_...        # 用户自己的密钥
+AI_MODEL=deepseek-v4.1-flash
+AI_TIMEOUT_MS=              # 可选，默认 90000
+AI_JSON_SCHEMA=             # 可选，默认开；上游不认 response_format 时填 0
+```
+
+本机直跑（`pnpm --dir services/api run start:dev`）则填 `services/api/.env`。改完 `docker compose up -d --build api` 重启。
+
+### 三条验收命令
+
+```bash
+# ① 没配 AI 的路径：状态说没配、调用得 503 且话术给出去哪配（先在根 .env 里清空 AI_*）
+pnpm --dir services/api run test:http:ai     # 8/8
+
+# ② 配了 AI 的路径（真实网关，花钱、每次十几到几十秒；13 项）
+pnpm --dir services/api run test:http:ai     # 13/13
+
+# ③ 配了 AI 但**不花用户额度**：本地 stub 上游
+node services/api/scripts/ai-stub-upstream.cjs 18990 &   # 另开一个终端
+AI_API_BASE=http://host.docker.internal:18990/v1 AI_API_KEY=stub-key AI_MODEL=stub-model \
+  docker compose up -d --build api
+pnpm --dir services/api run test:http:ai     # 13/13
+```
+
+**stub 为什么必要**：AI 的功能验收不能依赖用户的真实密钥与额度，也不该把密钥写进脚本。stub 回**形状真实**的回包（推荐那段**带一条编造的 id** + 一条**从收到的候选清单里现取的真 id**），于是能验最关键的两件事——**服务端确实把候选清单发给了模型**、**模型编造的 id 被丢掉**。真 id 必须现取：写死一个假 id 的话，两条一起被丢掉也照样"通过"，等于没验（反证过：把候选清单的 id 抹掉，第二条断言会红）。
+- `STUB_FORCE_STREAM=1`：强制回 SSE，验客户端"网关不听话也照样回 SSE"的降级。
+- `STUB_ECHO_JSON_OBJECT=1`：模拟老 `json_object` 的故障（把参数当正文回）——那正是真网关的行为，见 D-026。
+
+### 实测结果（2026-10-12）
+
+- **未配置路径 8/8**：`/ai/status` 回 `{configured:false,model:null}` 且**不含密钥**；`suggest`/`chat` → 503 + 「AI 还没配置：Docker 跑填根目录 .env、本机直跑填 services/api/.env…」；未登录 → 401；输入错（hint 非文字 / >200 字 / 空消息）**先于配置判定**报 400。
+- **真实网关 13/13**：推荐返回真实菜（每条都在库里）、编造 id 被丢、问答返回整段回答、**流式 200 + `text/event-stream` + 分 20～38 段到 + `[DONE]` 收尾**、输入闸门 400、流式的输入校验**在写头之前**（真 400，不是 200 的流里夹一段错）、未登录 401。
+- **stub 13/13**（不花额度）：同上一套，另验"候选清单真的发给了模型"与"编造 id 被丢"。
+- **浏览器实测（真实点击）**：发现页「AI 帮你想」→ 点「清淡点」→ 约 20 秒后出 4 道菜（`干贝花菇芹菜羹` / `凉拌海带丝` / `素炒蘑菇` / `黄瓜鸡蛋包子`，各带一句理由）→ 点第一道的「点这道」→ 抽屉关、**本周菜单的「明天午餐」出现「干贝花菇芹菜羹[原创首发] · 待确认」**（`18:00` 时"下一餐"= 明天午餐，与「想吃这道」同一份规则）。「问 AI」→ 流式逐字上屏、等待时显示 DotLoading + 阶段提示。
+
+### 踩过的坑（都已在代码里修掉，供复查时对照）
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| 推荐半数失败，回包正文 `{"type":"json_object"}` | 网关不支持老 `json_object`，模型把参数当正文回 | 改用 `json_schema` + `strict`；默认开、可关 |
+| 网关 400 `This response_format type is unavailable now`（8 次里 5 次） | `json_schema` 的支持**按后端路由**，且错误体有两种形状 | 发过结构化参数的请求拿到 400 就**去掉它重试一次**（判据只看状态码） |
+| `Unexpected token 'd', "data: {"id"...` | 没显式发 `stream: false`，上游回 SSE | 显式发 `stream: false`；另按 content-type 兜 SSE |
+| 上游报错时界面是「服务器开小差了」(500) | 客户端与服务抛的是普通 `Error`，Nest 只映射 `HttpException` | `ask()` 里统一映射：超时 504、模型答非所问 502 |
+| 模型回散文时仍是 500 | `parsePicks` 在 `ask()` **之外**调用，绕过了映射 | 解析器作为参数传进 `ask`（stub 复现后修） |
+| 一次推荐要 11～40 秒，30 秒超时半数失败 | 推理模型先想再答 | 默认超时调到 **90 秒**；前端 AI 请求单给 **120 秒**（`apiClient` 默认 15 秒会在客户端先掐） |
+| 500 的详情只有 `{"model":"deepseek-v4.1-flash"}` | 错误体形状多变，取错了字段 | `safeErrorText` 按 `error.message` → 顶层 `message` → 原文依次退 |
+
+> **密钥纪律**：任何验证输出、日志、文档里都不得出现 key 值。`/ai/status` 只回 `configured` 与模型名（HTTP 断言里钉死了"不含 `sk-`、不含 `apiKey`/`baseUrl` 字段"）。日志只记模型名与状态码。
