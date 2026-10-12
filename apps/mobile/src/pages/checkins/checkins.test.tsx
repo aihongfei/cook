@@ -15,13 +15,14 @@ import CheckInPage from './CheckInPage'
 
 const clients: QueryClient[] = []
 
-function renderWall() {
+function renderWall(from?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   clients.push(client)
+  const entry = from ? { pathname: '/checkins', state: { from } } : '/checkins'
   return render(
     <QueryClientProvider client={client}>
       <Toaster />
-      <MemoryRouter initialEntries={['/checkins']}>
+      <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="/checkins" element={<CheckInPage />} />
           <Route path="/family" element={<h1>家庭页</h1>} />
@@ -195,4 +196,30 @@ it('每次重新打开抽屉都是干净的一份（上次写的备注不会留�
 
   const reopened = await screen.findByPlaceholderText('如：给小满做的生日面')
   expect((reopened as HTMLInputElement).value).toBe('')
+})
+
+it('返回入口跟着来源走：从「我的」进来就回我的，不写死厨房', async () => {
+  mockGet({ family: familyFixture() })
+  renderWall('/mine')
+
+  const back = await screen.findByRole('link', { name: '← 返回我的' })
+  expect(back.getAttribute('href')).toBe('/mine')
+  // 写死"返回厨房"时，从我的进来的人点返回会落到厨房——这条就是防它回来
+  expect(screen.queryByRole('link', { name: '← 返回厨房' })).toBeNull()
+})
+
+it('从点单卡的成品照进来就回点菜单', async () => {
+  mockGet({ family: familyFixture() })
+  renderWall('/order')
+
+  const back = await screen.findByRole('link', { name: '← 返回点菜单' })
+  expect(back.getAttribute('href')).toBe('/order')
+})
+
+it('没带来源（直接输地址）时兜底回「我的」，不是厨房', async () => {
+  mockGet({ family: familyFixture() })
+  renderWall()
+
+  const back = await screen.findByRole('link', { name: '← 返回我的' })
+  expect(back.getAttribute('href')).toBe('/mine')
 })

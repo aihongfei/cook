@@ -14,6 +14,17 @@ import './checkins.scss'
  * 家庭打卡墙（M9 / F9-03；口径见 D-023）。
  * 家里人的照片都在这里，最新在前；共享开关关闭时吃货只看得到自己上传的。
  */
+/**
+ * 能从哪些页面进到打卡墙，以及返回时的文案。
+ * 返回目标跟着**来源**走，不写死：从「我的」进来要回「我的」，从点单卡那张成品照进来要回点菜单。
+ * （原先写死"返回厨房"，从"我的"进来的人点返回会莫名其妙落到厨房——用户报的正是这个。）
+ */
+const WALL_ENTRIES: Record<string, string> = {
+  '/mine': '返回我的',
+  '/order': '返回点菜单',
+  '/kitchen': '返回厨房',
+}
+
 export default function CheckInPage() {
   const location = useLocation()
   const family = useFamily()
@@ -26,6 +37,10 @@ export default function CheckInPage() {
     setUploading(true)
   }
 
+  // 没带来源（直接输地址/刷新丢了 state）时按主要入口「我的」兜底
+  const requestedFrom = location.state?.from
+  const from = typeof requestedFrom === 'string' && requestedFrom in WALL_ENTRIES ? requestedFrom : '/mine'
+
   const wall = useCheckInWall(scope, { enabled: Boolean(family.data) })
 
   const entries = wall.data?.items ?? []
@@ -36,7 +51,7 @@ export default function CheckInPage() {
   return (
     <Page>
       <div className="pscreen">
-        <Link className="page-back" to="/kitchen">← 返回厨房</Link>
+        <Link className="page-back" to={from}>← {WALL_ENTRIES[from]}</Link>
         <div className="ptitle">家庭打卡墙</div>
         <div className="psub">做好一道菜就拍一张，攒着看特别有成就感</div>
 
