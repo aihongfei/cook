@@ -21,26 +21,7 @@
   margin: 14px var(--spacing-page) 0;
 }
 
-/* 已取消的戳：褪色处理，别再吸引注意力 */
-.stamp--canceled {
-  color: var(--color-ink-3);
-  background: rgb(120 100 80 / 10%);
-  border-color: #cbb69c;
-}
-
-/* 已安排：琥珀色（"定了"但还没动手） */
-.stamp--planned {
-  color: #8a6a2f;
-  background: rgb(245 217 139 / 30%);
-  border-color: #d8a25c;
-}
-
-/* 准备中：砖红（正在灶上，最需要被看见的一档） */
-.stamp--cooking {
-  color: var(--color-brick);
-  background: rgb(178 74 52 / 12%);
-  border-color: #c8806a;
-}
+/* 各状态的戳色已提到 components/ui/ui.scss（本周菜单也要用同一套，不能各写一份） */
 
 /* 一道菜一行：菜名 + 备注 + 撤回入口 */
 .order-card__dish {

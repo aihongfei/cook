@@ -88,7 +88,7 @@
   background: rgb(224 123 57 / 12%);
 }
 
-/* 印章式状态标（点菜单用） */
+/* 印章式状态标（点菜单、本周菜单用） */
 .stamp {
   padding: 4px 9px;
   font-size: 10px;
@@ -104,6 +104,27 @@
   color: #a8762f;
   background: rgb(245 217 139 / 30%);
   border-color: #d8a25c;
+}
+
+/* 已安排：琥珀色（"定了"但还没动手） */
+.stamp--planned {
+  color: #8a6a2f;
+  background: rgb(245 217 139 / 30%);
+  border-color: #d8a25c;
+}
+
+/* 准备中：砖红（正在灶上，最需要被看见的一档） */
+.stamp--cooking {
+  color: var(--color-brick);
+  background: rgb(178 74 52 / 12%);
+  border-color: #c8806a;
+}
+
+/* 已取消的戳：褪色处理，别再吸引注意力 */
+.stamp--canceled {
+  color: var(--color-ink-3);
+  background: rgb(120 100 80 / 10%);
+  border-color: #cbb69c;
 }
 
 /* 卡片 */

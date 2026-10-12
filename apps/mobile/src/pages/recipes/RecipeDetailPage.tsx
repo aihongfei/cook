@@ -4,6 +4,7 @@ import { Link, useLocation, useParams } from 'react-router-dom'
 import { caloriesLabel, fetchRecipe, recipeErrorMessage } from '@/api/recipes'
 import Page from '@/components/ui/Page'
 import OrderDishSheet from '@/pages/order/components/OrderDishSheet'
+import { readPlanTarget } from '@/pages/order/plan-target'
 import RecipeImage from './components/RecipeImage'
 import RecipeStatus from './components/RecipeStatus'
 import './recipes.scss'
@@ -26,6 +27,9 @@ export default function RecipeDetailPage() {
       requestedFrom.startsWith('/recipes?'))
       ? requestedFrom
       : '/recipes'
+  // 本周菜单「去安排」带来的目标（F4-02）：只要经过菜谱小书，它就会跟着路由 state 一路到这里。
+  // 路由 state 是不可信输入，用 readPlanTarget 读（见该文件）；读不出来就是普通的"想吃这道"。
+  const planTarget = readPlanTarget(location.state)
   const query = useQuery({
     queryKey: ['recipes', 'detail', id],
     queryFn: ({ signal }) => fetchRecipe(id, signal),
@@ -184,6 +188,7 @@ export default function RecipeDetailPage() {
             visible={ordering}
             recipeId={recipe.id}
             recipeName={recipe.name}
+            preset={planTarget}
             onClose={() => setOrdering(false)}
           />
         )}

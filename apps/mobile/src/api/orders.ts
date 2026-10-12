@@ -79,11 +79,14 @@ export interface OrderBoard {
   scope: 'family' | 'mine'
 }
 
-/** 今日安排的一行（M4 / F4-01）：厨房页用来显示"这餐到哪一步了" */
-export interface TodayMealRow {
+/**
+ * 一餐的进度（M4）：**今日安排（F4-01）与本周菜单（F4-02）共用同一个形状**——
+ * 两份视图是同一件事的不同窗口，后端也是同一份数据（见 orders.rules 的 MealProgressRow）。
+ */
+export interface MealProgressRow {
   meal: MealSlot
   label: string
-  /** none=还没人点；open=收集中/已安排/准备中；settled=已做好/已取消 */
+  /** none=还没人点/还没安排；open=收集中/已安排/准备中；settled=已做好/已取消 */
   state: 'none' | 'open' | 'settled'
   status: OrderStatus | null
   statusLabel: string
@@ -97,13 +100,28 @@ export interface TodayMealRow {
 
 export interface TodayBoard {
   date: string
-  rows: TodayMealRow[]
+  rows: MealProgressRow[]
+}
+
+/** 本周菜单里的一天（M4 / F4-02）：午晚两餐固定两行，没安排的也占位 */
+export interface PlanDay {
+  date: string
+  /** 今天/明天/后天；更远的日子是星期 */
+  label: string
+  weekday: string
+  meals: MealProgressRow[]
+}
+
+export interface PlanBoard {
+  /** 共享关闭时吃货看到的是收窄后的空行，前端据此说明原因（scope=mine） */
+  scope: 'family' | 'mine'
+  days: PlanDay[]
 }
 
 export interface OrderOptions {
   meals: { value: MealSlot; label: string }[]
   statuses: { value: OrderStatus; label: string }[]
-  /** 点菜能选的日子：今天/明天（由后端下发） */
+  /** 点菜能选的日子：今天/明天/后天（由后端下发，前端不硬编码） */
   dayOptions: { value: string; label: string }[]
 }
 
@@ -122,6 +140,13 @@ export async function fetchOrders(options: {
 
 export async function fetchToday(): Promise<TodayBoard> {
   const { data } = await apiClient.get<TodayBoard>('/orders/today')
+  return data
+}
+
+export async function fetchPlan(days?: number): Promise<PlanBoard> {
+  const { data } = await apiClient.get<PlanBoard>('/orders/plan', {
+    params: days ? { days } : undefined,
+  })
   return data
 }
 
@@ -238,6 +263,17 @@ export function useTodayBoard(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['orders', 'today'],
     queryFn: fetchToday,
+    enabled: Boolean(token) && options.enabled !== false,
+    staleTime: 15_000,
+  })
+}
+
+/** 本周菜单（发现页，F4-02）：与今日安排同一份数据的不同窗口 */
+export function usePlanBoard(options: { days?: number; enabled?: boolean } = {}) {
+  const token = useAuth((state) => state.token)
+  return useQuery({
+    queryKey: ['orders', 'plan', options.days ?? 3],
+    queryFn: () => fetchPlan(options.days),
     enabled: Boolean(token) && options.enabled !== false,
     staleTime: 15_000,
   })

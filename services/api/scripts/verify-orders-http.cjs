@@ -87,20 +87,29 @@ async function newUser(nickname) {
 
 /** 验收要真的点几道菜：用当天日期 + 晚餐 */
 function todayKey() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  return plusDaysKey(0)
 }
 
-function tomorrowKey() {
-  const next = new Date(Date.now() + 86_400_000)
-  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
+function plusDaysKey(offset) {
+  // 按日历递进（setDate），不是加 86400000 毫秒——跨夏令时那天会跑偏
+  const base = new Date()
+  const date = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+const WEEKDAY_LABEL = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+function weekdayOfKey(key) {
+  const [year, month, day] = key.split('-').map(Number)
+  return WEEKDAY_LABEL[new Date(year, month - 1, day).getDay()]
 }
 
 async function main() {
   await settleThrottleWindow(() => call('POST', '/auth/login', { body: { account: 'throttle-probe', password: 'probe-not-valid' } }))
 
   const TODAY = todayKey()
-  const TOMORROW = tomorrowKey()
+  const TOMORROW = plusDaysKey(1)
+  const DAY_AFTER = plusDaysKey(2)
 
   // ---------- 口径接口（免登录） ----------
   const options = await callWithRetry('GET', '/orders/options')
@@ -109,12 +118,12 @@ async function main() {
     options.status === 200
       && options.body?.meals?.length === 2
       && options.body?.statuses?.length === 5
-      && options.body?.dayOptions?.length === 2,
+      && (options.body?.dayOptions ?? []).length === 3,
     `${options.status} meals=${options.body?.meals?.length} statuses=${options.body?.statuses?.length} days=${options.body?.dayOptions?.length}`,
   )
   check(
-    '可选日期只有今天与明天（更远的安排归 M4）',
-    (options.body?.dayOptions ?? []).map(d => d.value).join(',') === `${TODAY},${TOMORROW}`,
+    '可选日期是今天/明天/后天（本周菜单要能安排后天，不能再点昨天与更远的）',
+    (options.body?.dayOptions ?? []).map(d => d.value).join(',') === `${TODAY},${TOMORROW},${DAY_AFTER}`,
     JSON.stringify(options.body?.dayOptions),
   )
 
@@ -395,9 +404,16 @@ async function main() {
 
   await callWithRetry('PATCH', '/family', { token: mama.token, body: { shared: true } })
 
-  // ---------- 日期边界（D-022：只放今天/明天） ----------
+  // ---------- 日期边界（本周菜单把窗口从今天/明天扩到含后天，D-025） ----------
   const farAway = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: '2027-01-01', meal: 'LUNCH' } })
-  check('点远期的菜 → 400（只放今天/明天）', farAway.status === 400, `${farAway.status} ${farAway.body?.message ?? ''}`)
+  check('点远期的菜 → 400（窗口之外，更远的安排归 F4-03 备菜计划）', farAway.status === 400, `${farAway.status} ${farAway.body?.message ?? ''}`)
+
+  const yesterday = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(-1), meal: 'LUNCH' } })
+  check('点昨天 → 400（过期的一天不能补）', yesterday.status === 400, `${yesterday.status} ${yesterday.body?.message ?? ''}`)
+
+  const fourthDay = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(3), meal: 'LUNCH' } })
+  check('点第 4 天 → 400（窗口是今天/明天/后天三格）', fourthDay.status === 400, `${fourthDay.status} ${fourthDay.body?.message ?? ''}`)
+  check('越界提示语跟着窗口生成（不是写死的"今天或明天"）', /今天\/明天\/后天/.test(fourthDay.body?.message ?? ''), `${fourthDay.body?.message ?? ''}`)
 
   const badMeal = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: TODAY, meal: 'BREAKFAST' } })
   check('非法餐次 → 400', badMeal.status === 400, `${badMeal.status}`)
@@ -491,6 +507,105 @@ async function main() {
 
   const dinersMissing = await callWithRetry('POST', '/orders/meals/2027-01-01-LUNCH/diners', { token: mama.token, body: { dinerCount: 3 } })
   check('给没点菜的餐设人数 → 404（服务层"这一餐还没有人点菜"）', dinersMissing.status === 404, `${dinersMissing.status}`)
+
+  // ---------- 本周菜单（M4 / F4-02） ----------
+  // 同样自建前置状态：今天午餐前面已经点过（lunchSeed），这里再往前安排一格"后天晚餐"
+  const planBoard = await callWithRetry('GET', '/orders/plan', { token: mama.token })
+  check(
+    '本周菜单默认给 3 天 × 午晚两餐（今天/明天/后天），没安排的也占行',
+    planBoard.status === 200
+      && planBoard.body?.days?.length === 3
+      && planBoard.body.days.map(d => d.date).join(',') === `${TODAY},${TOMORROW},${DAY_AFTER}`
+      && planBoard.body.days.every(d => (d.meals ?? []).length === 2
+        && d.meals.map(m => m.meal).join(',') === 'LUNCH,DINNER'),
+    `${planBoard.status} days=${JSON.stringify((planBoard.body?.days ?? []).map(d => `${d.date}:${d.meals?.length}`))}`,
+  )
+  check(
+    '每天带「今天/明天/后天」相对说法与星期（过了三天要落到具体星期）',
+    planBoard.body?.days?.[0]?.label === '今天'
+      && planBoard.body?.days?.[1]?.label === '明天'
+      && planBoard.body?.days?.[2]?.label === '后天'
+      && planBoard.body.days.every(d => d.weekday === weekdayOfKey(d.date)),
+    JSON.stringify((planBoard.body?.days ?? []).map(d => `${d.label}(${d.weekday})`)),
+  )
+  check(
+    '本周菜单里"没安排"的行不编内容：没有菜名、道数为 0、状态为 null',
+    (planBoard.body?.days ?? []).every(d => d.meals.every(m => (m.status === null
+      ? m.state === 'none' && m.dishCount === 0 && (m.dishes ?? []).length === 0
+      : true))),
+    JSON.stringify((planBoard.body?.days ?? []).flatMap(d => d.meals.filter(m => m.status === null).map(m => `${d.date}-${m.meal}:${m.statusLabel}`))),
+  )
+
+  const planSeed = await callWithRetry('POST', '/orders/items', {
+    token: mama.token,
+    body: { recipeId: dishB.id, mealDate: DAY_AFTER, meal: 'DINNER' },
+  })
+  if (![200, 201].includes(planSeed.status)) throw new Error(`本周菜单前置点菜失败：${planSeed.status} ${JSON.stringify(planSeed.body)}`)
+
+  const planAfterSeed = await callWithRetry('GET', '/orders/plan', { token: mama.token })
+  const lastDay = (planAfterSeed.body?.days ?? []).find(d => d.date === DAY_AFTER)
+  const lastDinner = (lastDay?.meals ?? []).find(m => m.meal === 'DINNER')
+  check(
+    '安排过的那一格带上菜名与状态，且 mealKey 对得上（点进去就是这一餐）',
+    lastDinner?.mealKey === `${DAY_AFTER}-DINNER`
+      && (lastDinner?.dishes ?? []).includes(dishB.name)
+      && lastDinner?.status === 'PENDING'
+      && lastDinner?.state === 'open',
+    JSON.stringify(lastDinner),
+  )
+  check(
+    '后天的菜真的点得进去了（点菜窗口含后天，不然那格的「去安排」是死路）',
+    planSeed.body?.mealKey === `${DAY_AFTER}-DINNER`,
+    `${planSeed.status} ${planSeed.body?.mealKey ?? ''}`,
+  )
+
+  const planDays5 = await callWithRetry('GET', '/orders/plan?days=5', { token: mama.token })
+  check(
+    'days 参数能放开到 5 天（备菜计划的窗口预演），标签从第 4 天起改用星期',
+    planDays5.status === 200
+      && planDays5.body?.days?.length === 5
+      && planDays5.body.days.slice(3).every(d => /^周[日一二三四五六]$/.test(d.label)),
+    `${planDays5.status} labels=${JSON.stringify((planDays5.body?.days ?? []).map(d => d.label))}`,
+  )
+  const planDaysBad = await callWithRetry('GET', '/orders/plan?days=8', { token: mama.token })
+  check('days 超上限（>7）→ 400', planDaysBad.status === 400, `${planDaysBad.status} ${planDaysBad.body?.message ?? ''}`)
+  const planBad = await callWithRetry('GET', '/orders/plan?days=abc', { token: mama.token })
+  check('days 非数字 → 400', planBad.status === 400, `${planBad.status}`)
+  const planAnonymous = await callWithRetry('GET', '/orders/plan')
+  check('未带 token 看本周菜单 → 401', planAnonymous.status === 401, `${planAnonymous.status}`)
+
+  // 共享关闭时吃货的收窄（与今日安排同一套可见性）
+  await callWithRetry('PATCH', '/family', { token: mama.token, body: { shared: false } })
+  const planForSon = await callWithRetry('GET', '/orders/plan', { token: son.token })
+  const sonLastDinner = (planForSon.body?.days ?? []).find(d => d.date === DAY_AFTER)?.meals?.find(m => m.meal === 'DINNER')
+  check(
+    '共享关闭时吃货看不到别人安排的餐：整格与"真没人安排"完全一致（菜名、状态、人数、张数都不漏），scope=mine 让前端说明原因',
+    planForSon.status === 200
+      && planForSon.body?.scope === 'mine'
+      && sonLastDinner?.state === 'none'
+      && sonLastDinner?.status === null
+      && sonLastDinner?.statusLabel === '还没安排'
+      && sonLastDinner?.dishCount === 0
+      && (sonLastDinner?.dishes ?? []).length === 0
+      && sonLastDinner?.dinerCount === null
+      && sonLastDinner?.photoCount === 0,
+    `${planForSon.status} scope=${planForSon.body?.scope} ${JSON.stringify(sonLastDinner)}`,
+  )
+  const planMamaClosed = await callWithRetry('GET', '/orders/plan', { token: mama.token })
+  const mamaDinnerClosed = (planMamaClosed.body?.days ?? []).find(d => d.date === DAY_AFTER)?.meals?.find(m => m.meal === 'DINNER')
+  check(
+    '共享关闭不影响掌勺人（他要做饭，仍看得到全量）',
+    planMamaClosed.body?.scope === 'family' && (mamaDinnerClosed?.dishes ?? []).includes(dishB.name),
+    `scope=${planMamaClosed.body?.scope} ${JSON.stringify(mamaDinnerClosed)}`,
+  )
+  await callWithRetry('PATCH', '/family', { token: mama.token, body: { shared: true } })
+  const planSonSharedOn = await callWithRetry('GET', '/orders/plan', { token: son.token })
+  const sonDinnerSharedOn = (planSonSharedOn.body?.days ?? []).find(d => d.date === DAY_AFTER)?.meals?.find(m => m.meal === 'DINNER')
+  check(
+    '共享开回来后吃货又能看到那一格（scope=family，提示随之消失）',
+    planSonSharedOn.body?.scope === 'family' && (sonDinnerSharedOn?.dishes ?? []).includes(dishB.name),
+    `scope=${planSonSharedOn.body?.scope} ${JSON.stringify(sonDinnerSharedOn)}`,
+  )
 
   for (const item of results) {
     console.log(`${item.ok ? '✅' : '❌'} ${item.name}${item.detail ? `  — ${item.detail}` : ''}`)

@@ -15,6 +15,7 @@ import Chips from '@/components/ui/Chips'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
 import Page from '@/components/ui/Page'
+import { STATUS_TONE } from '@/components/ui/status-tone'
 import { toast } from '@/components/ui/toast'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
 import '../shared.scss'
@@ -30,15 +31,6 @@ import './order.scss'
  * - **不可逆的动作先问一句**：取消整餐与撤回自己点的菜都走 ConfirmDialog。
  *   前者影响全家人（砖红），后者只影响自己（普通色）。
  */
-
-const STATUS_TONE: Record<OrderStatus, string> = {
-  PENDING: 'stamp--wait',
-  PLANNED: 'stamp--planned',
-  COOKING: 'stamp--cooking',
-  // 已做好是收尾，用默认的绿色实心戳；已取消要"褪色"，别再吸引注意力
-  DONE: '',
-  CANCELED: 'stamp--canceled',
-}
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
   PENDING: '待确认',

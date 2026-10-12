@@ -15,7 +15,7 @@ import OrderDishSheet from './OrderDishSheet'
 
 const clients: QueryClient[] = []
 
-function renderSheet() {
+function renderSheet(preset?: { date: string; meal: 'LUNCH' | 'DINNER'; label: string } | null) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -24,7 +24,7 @@ function renderSheet() {
     <QueryClientProvider client={client}>
       <Toaster />
       <MemoryRouter>
-        <OrderDishSheet visible recipeId="r1" recipeName="番茄炒蛋" onClose={() => {}} />
+        <OrderDishSheet visible recipeId="r1" recipeName="番茄炒蛋" preset={preset} onClose={() => {}} />
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -201,4 +201,56 @@ it('后端拒绝时把话术显示出来（如这餐已安排、备注超长）'
 
   fireEvent.click(await screen.findByRole('button', { name: '加进点菜单' }))
   expect(await screen.findByText('这餐已经「已安排」了，想加菜先取消这餐')).toBeTruthy()
+})
+
+// ---------- 从本周菜单来（F4-02）：preset 预设 ----------
+
+it('本周菜单带的 preset 会预选到那一餐（哪怕当前时间默认是别的餐次）', async () => {
+  // 上午 10 点，默认下一餐是"今天晚餐"；preset 指定明天午餐，必须盖过默认值
+  vi.setSystemTime(new Date('2026-10-12T10:00:00'))
+  mockGet(familyFixture())
+  renderSheet({ date: '2026-10-13', meal: 'LUNCH', label: '明天午餐' })
+
+  expect(await screen.findByRole('button', { name: '明天' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '明天' }).getAttribute('aria-pressed')).toBe('true')
+  expect(screen.getByRole('button', { name: '午餐' }).getAttribute('aria-pressed')).toBe('true')
+  // 说明从哪来，别让人以为默认值错了
+  expect(screen.getByText(/从「本周菜单」来的/)).toBeTruthy()
+})
+
+it('preset 的日期已过期（不在当下可选范围）时，回落到"下一餐"默认，不预选一个提交必被拒的日期', async () => {
+  // 场景：昨天在后天那一行点了「去安排」，今天才点「想吃这道」——那时 target.date 已经过期
+  vi.setSystemTime(new Date('2026-10-12T10:00:00'))
+  mockGet(familyFixture())
+  renderSheet({ date: '2026-10-11', meal: 'LUNCH', label: '昨天午餐' })
+
+  expect(await screen.findByRole('button', { name: '今天' })).toBeTruthy()
+  // 过期的那天不在选项里，预选必须落回默认（上午 10 点 → 今天晚餐）
+  expect(screen.getByRole('button', { name: '今天' }).getAttribute('aria-pressed')).toBe('true')
+  expect(screen.getByRole('button', { name: '晚餐' }).getAttribute('aria-pressed')).toBe('true')
+  expect(screen.queryByText(/从「本周菜单」来的/)).toBeNull()
+
+  // 而且提交出去的日期是当下有效的那个（不是过期日期）
+  const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { mealKey: 'x', date: '2026-10-12', mealLabel: '晚餐' } as unknown as MealCard } as never)
+  fireEvent.click(screen.getByRole('button', { name: '加进点菜单' }))
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith('/orders/items', expect.objectContaining({ mealDate: '2026-10-12', meal: 'DINNER' })),
+  )
+})
+
+it('preset 之后用户仍能改到别的餐次（预选只是默认值，不是锁死）', async () => {
+  vi.setSystemTime(new Date('2026-10-12T10:00:00'))
+  mockGet(familyFixture())
+  const post = vi.spyOn(apiClient, 'post').mockResolvedValue({
+    data: { mealKey: '2026-10-12-DINNER', date: '2026-10-12', mealLabel: '晚餐' } as unknown as MealCard,
+  } as never)
+  renderSheet({ date: '2026-10-13', meal: 'LUNCH', label: '明天午餐' })
+
+  fireEvent.click(await screen.findByRole('button', { name: '今天' }))
+  fireEvent.click(screen.getByRole('button', { name: '晚餐' }))
+  fireEvent.click(screen.getByRole('button', { name: '加进点菜单' }))
+
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith('/orders/items', expect.objectContaining({ mealDate: '2026-10-12', meal: 'DINNER' })),
+  )
 })

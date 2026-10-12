@@ -4,11 +4,12 @@ import { can, useFamily } from '@/api/family'
 import { useAddOrderItem, useOrderOptions, type MealSlot } from '@/api/orders'
 import BottomSheet from '@/components/ui/BottomSheet'
 import { toast } from '@/components/ui/toast'
+import type { PlanTarget } from '../plan-target'
 import '../order.scss'
 
 /**
  * 默认选「下一餐」：下午 3 点前默认今天的晚饭，之后默认明天的午饭。
- * days 是后端下发的可选日期（今天/明天），为空时（选项还没回来）返回空值，界面自然什么都不选。
+ * days 是后端下发的可选日期（今天/明天/后天），为空时（选项还没回来）返回空值，界面自然什么都不选。
  */
 function nextMealDefaults(days: { value: string; label: string }[]): { day: string; meal: MealSlot | null } {
   if (days.length === 0) return { day: '', meal: null }
@@ -23,16 +24,22 @@ function nextMealDefaults(days: { value: string; label: string }[]): { day: stri
  *
  * 只做一件事——把这道菜加进「某天某餐」。日期与餐次选项都由 `/orders/options` 下发，
  * 前端不硬编码（改口径不用发版）；默认选中"下一餐"，让最常见的操作一次点完。
+ *
+ * `preset` 是本周菜单「去安排」带过来的目标（F4-02）：**它的日期必须先出现在当下下发的
+ * dayOptions 里**才生效——那是个跨页路由 state，可能是昨天留下的链接（"后天"已经过期），
+ * 也可能是手改的。对不上就照常回落到"下一餐"，不把无效日期预选出来让人白提交一次。
  */
 export default function OrderDishSheet({
   visible,
   recipeId,
   recipeName,
+  preset,
   onClose,
 }: {
   visible: boolean
   recipeId: string
   recipeName: string
+  preset?: PlanTarget | null
   onClose: () => void
 }) {
   const family = useFamily()
@@ -54,8 +61,9 @@ export default function OrderDishSheet({
    * 组件由调用方用 key 在每次打开时重挂载，所以"上次选的"不会带到下一次。
    */
   const fallback = nextMealDefaults(days)
-  const day = chosenDay ?? fallback.day
-  const meal: MealSlot | '' = chosenMeal ?? fallback.meal ?? ''
+  const presetDay = preset && days.some((option) => option.value === preset.date) ? preset.date : null
+  const day = chosenDay ?? presetDay ?? fallback.day
+  const meal: MealSlot | '' = chosenMeal ?? (presetDay ? preset.meal : fallback.meal) ?? ''
 
   const mayOrder = can(family.data, 'order.create')
 
@@ -85,6 +93,9 @@ export default function OrderDishSheet({
         <p className="order-sheet__hint">你在家里的角色暂时不能点菜，让掌勺人看看你的角色。</p>
       ) : (
         <>
+          {presetDay && preset && (
+            <p className="order-sheet__hint">从「本周菜单」来的：默认放进{preset.label}，也可以改。</p>
+          )}
           <div className="order-sheet__group">
             <span className="order-sheet__label">哪一天</span>
             <div className="order-sheet__choices">

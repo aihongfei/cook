@@ -8,10 +8,13 @@ import {
   MEAL_SLOTS,
   NOTE_MAX_LENGTH,
   ORDER_STATUSES,
+  PLAN_DAYS_DEFAULT,
+  PLAN_DAYS_MAX,
   STATUS_LABEL,
   aggregateItems,
   canAddItem,
   dayOptions,
+  dayWindow,
   dateKey,
   dateOnly,
   isAllowedTransition,
@@ -20,12 +23,14 @@ import {
   parseMealDate,
   parseMealKey,
   parseNote,
+  parsePlanDays,
   parseSlot,
   parseStatus,
   parseDinerCount,
   photoVisibleTo,
   todayMealState,
   DINER_COUNT_MAX,
+  ORDER_DAY_SPAN,
   revivedStatus,
   visibleToMember,
 } from '../src/modules/orders/orders.rules'
@@ -111,18 +116,56 @@ test('取消过的餐还能重新点菜，并复活成待确认', () => {
 
 const now = new Date('2026-10-12T09:30:00.000Z')
 
-test('可点日期是今天与明天，后天的菜点不了', () => {
+test('可点日期是今天/明天/后天，第四天点不了（本周菜单要能安排后天）', () => {
   assert.deepEqual(dayOptions(now), [
     { value: '2026-10-12', label: '今天' },
     { value: '2026-10-13', label: '明天' },
+    { value: '2026-10-14', label: '后天' },
   ])
   assert.equal(dateKey(parseMealDate('2026-10-12', now)), '2026-10-12')
   assert.equal(dateKey(parseMealDate('2026-10-13', now)), '2026-10-13')
-  // 昨天/后天都不行（更远的安排归 M4 菜单）
-  assert.throws(() => parseMealDate('2026-10-14', now), BadRequestException)
+  assert.equal(dateKey(parseMealDate('2026-10-14', now)), '2026-10-14', '后天要能点了——不然本周菜单那行的「去安排」是死路')
+  // 昨天/大后天都不行（更远的安排归 F4-03 备菜计划）
+  assert.throws(() => parseMealDate('2026-10-15', now), BadRequestException)
   assert.throws(() => parseMealDate('2026-10-11', now), BadRequestException)
   assert.throws(() => parseMealDate('10/12', now), BadRequestException)
   assert.throws(() => parseMealDate(undefined, now), BadRequestException)
+})
+
+test('可选日期窗口跟着 ORDER_DAY_SPAN 走，提示语不会说错', () => {
+  assert.equal(ORDER_DAY_SPAN, 3)
+  // 越界时的文案由窗口自己生成：写成常量字符串的话，改了窗口就会和实际范围对不上
+  assert.throws(() => parseMealDate('2026-10-16', now), /今天\/明天\/后天/)
+})
+
+test('dayWindow 给的是「哪一天」标量 + 星期，且不返回 Date（避免拿本地午夜去查库）', () => {
+  const window = dayWindow(7, now)
+  assert.deepEqual(window.map(day => day.value), [
+    '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18',
+  ])
+  assert.deepEqual(window.slice(0, 3).map(day => day.label), ['今天', '明天', '后天'])
+  // 第 4 天起改用星期：7 天窗口里再写"大后天""大大后天"就没法看了
+  assert.deepEqual(window.slice(3).map(day => day.label), ['周四', '周五', '周六', '周日'])
+  assert.deepEqual(window.map(day => day.weekday), ['周一', '周二', '周三', '周四', '周五', '周六', '周日'])
+  assert.equal('date' in window[0], false, '窗口里不该带 Date 对象：存库的日子要用 dateOnly(value) 换算')
+})
+
+test('dayWindow 跨月按日历递进（不是加毫秒）', () => {
+  const endOfMonth = new Date('2026-10-30T09:30:00.000Z')
+  assert.deepEqual(dayWindow(3, endOfMonth).map(day => day.value), ['2026-10-30', '2026-10-31', '2026-11-01'])
+})
+
+test('看几天：默认 3 天、上限 7 天，非法值直接拒', () => {
+  assert.equal(parsePlanDays(undefined), PLAN_DAYS_DEFAULT)
+  assert.equal(parsePlanDays(null), PLAN_DAYS_DEFAULT)
+  assert.equal(parsePlanDays(''), PLAN_DAYS_DEFAULT)
+  assert.equal(PLAN_DAYS_DEFAULT, 3)
+  assert.equal(PLAN_DAYS_MAX, 7)
+  assert.equal(parsePlanDays('5'), 5)
+  assert.equal(parsePlanDays(7), 7)
+  for (const bad of ['0', '-1', '8', '2.5', 'abc']) {
+    assert.throws(() => parsePlanDays(bad), BadRequestException, `${bad} 应被拒`)
+  }
 })
 
 test('餐次只认午餐与晚餐', () => {
@@ -161,7 +204,7 @@ test('「今天」按服务器本地日历算，不用 UTC（北京时间凌晨�
 
     // 可选日期也要跟着本地日历走
     const options = dayOptions(earlyMorning)
-    assert.deepEqual(options.map(o => o.value), ['2026-10-13', '2026-10-14'])
+    assert.deepEqual(options.map(o => o.value), ['2026-10-13', '2026-10-14', '2026-10-15'])
     assert.equal(parseMealDate('2026-10-13', earlyMorning) instanceof Date, true, '凌晨仍能点"今天"')
     assert.throws(() => parseMealDate('2026-10-12', earlyMorning), BadRequestException, '不能再点"昨天"')
 

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useFamily } from '@/api/family'
-import { useTodayBoard, type TodayMealRow } from '@/api/orders'
+import { useTodayBoard, type MealProgressRow } from '@/api/orders'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
 
 /**
@@ -13,7 +13,7 @@ import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
  * - **有内容的那行整行可点**，落到点菜单（安排菜单、改状态都在那里）。
  */
 
-const STATE_CLASS: Record<TodayMealRow['state'], string> = {
+const STATE_CLASS: Record<MealProgressRow['state'], string> = {
   none: 'is-none',
   open: 'is-collecting',
   settled: 'is-done',

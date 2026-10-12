@@ -5,9 +5,10 @@ import { publicImageUrl } from '../media/media.storage'
 import { PrismaService } from '../recipes/prisma.service'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
-  aggregateItems, canAddItem, dateKey, dateOnly, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount, parseMealDate,
-  parseMealKey, parseNote, parseSlot, parseStatus, photoVisibleTo, revivedStatus, todayKey, todayMealState, visibleToMember,
-  dayOptions, type AggregateItem, type TodayMealRow,
+  aggregateItems, canAddItem, dateKey, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
+  parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, revivedStatus, todayKey,
+  todayMealState, visibleToMember,
+  dayOptions, type AggregateItem, type MealProgressRow, type PlanDayRow,
 } from './orders.rules'
 
 /**
@@ -236,7 +237,7 @@ export class OrdersService {
    * 首页要能一眼看出"晚饭还没人点"，而不是让那一行凭空消失。
    * 可见性沿用列表那一套（共享关闭 + 吃货 → 只看自己参与的餐次）。
    */
-  async today(userId: string): Promise<{ date: string; rows: TodayMealRow[] }> {
+  async today(userId: string): Promise<{ date: string; rows: MealProgressRow[] }> {
     const { familyId, role } = await this.requireMember(userId)
     const family = await this.requireFamily(familyId)
     const date = todayKey()
@@ -246,36 +247,47 @@ export class OrdersService {
       include: MEAL_ORDER_INCLUDE,
     })
     const byMeal = new Map(rows.map(row => [row.meal, row]))
-    const scope = visibleToMember(family.shared, role)
 
-    const output = MEAL_SLOTS.map((slot): TodayMealRow => {
-      const row = byMeal.get(slot)
-      const base = {
-        meal: slot,
-        label: MEAL_LABEL[slot],
-        mealKey: `${date}-${slot}`,
-        dinerCount: row?.dinerCount ?? null,
-      }
-      if (!row) {
-        return { ...base, state: 'none', status: null, statusLabel: '还没人点', dishes: [], dishCount: 0, ordererCount: 0, photoCount: 0 }
-      }
-      const card = this.cardFromRow(row, userId, role, family.shared)
-      // 共享关闭时吃货看不到别人点的菜，那一餐对他就是"没有内容"——
-      // 但**不能谎报成"还没人点"**（那会让人以为没人张罗，实际是别人点了不给他看）。
-      const hiddenFromMe = scope === 'mine' && card.mineCount === 0
-      return {
-        ...base,
-        state: hiddenFromMe ? 'none' : todayMealState(row.status),
-        status: row.status,
-        statusLabel: hiddenFromMe ? '还没人点' : STATUS_LABEL[row.status],
-        dishes: hiddenFromMe ? [] : card.dishes.map(dish => dish.count > 1 ? `${dish.name} ×${dish.count}` : dish.name),
-        dishCount: hiddenFromMe ? 0 : card.dishCount,
-        ordererCount: hiddenFromMe ? 0 : card.ordererCount,
-        photoCount: card.photoCount,
-      }
+    return {
+      date,
+      rows: MEAL_SLOTS.map(slot =>
+        this.mealProgress(byMeal.get(slot), slot, date, userId, role, family.shared, '还没人点'),
+      ),
+    }
+  }
+
+  /**
+   * 本周菜单（M4 / F4-02）：从今天起 `days` 天，每天午晚两餐各一行。
+   *
+   * 与今日安排同一份数据、同一套可见性，只是把窗口从 1 天摊成 N 天——
+   * 发现页要能一眼看出"明天晚饭还没安排"，并就地给个去安排的入口。
+   * 返回 `scope`：共享关闭时吃货看到的是收窄后的空行，前端要说清原因（见 CheckInPage 的同款提示）。
+   */
+  async plan(userId: string, rawDays?: unknown): Promise<{ scope: 'family' | 'mine'; days: PlanDayRow[] }> {
+    const { familyId, role } = await this.requireMember(userId)
+    const family = await this.requireFamily(familyId)
+
+    const window = dayWindow(parsePlanDays(rawDays))
+    const first = dateOnly(window[0].value)
+    const last = dateOnly(window[window.length - 1].value)
+
+    const rows = await this.prisma.mealOrder.findMany({
+      where: { familyId, mealDate: { gte: first, lte: last } },
+      include: MEAL_ORDER_INCLUDE,
     })
+    const byKey = new Map(rows.map(row => [`${dateKey(row.mealDate)}-${row.meal}`, row]))
 
-    return { date, rows: output }
+    return {
+      scope: visibleToMember(family.shared, role),
+      days: window.map(day => ({
+        date: day.value,
+        label: day.label,
+        weekday: day.weekday,
+        meals: MEAL_SLOTS.map(slot =>
+          this.mealProgress(byKey.get(`${day.value}-${slot}`), slot, day.value, userId, role, family.shared, '还没安排'),
+        ),
+      })),
+    }
   }
 
   /** 点单口径（免登录可读，与 /family/options 同理）：前端不硬编码餐次、状态与可选日期 */
@@ -288,6 +300,48 @@ export class OrdersService {
   }
 
   // ---------- 内部 ----------
+
+  /**
+   * 一餐的进度行（今日安排与本周菜单共用，见 orders.rules 的 MealProgressRow）。
+   * `emptyLabel` 是"还没成卡"那行的文案：厨房页说「还没人点」，本周菜单说「还没安排」。
+   */
+  private mealProgress(
+    row: MealOrderRow | undefined,
+    slot: MealSlot,
+    date: string,
+    viewerId: string,
+    role: FamilyRole,
+    shared: boolean,
+    emptyLabel: string,
+  ): MealProgressRow {
+    const base = {
+      meal: slot,
+      label: MEAL_LABEL[slot],
+      mealKey: `${date}-${slot}`,
+      dinerCount: row?.dinerCount ?? null,
+    }
+    if (!row) {
+      return { ...base, state: 'none', status: null, statusLabel: emptyLabel, dishes: [], dishCount: 0, ordererCount: 0, photoCount: 0 }
+    }
+    const card = this.cardFromRow(row, viewerId, role, shared)
+    // 共享关闭时吃货看不到别人点的菜，那一餐对他就是"没有内容"。
+    // 这里把它**做成与"真的没人安排"完全不可区分**：状态、人数、道数、菜名全部退回空，
+    // 连底层 `status` 都不给（给了 PENDING 就等于承认"有人张罗了这一餐"）。
+    // 口径是"宁可少说"（见 D-024），代价是这个人会以为家里没张罗——
+    // 所以视图层要**明说共享被关了**（前端拿 `scope === 'mine'` 出提示，同打卡墙的做法）。
+    const hiddenFromMe = visibleToMember(shared, role) === 'mine' && card.mineCount === 0
+    return {
+      ...base,
+      dinerCount: hiddenFromMe ? null : base.dinerCount,
+      state: hiddenFromMe ? 'none' : todayMealState(row.status),
+      status: hiddenFromMe ? null : row.status,
+      statusLabel: hiddenFromMe ? emptyLabel : STATUS_LABEL[row.status],
+      dishes: hiddenFromMe ? [] : card.dishes.map(dish => dish.count > 1 ? `${dish.name} ×${dish.count}` : dish.name),
+      dishCount: hiddenFromMe ? 0 : card.dishCount,
+      ordererCount: hiddenFromMe ? 0 : card.ordererCount,
+      photoCount: hiddenFromMe ? 0 : card.photoCount,
+    }
+  }
 
   private cardFromRow(row: MealOrderRow, viewerId: string, role: FamilyRole, shared: boolean): MealCardView {
     const aggregated = aggregateItems(row.items as AggregateItem[], viewerId)

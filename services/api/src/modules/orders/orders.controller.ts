@@ -42,6 +42,14 @@ export class OrdersController {
     return this.orders.today(userId)
   }
 
+  @Get('plan')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '菜单安排：从今天起 N 天（默认 3 天）每天的午/晚餐进度（M4 / F4-02）' })
+  @ApiQuery({ name: 'days', required: false, description: '看几天，默认 3（今天/明天/后天），上限 7' })
+  async plan(@CurrentUserId() userId: string, @Query('days') days?: string) {
+    return this.orders.plan(userId, days)
+  }
+
   @Post('items')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '点菜（需 order.create；已安排的餐不能再加）（F3-01/05）' })

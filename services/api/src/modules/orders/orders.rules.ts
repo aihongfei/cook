@@ -52,8 +52,13 @@ export const TRANSITION_CAPABILITY: Record<OrderStatus, string> = {
 /** 影响别人/不可逆的动作，前端要二次确认（走 ConfirmDialog） */
 const NEEDS_CONFIRM: OrderStatus[] = ['CANCELED']
 
-/** 点菜可选范围：今天、明天（D-022） */
-export const ORDER_DAY_SPAN = 2
+/**
+ * 点菜可选范围：今天、明天、后天（M4 / F4-02 把 D-022 的 2 天扩到 3 天）。
+ *
+ * 扩这一格是因为「本周菜单」要能安排后天——不然那一行的「去安排」是条死路
+ * （点不进后天，只能看着它空着）。再往后的日子归 F4-03 备菜计划（未来 7 天）。
+ */
+export const ORDER_DAY_SPAN = 3
 
 export const ORDER_STATUSES: OrderStatus[] = ['PENDING', 'PLANNED', 'COOKING', 'DONE', 'CANCELED']
 export const MEAL_SLOTS: MealSlot[] = ['LUNCH', 'DINNER']
@@ -122,17 +127,19 @@ export function parseDinerCount(raw: unknown): number | null {
 }
 
 /**
- * 今日安排（M4 / F4-01）：厨房页那一块的文案与落点。
+ * 一餐的进度（**今日安排 F4-01 与本周菜单 F4-02 共用同一个形状**）。
  *
- * 首页只要"今天两餐现在到哪一步了"，不需要点单卡的细节，所以这里给的是精简视图。
+ * 首页要"今天两餐现在到哪一步"，本周菜单要"今天/明天/后天各自到哪一步"——
+ * 是同一件事的不同视角，所以是同一份数据：一张卡一行，没成卡的那一餐也给一行。
+ *
  * 三种行状态：
- * - `none`    还没人点 → 引导去菜谱；
- * - `open`    收集中 / 已安排 / 准备中 → 点进点菜单；
+ * - `none`    还没人点（或共享关闭时对吃货不可见）→ 引导去安排；
+ * - `open`    收集中 / 已安排 / 准备中 → 点进点菜单（`statusLabel` 说明具体在哪一步）；
  * - `settled` 已做好 / 已取消 → 只回看，不再引导（取消了不催人重做，那是用户自己的决定）。
  */
 export type TodayMealState = 'none' | 'open' | 'settled'
 
-export interface TodayMealRow {
+export interface MealProgressRow {
   meal: MealSlot
   label: string
   state: TodayMealState
@@ -147,6 +154,15 @@ export interface TodayMealRow {
   mealKey: string
   /** 该餐的成品照张数（M9 / F9-08） */
   photoCount: number
+}
+
+/** 菜单安排视图里的一天（M4 / F4-02）：午晚两餐固定两行，没安排的也占位 */
+export interface PlanDayRow {
+  date: string
+  /** 今天/明天/后天，再往后是星期 */
+  label: string
+  weekday: string
+  meals: MealProgressRow[]
 }
 
 export function todayMealState(status: OrderStatus | null): TodayMealState {
@@ -205,25 +221,75 @@ export function parseMealKey(raw: string): { mealDate: Date; meal: MealSlot } {
   return { mealDate: dateOnly(matched[1]), meal: matched[2] as MealSlot }
 }
 
-/** 点菜允许的日期：今天或明天，其它一律拒（更远的安排归 M4） */
+/** 点菜允许的日期：今天/明天/后天，其它一律拒（本周菜单按 3 天安排，见 D-025） */
 export function parseMealDate(raw: unknown, now: Date = new Date()): Date {
   if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     throw new BadRequestException('日期格式不对（应为 YYYY-MM-DD）')
   }
-  const allowed = new Set(dayOptions(now).map(option => option.value))
-  if (!allowed.has(raw)) throw new BadRequestException('只能点今天或明天的菜')
+  const options = dayOptions(now)
+  const allowed = new Set(options.map(option => option.value))
+  if (!allowed.has(raw)) {
+    // 文案跟着窗口走：改了 ORDER_DAY_SPAN，提示语不用改也不会说错
+    throw new BadRequestException(`只能点${options.map(option => option.label).join('/')}的菜`)
+  }
   return dateOnly(raw)
 }
 
 /**
- * 可选日期（今天/明天）：接口把它下发给前端，前端不硬编码。
+ * 可选日期（今天/明天/后天）：接口把它下发给前端，前端不硬编码。
  * 按**本地日历**递进（用 setDate 而不是加固定毫秒数）：跨夏令时的那一天加 24 小时会跑偏。
  */
 export function dayOptions(now: Date = new Date()): { value: string; label: string }[] {
-  return Array.from({ length: ORDER_DAY_SPAN }, (_, index) => {
-    const value = new Date(now.getFullYear(), now.getMonth(), now.getDate() + index)
-    return { value: todayKey(value), label: index === 0 ? '今天' : '明天' }
+  return dayWindow(ORDER_DAY_SPAN, now).map(({ value, label }) => ({ value, label }))
+}
+
+const WEEKDAY_LABEL = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+/**
+ * 某一天怎么称呼：近三天用相对说法（今天/明天/后天，比"周三"更不容易看错），
+ * 再往后用星期（备菜计划会用到 7 天的窗口）。
+ */
+export function dayLabel(index: number, date: Date): string {
+  if (index === 0) return '今天'
+  if (index === 1) return '明天'
+  if (index === 2) return '后天'
+  return WEEKDAY_LABEL[date.getDay()]
+}
+
+export interface DayWindowItem {
+  /** `YYYY-MM-DD`（本地日历日） */
+  value: string
+  label: string
+  /** 星期几：让"后天"落到具体的日子上 */
+  weekday: string
+}
+
+/**
+ * 从今天起 `span` 天的日历。日期一律按**本地日历**递进（今天/明天/后天……），
+ * 是 `dayOptions` 与菜单安排视图共用的那一份口径——两处各算一遍迟早会分叉。
+ *
+ * 刻意**不返回 Date 对象**：这里的日子是"哪一天"这个标量，查库要用 `dateOnly(value)`
+ * （存的是 UTC 零点）。把本地午夜的 Date 直接拿去查会差一天（见 dateOnly 的说明）。
+ */
+export function dayWindow(span: number, now: Date = new Date()): DayWindowItem[] {
+  return Array.from({ length: span }, (_, index) => {
+    // 用「年/月/日 + n」构造而不是加毫秒：跨夏令时的那一天加 24 小时会跑偏
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + index)
+    return { value: todayKey(date), label: dayLabel(index, date), weekday: WEEKDAY_LABEL[date.getDay()] }
   })
+}
+
+/** 菜单安排视图默认看几天（今天/明天/后天）；上限 7 天是给 F4-03 备菜计划留的窗口 */
+export const PLAN_DAYS_DEFAULT = 3
+export const PLAN_DAYS_MAX = 7
+
+export function parsePlanDays(raw: unknown): number {
+  if (raw === undefined || raw === null || raw === '') return PLAN_DAYS_DEFAULT
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(value) || value < 1 || value > PLAN_DAYS_MAX) {
+    throw new BadRequestException(`天数要在 1～${PLAN_DAYS_MAX} 之间`)
+  }
+  return value
 }
 
 export function parseSlot(raw: unknown): MealSlot {
