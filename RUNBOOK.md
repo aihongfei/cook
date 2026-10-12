@@ -4,9 +4,9 @@
 
 ## 前置条件（当前状态）
 
-- Node.js：**已就绪 v26.7.0**（nvm 装在 `%LOCALAPPDATA%\Author Software\nvm`；PATH 经 `C:\nvm4w\nodejs` 连接生效）。Git：已安装 `C:\Program Files\Git\cmd\git.exe`。
-- 数据库：开发期计划用 SQLite，无需额外安装；生产 PostgreSQL 待定。
-- 工作目录：`C:\Users\Administrator\Desktop\cook`
+- **当前工作副本（2026-10-12 实测）**：macOS（Darwin arm64），工作目录 `/Users/aihf/Downloads/work/cook`；Node **v26.7.0** 与 **pnpm 12.11.2** 位于 `~/.nvm/versions/node/v26.7.0`（nvm 默认别名 `26.7.0`；非登录 shell 需自行把该目录加入 PATH，Node 26 已不再随包分发 `corepack`）。
+- 数据库：开发期用 SQLite（`services/api/prisma/dev.db`，已建库并应用 init + recipes 两个迁移，**未导入种子数据**），无需额外安装；生产 PostgreSQL 待定。
+- 历史环境（2026-10-11，另一台 Windows 机器）：Node v26.7.0（nvm-windows，见 R-000）、Git 在 `C:\Program Files\Git\cmd\git.exe`、工作目录 `C:\Users\Administrator\Desktop\cook`。下方 R-001/R-002 代码块里的 `cd /d C:\...` 属于该环境；在 macOS 上请改用仓库内相对路径（推荐 `pnpm --dir apps/mobile ...` / `pnpm --dir services/api ...`）。
 
 ---
 
@@ -52,7 +52,176 @@ npm -v
 
 ---
 
-## R-001 前端：安装 / 构建 / 启动（✅ 已验证，2026-10-11 起改用 pnpm）
+## R-007 Docker：起后端 + MySQL（✅ 已验证，2026-10-12）
+
+> **2026-10-12 起，本地开发的默认形态**：后端与数据库跑 Docker，前端在本机跑 Vite。
+> 前端不进容器（发布走 Capacitor 打 APK），见 `DECISIONS.md` D-018。
+> 下方 R-001 / R-002 的 SQLite 建库步骤已作废（迁移已换 MySQL 方言，旧迁移归档在 `history/prisma-sqlite-archive/`）。
+
+前置：Docker Desktop 已启动（`open -a Docker`，守护进程要真的在跑，光装 App 不够）。
+
+```bash
+# 首次：准备 compose 用的环境变量（.env 不入库）
+cp .env.example .env        # 按需改密码与端口
+
+# 起后端 + MySQL（首次会构建镜像，耗时取决于网络）
+docker compose up -d --build
+
+# 看状态与日志
+docker compose ps
+docker compose logs -f api
+
+# 停掉（保留数据卷）
+docker compose down
+# 连库清空重建（会删数据！仅开发期用）
+docker compose down -v && docker compose up -d --build
+```
+
+**实测结果（2026-10-12，本机 macOS，Docker Desktop 29.8.2）**：
+- `docker compose up -d --build` 成功；容器 `cook-mysql-1`（healthy，3306）、`cook-api-1`（3000）。
+- api 容器启动时自动执行 `prisma migrate deploy` → 建表 `AppMeta` / `Recipe` / `_prisma_migrations`。
+- `GET http://127.0.0.1:3000/api/health` → 200 `{"status":"ok","node":"v24.21.0"}`；`/api/recipes` → 200（空库 `total=0`）。
+- 与宿主机前端联调：跨域预检 `OPTIONS /api/recipes`（Origin `http://127.0.0.1:5173`）→ **204** + `Access-Control-Allow-Origin: http://127.0.0.1:5173`。
+
+**踩坑备忘**：
+- **容器内必须监听 `0.0.0.0`**：`main.ts` 原先硬编码 `127.0.0.1`，容器里宿主机连不上；现由 `HOST` 环境变量控制（compose 设为 `0.0.0.0`）。
+- **MySQL 下 String 默认是 `VARCHAR(191)`**：`searchText`（拼接了名称/别名/配料/标签）与 `rawMarkdown` 必超长，已加 `@db.Text`；否则导入时报 `Data too long`。
+- **`prisma migrate dev` 需要建影子库**：应用账号 `cook` 只有单库权限，会失败；从宿主机生成迁移时用 root 连接：
+  `DATABASE_URL="mysql://root:<root密码>@127.0.0.1:3306/cook" pnpm exec prisma migrate dev --name <名字>`
+- **entrypoint 用 `./node_modules/.bin/prisma` 而不是 `pnpm exec prisma`**：后者会触发 pnpm 的 `verifyDepsBeforeRun` 校验，在容器里白跑一次安装并在受限网络下报警。
+- **国内构建慢**：`.env` 里 `NPM_REGISTRY=https://registry.npmmirror.com` 可显著加速镜像构建（仅构建期取包，锁文件完整性仍会校验）。
+- **Docker Hub 拉基础镜像偶发失败**（`failed to fetch anonymous token ... connection refused`）：重试一次通常即可，不必改配置。
+- **后端单测需要 MySQL 容器在跑**：测试用独立测试库 `cook_test`（自动 `CREATE DATABASE IF NOT EXISTS` 并应用同一份迁移），不碰应用库 `cook`。故 `pnpm --dir services/api run test` 前先 `docker compose up -d mysql`。
+- **MySQL 的 JSON 列不保留对象键顺序**：换库后暴露的真实坑——导入器原先用 `JSON.stringify` 比较判断"内容是否变化"，键序被 MySQL 重排后误判为有变，重跑导入会刷新 `updatedAt`、破坏幂等。已改为递归排序键再比较（`canonicalJson`），并在 update 分支显式带回原 `updatedAt`。
+
+---
+
+## R-008 导入菜谱（外部数据源 → MySQL）（✅ 已验证，2026-10-12）
+
+前置：MySQL 容器在跑（`docker compose up -d mysql`）；`.env` 里的 `DATABASE_URL` 指向它。
+
+```bash
+# ① 按关键词检索并入库（uapis 免密钥，可当兜底源）
+pnpm --dir services/api run import:recipes -- --keywords=番茄炒蛋,红烧排骨,可乐鸡翅 --limit=3
+# 参数：--source=<源标识>（默认 uapis；已登记 uapis / jumdata / jisu） --keywords=<逗号分隔> --limit=<每词条数>
+
+# ② 按分类批量建库（主力用法，极速数据 jisu）
+pnpm --dir services/api run import:recipes -- --source=jisu --categories=307,305,351 --limit=40
+#     --categories=all → 枚举分类树里的全部叶子分类
+#     分类 id 从 /recipe/class 取；只认叶子分类，传顶级 id 会返回 205 没有信息
+
+# ③ 把「入库时才生效」的菜名清理规则补用到历史行（不调用任何接口，可反复执行）
+pnpm --dir services/api run normalize:names
+
+# ④ 聚美智数（步骤细但无图，仅作补充源）
+pnpm --dir services/api run import:recipes -- --source=jumdata --keywords=红烧排骨 --limit=5
+```
+
+### 极速数据 jisuapi（主力源，✅ 实测跑通 2026-10-12）
+
+- **密钥**：`JISU_APP_KEY` / `JISU_APP_SECRET` 写进 `services/api/.env`（被 gitignore）。**不要写进 `.env.example`（该文件会提交）**。适配器只读 `JISU_APP_KEY`（作为 `appkey` 查询参数）。
+- **接口**：`GET /recipe/class`（分类树）、`GET /recipe/byclass`（按分类枚举）、`GET /recipe/search`（关键词）、`GET /recipe/detail`。成功码 `status=0`。
+- **`103 APPKEY无请求此数据权限` = 密钥有效但这个接口没开通**，要去极速数据后台**申请/开通「菜谱」接口**——不是改代码能解决的（本次就卡在这一点上）。
+- **`byclass` 关键约束（都实测过）**：
+  - 一次返回**含 `material`/`process` 的完整菜谱**，不需要再逐条调详情（比 uapis 省的调用就在这）。
+  - `result` 是**对象** `{ total, num, list }`，不是数组。
+  - **`num` 硬上限 20**：传 50、100 都只回 20 条，翻页只能靠 `start`。
+  - **只认叶子分类**：传顶级 id（如 `1 功效`）返回 `205 没有信息`。
+  - `material[].type` 是**数字**：1 主料、0 辅料（主料排在数组末尾），按字符串比会全判成辅料。
+- **图片**：`pic` 实测 230×230 px / 16KB JPEG；域名 `api.jisuapi.com` 的 **https 同样可用**，适配器统一把 http 升到 https（避免 APK 内被混合内容策略拦）。**但其文档写明图片链接会过期 → 转存 MinIO 是打包前必做项**。
+- **规模与成本**：家常菜类目 `total=12710`、热菜 2681、川菜 456。按 20 条/页，**拉满家常菜约 636 次调用**，扩库要按套餐额度分批跑（`sourceKey` 去重，重跑不会重复入库）。
+- **分类树**：14 个顶级、子类合计 900+，但**大部分节点不是菜品分类**（"功效/人群/疾病/体质/场景"是筛选维度）。建库挑「菜品(301)」下的叶子（素菜 307、汤 351、羹 352、海鲜 312、饭 320、面 326…）与「菜系(223)」下的菜系叶子。
+
+**实测结果（2026-10-12）**：
+- 权限开通前 `status=103`，开通后 `status=0`。
+- 16 个分类、**32 次调用 / 52 秒 → 入库 640 条（去重后库内 600 道）**；构成 `jisu=589`、`uapis=9`、`jumdata=2`，**598/600 带图**。
+- 品类分布 主食 235 / 素菜 156 / 荤菜 123 / 汤 86；菜系 10 种（家常 541、川菜 40、苏菜 5、粤菜 4…）。
+- 600/600 都有食材与步骤（源站最少 2 项食材、3 步）。
+
+### 聚美智数 jumdata（补充源，✅ 已实测）
+
+- 分类查询 `POST https://api.jumdata.com/cookbook/type`；菜谱查询 `POST https://api.jumdata.com/cookbook/list`（`x-www-form-urlencoded`）。
+- 签名：`sign = sha256(appId + appSecret + timestamp)`；`productCode` 固定 `cookbook_query`。
+- **`type`（分类）是必填参数**——所以适配器先取分类树，再逐个一级分类按 `name` 检索。
+- 返回字段：`name/typeV1-V3/tip(小贴士)/largeImg/smallImag/steps[{orderNum,content}]/yl[{ylName,ylUnit}]`。
+- **实测结论**：接口可用（成功入库 2 条）。**抽到的菜谱都没有图片**——与文档示例里图片字段为空一致，因此该源**不满足"图片必须要有"**，仅作补充源；步骤很详细（14 步 / 8 步）但无配图；原料部分带用量（`排骨 → 1.5斤` 解析正确）、部分只有名称；`tip` 小贴士部分有。
+
+### 归一口径（各源共用）
+
+- **品类：源站分类优先**——源站分类名命中映射表（`SOURCE_CATEGORY_MAP`）就直接采用（源站事实）；未命中才退回菜名关键词规则（汤 → 主食 → 素菜 → 荤菜），都不命中归「荤菜」。原始标签完整保留在 `tags`，可无损重映射。**理由**：纯菜名启发式把源站「素菜」类下的"姜汁腐竹拌芹菜"判成了荤菜。
+- **菜系：源站事实**——从源站分类名与标签里提取真实菜系（`deriveCuisine()`），没有就写「家常」，不臆造。
+- **厨具词先剥掉**：`电饭锅`/`面包机`/`烤箱`… 里的"饭""面"会把菜误判成主食（`红烧肉（电饭锅）` 曾中招），已修并加测试锁住。
+- **菜名清理**（`cleanDishName()`）：剥掉 `[原创首发]`、`【儿童美食】` 这类编辑/人群前缀；**不无条件剥括号**——源站有「【红烧排骨】万用的炒糖上色法」「【桂圆银耳羹】」这种菜名本身在括号里的写法。历史行用 `normalize:names` 补用。
+- **占位值不当内容**：源站用「无」占位时（`preparetime: 无`）不再渲染出"准备 无"。
+- **`origin`/`sourceKey` 必须写进入库负载**：DB 列有默认值，漏写会变成 `origin='user'` 且 `sourceKey=NULL`——既破坏去重，又会让下次导入把记录误判成"用户自建"而跳过（本次实测踩到并修正）。
+- **幂等用 `canonicalJson()` 比对**：**MySQL 的 JSON 列不保留对象键顺序**，直接 `JSON.stringify` 比会把"无变化"误判成"有变化"并刷新 `updatedAt`。
+- **热量不臆造**：源站无卡路里，一律存 `null` + `caloriesEstimated=false`，前端显示「热量暂无」。
+
+### 实现位置
+
+- 适配层：`src/modules/recipes/sources/`（`recipe-source.ts` 归一规则、`jisu.source.ts`、`uapis.source.ts`、`jumdata.source.ts`）+ `src/scripts/import-recipes.ts`、`src/scripts/normalize-names.ts`。
+- 新增源：实现 `search()` 即可；支持分类枚举的源再实现 `listCategories()` + `enumerate()`，并在 `import-recipes.ts` 的 `SOURCES` 里登记。
+- **调用成本**：uapis 搜索 1 积分/次、详情 3 积分/次（每条都要再取一次详情才有配料与步骤），限流 4 QPS，脚本内按 300ms 串行节流；jisu 一次调用回 20 条完整菜谱。
+
+---
+
+## R-009 菜谱图片自托管（备份进 MinIO）（✅ 已验证，2026-10-12）
+
+前置：`docker compose up -d mysql minio`；`services/api/.env` 里配好 `MEDIA_S3_*`（值同根 `.env` 的 `MINIO_ROOT_USER/PASSWORD`）。
+
+```bash
+# 把第三方图床的图片备份进 MinIO，并回写 Recipe.imageKey/imageHash
+pnpm --dir services/api run mirror:images
+#   --force  忽略已有记录、强制重新下载（换了图源或怀疑图坏了时用）
+```
+
+**为什么要做**：图片原本是第三方域名直链，官方文档明确写"图片链接会过期"。备份后前端只读自己的图，**第三方接口只在首次导入时用到，运行时不再依赖**（也不会因此反复花调用次数）。
+
+**实现要点**：
+- 代码：`src/modules/media/media.storage.ts`（S3 客户端 / 桶准备 / 上传 / 对外地址拼接）+ `src/scripts/mirror-images.ts`。
+- **只下载图片文件，不调用数据源业务接口** → 备份不消耗第三方 API 调用次数。
+- 文件名 = 图片内容的 **sha256**：同一张图被多道菜引用只存一份；重复执行不会重传。
+- 同一批里按源 URL 去重，串行 120ms 节流；响应 `Content-Type` 不是已知图片类型（如限流时返回的 HTML）或体积异常的一律拒收。
+- **跳过条件是「对象确实在桶里」（HeadObject 探测），不是"DB 里有 imageKey"**。两者会不一致——本次实测踩到：被中断的一次运行给 327 行写了 `imageKey` 但对象并没上传，只看 DB 就会让这 327 道菜的图在页面上 404。脚本现在会自愈补传。
+- 桶不存在会自动创建并设为**公开只读**（菜谱图是给所有登录用户看的公开内容；私有内容应另建私有桶）。
+- 接口返回地址由 `publicImageUrl()` 决定：**有自托管副本用副本，没有才回退源站直链**（`MEDIA_BASE_URL` 没配的环境也不会无图）。
+
+**实测结果（2026-10-12）**：
+- 两次运行合计：`598 道全部备份成功，失败 0`；覆盖率 **598/600**（缺的 2 道是库内本来就无图的 jumdata 记录）。
+- MinIO `cook-media` 桶：**598 个对象 / 8.9 MiB**。
+- 直连图片：`GET http://127.0.0.1:9000/cook-media/recipes/<hash>.jpg` → **HTTP 200、image/jpeg、16534 字节**。
+- 浏览器实测：`/recipes` 列表 12/12 张卡片图全部来自 `127.0.0.1:9000`，`complete && naturalWidth > 0` 全部为真；厨房页推荐位同样来自 MinIO。
+
+**MinIO 常用运维命令**（镜像内置 `mc`）：
+```bash
+docker exec cook-minio-1 /opt/bitnami/minio-client/bin/mc ls --recursive local/cook-media | wc -l   # 对象数
+docker exec cook-minio-1 /opt/bitnami/minio-client/bin/mc du local/cook-media                        # 占用
+docker exec cook-minio-1 /opt/bitnami/minio-client/bin/mc anonymous set download local/cook-media    # 桶开公开只读
+```
+
+**⚠️ MinIO 镜像来源：用自建镜像（`services/minio/Dockerfile`）**。背景是实测出来的三条硬事实：
+- MinIO 官方 Docker 镜像**已不可获取**：`docker pull minio/minio` → `pull access denied ... repository does not exist`（同期 `alpine:3.20` 可正常拉取，排除网络问题）；`quay.io/minio/minio` → `401 UNAUTHORIZED`。
+- 官方直发二进制地址 `dl.min.io/server/minio/release/...` **现在返回 410 Gone**（连 `client/mc` 也是 410）。
+- **但官方中国镜像站 `dl.minio.org.cn` 仍提供二进制**，自建镜像即从这里取。
+
+```bash
+docker compose build minio          # 自建镜像（自动按当前架构选 arm64/amd64）
+docker compose up -d minio
+```
+
+自建镜像的要点：
+- 二进制是 **MinIO 官方发布产物**（`minio --version` 会打印 `RELEASE.2025-04-22T22-12-26Z` / `GNU AGPLv3` / `Copyright: 2015-2025 MinIO, Inc.`），不是第三方二次打包。
+- **版本固定 + sha256 校验**：Dockerfile 里钉死 release 与两个架构的哈希，上游若换文件构建会**直接失败报哈希不符**，不会悄悄装上不一样的东西。升级步骤：改 `MINIO_RELEASE` → 下载新文件 → `sha256sum` 更新对应 `ARG`。
+- 海外服务器可用 `--build-arg MINIO_DOWNLOAD_BASE=https://dl.min.io` 覆盖下载源（但该站当前对 server 二进制返回 410，需先确认）。
+- 镜像只含 `minio` 二进制（167 MB），**不含 curl/wget**；healthcheck 用 `minio --version`。桶与公开读权限不预置，由 `mirror:images` 幂等创建。
+- 数据卷挂载点是 **`/data`**（旧的 Bitnami 镜像用 `/bitnami/minio/data`）。换镜像时**命名卷 `minio-data` 保留**，卷根就是数据目录，桶会原样被识别——本次切换后 598 个对象全部可用，已用备份脚本逐个探测确认（`待处理 0 个`）。
+
+**配置项**（`MEDIA_S3_*` 走标准 S3 协议，换成阿里云 OSS / 腾讯云 COS / AWS S3 只改环境变量，不动业务代码）：
+`MEDIA_S3_ENDPOINT`、`MEDIA_S3_REGION`、`MEDIA_S3_BUCKET`、`MEDIA_S3_ACCESS_KEY`、`MEDIA_S3_SECRET_KEY`、`MEDIA_BASE_URL`。
+
+---
+
+## R-001 前端：安装 / 构建 / 启动（⚠️ 部分作废，见 R-007 说明）
 
 前置：Node ≥ 22.19（见 R-000）；包管理器用 **pnpm**（与后端一致）。
 
@@ -77,7 +246,8 @@ pnpm run dev        :: 开发服务器 http://127.0.0.1:5173
 - `pnpm install --frozen-lockfile` 在锁文件元数据未同步时会报 `ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE` → 先跑一次普通 `pnpm install` 同步，再回到 frozen。
 
 **排查备忘**：
-- **`ERR_PNPM_IGNORED_BUILDS` 让安装非零退出** → pnpm 12 的放行名单在 `pnpm-workspace.yaml` 的 **`allowBuilds` 映射**（如 `esbuild: true`、`'@parcel/watcher': true`、`'@scarf/scarf': false`）；实测旧的 `onlyBuiltDependencies` / `ignoredBuiltDependencies` 在本机不生效。
+- **`ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`（pnpm 12 默认供应链策略）** → pnpm 12 默认拒绝安装"发布未满 24 小时"的包；若锁文件里有刚发布的版本（本项目实测命中 `@tanstack/react-virtual` / `@tanstack/virtual-core`），安装会以"Lockfile failed supply-chain policy check"中断。因为锁文件是团队自己生成并已入库的，用 **`pnpm install --trust-lockfile`** 放行（只跳过本次锁文件校验，不改全局策略）；也可以等满 24 小时后再装。
+- **`ERR_PNPM_IGNORED_BUILDS` 让安装非零退出** → pnpm 12 的放行名单在 `pnpm-workspace.yaml` 的 **`allowBuilds` 映射**（如 `esbuild: true`、`'@parcel/watcher': true`、`'@scarf/scarf': false`）；实测旧的 `onlyBuiltDependencies` / `ignoredBuiltDependencies` 在本机不生效（后端 `services/api` 已于 2026-10-12 改为 `allowBuilds`）。
 - 若整页背景/颜色失效、`var(--color-*)` 取不到值 → 检查 `src/styles/tailwind.css` 是否用了 `@theme static`（Tailwind v4 默认只输出被工具类引用的 token）。
 - 若 `Cannot find module '@/...'` → 检查 `tsconfig.app.json` 的 `paths`（TS 6 已弃用 `baseUrl`，`paths` 相对 tsconfig 解析）。
 - **换端口起前端会被浏览器拦**（接口 200 但页面报“暂时连不上厨房”）→ 后端 CORS 只放行 `services/api/.env` 里的 `CORS_ORIGIN`（默认 `http://127.0.0.1:5173`），换端口需同步加白名单。
@@ -90,7 +260,7 @@ pnpm run dev        :: 开发服务器 http://127.0.0.1:5173
 
 ```bat
 cd /d C:\Users\Administrator\Desktop\cook\services\api
-pnpm install --dangerously-allow-all-builds
+pnpm install --trust-lockfile
 copy .env.example .env
 pnpm exec prisma migrate dev --name init
 pnpm run build
@@ -111,7 +281,7 @@ pnpm run start:prod
 
 ### pnpm 排查备忘（都踩过）
 
-- **`ERR_PNPM_IGNORED_BUILDS` 会让安装链中断**：pnpm 的依赖构建白名单不再读 `package.json` 的 `pnpm` 字段。放行名单写在 `services/api/pnpm-workspace.yaml` 的 `onlyBuiltDependencies` / `ignoredBuiltDependencies`；临时绕过可用 `pnpm install --dangerously-allow-all-builds`。
+- **`ERR_PNPM_IGNORED_BUILDS` 会让安装链中断**：pnpm 的依赖构建白名单不再读 `package.json` 的 `pnpm` 字段。**pnpm 12 的正确写法是 `pnpm-workspace.yaml` 里的 `allowBuilds` 映射**（`services/api/pnpm-workspace.yaml` 已于 2026-10-12 从前端的同款写法改过来：Prisma 三件套 `true`、`@scarf/scarf` `false`）；旧键 `onlyBuiltDependencies` / `ignoredBuiltDependencies` 在 pnpm 12 下不被读取，仍会报该错。临时绕过可用 `pnpm install --dangerously-allow-all-builds`（会连同遥测脚本一起放行，仅作应急）。
 - **`pnpm add -D <pkg>` 取 latest 会装到 RC**：本次误装 `prisma@8.0.0-rc` 与 `typescript@7`。**优先改 package.json 再 `pnpm install`**，不要盲用 `pnpm add`。
 - **Prisma 7 破坏性变更**：`datasource.url` 不再支持，需改用 `prisma.config.ts` + driver adapter。M0 阶段先用 **Prisma 6.x**（稳定、`url = env("DATABASE_URL")` 仍可用）。
 - **NestJS 12 要求 TypeScript ≥ 6**（`@nestjs/schematics@12` 的 peer）。

@@ -9,7 +9,7 @@
 ## 已完成（长期有效的事实）
 
 - ✅ **立项与建档**：`参考图片/` 13 张截图解析；Phase 0 调研（`docs/context/RESEARCH.md`）、Phase 1 需求对齐（`DECISIONS.md` D-001~D-013）、Phase 2 文档骨架全部完成。
-- ✅ **关键决策**：必须注册登录（D-008）；AI 走配置驱动 + pi-agent + 内置提示词（D-009）；**只做 Android**（D-002、D-010）；不用 uni-app，React + Capacitor（D-013）；3D 用 react-three-fiber + 2.5D 降级（D-015）。
+- ✅ **关键决策**：必须注册登录（D-008）；AI 走配置驱动 + pi-agent + 内置提示词（D-009）；**只做 Android**（D-002、D-010）；不用 uni-app，React + Capacitor（D-013）；**渲染层维持 WebView、不采用 React Native（D-017，2026-10-12 用户确认）**；3D 用 react-three-fiber + 2.5D 降级（D-015）。
 - ✅ **UI 方案**：两轮 AI 出图探索后用户选定 **04 手绘水粉**，实现稿 `docs/ui-preview/handpainted/index.html`（5 Tab、透明底品牌字、5 个分类按钮、手写字体 ZCOOL KuaiLe）。
 - ✅ **开发环境**：Node v26.7.0（`RUNBOOK.md` R-000）；图片生成 `gpt-image-2` 实测可用。
 - ✅ **代码已上 GitHub**：私有仓库 `https://github.com/aihongfei/cook`（默认分支 `main`）。操作与自查命令见 `RUNBOOK.md` R-006；后续提交沿用该仓库。
@@ -30,13 +30,91 @@
 
 ## M1 菜谱库（P0，已交付）
 
-- ✅ **数据与接口（后端）**：Prisma `Recipe` 模型 + 迁移 `20261011151646_recipes`；HowToCook 种子 **28 道真实菜谱**（固定 commit `3dfa950f…`、Unlicense，来源/许可/版本随详情返回）；`RecipeProvider` 可插拔适配层 + 内置实现；接口 `GET /api/recipes`（分页/搜索/筛选）、`GET /api/recipes/filters`、`GET /api/recipes/:id`。
-- ✅ **导入管线**：`pnpm run fetch:recipes`（抓取 + 解析）、`pnpm run seed:recipes`（幂等 upsert，不覆盖用户自建菜谱）。
+- ✅ **数据与接口（后端）**：Prisma `Recipe` 模型 + 迁移 `20261012021730_init`（MySQL）；`RecipeProvider` 可插拔适配层 + 内置实现；接口 `GET /api/recipes`（分页/搜索/筛选）、`GET /api/recipes/filters`、`GET /api/recipes/:id`。**菜谱数据已不是 HowToCook 种子**——该种子按用户 2026-10-12 指示弃用，改由第三方 API 聚合接入（见下节「菜谱数据源接入」），库内现有 **600 道**。
+- ✅ **导入管线**：`pnpm run import:recipes`（多源：按关键词或按分类批量建库，幂等 upsert，不覆盖用户自建/他源记录）；`pnpm run normalize:names`（把菜名清理规则补用到历史行）。
 - ✅ **解析器修正**：3 条菜谱的工具项（「直径 30cm 以上的盆」「砂锅（没有的话，用铁锅也行）」「小碗若干」）曾误判为配料，已修正并重新生成 `seeds/howtocook.json`，与测试恢复一致。
 - ✅ **前端页面**：菜谱列表（双列卡片、品类×菜系筛选、350ms 防抖搜索、中文输入法组合保护、无限滚动 + 已显示/总量）、菜谱详情（配料用量、步骤含子步骤、备注、来源许可版本、无视频明示）；厨房页搜索/分类/全部/推荐接真实接口；缺图统一「菜谱图片待补」占位，热量缺失显示「热量暂无」（不造数）。
 - ✅ **路由**：`/recipes`、`/recipes/:id` 挂在 TabLayout 下，厨房 Tab 高亮；详情返回保留列表条件。
 
-## 验收证据（本次实测）
+## 本机环境恢复（2026-10-12，macOS）
+
+> 本节是在当前 macOS 工作站上把项目跑起来的实测结果；下面「验收证据」表来自 2026-10-11 的另一台 Windows 机器，两者不要混用。
+
+- ✅ **工具链对齐**：本机 nvm 下装好 **pnpm 12.11.2**（与 `apps/mobile/package.json` 的 `packageManager` 固定值一致；此前本机只有 11.22.0）；Node **v26.7.0**（nvm 默认别名）。注意：非登录 shell 里 node/pnpm 不在 PATH，且 Node 26 已不随包分发 `corepack`。
+- ✅ **依赖安装**：前端、后端均安装成功。后端首次安装被 `ERR_PNPM_IGNORED_BUILDS` 中断——`services/api/pnpm-workspace.yaml` 还在用 pnpm 12 已不读取的旧键，已改成与前端同款 **`allowBuilds`** 映射（Prisma 三件套放行、`@scarf/scarf` 拒绝），随后 Prisma Client 生成成功。
+- ✅ **本地配置**：由 `.env.example` 生成 `apps/mobile/.env` 与 `services/api/.env`（两者都被 `.gitignore` 覆盖，未入库）。
+- ✅ **数据库**：`services/api/prisma/dev.db` 已建，迁移 `20261011145533_init`、`20261011151646_recipes` 均已应用。
+- ✅ **菜谱库已填充**：HowToCook 种子弃用后改走第三方 API 聚合导入，库内现有 **600 道**（`jisu=589`、`uapis=9`、`jumdata=2`），598 道带成品图；页面不再显示空态。详见「菜谱数据源接入」节。
+- ✅ **服务在跑**：后端 `http://127.0.0.1:3000/api`（文档 `/api/docs`）、前端 `http://127.0.0.1:5173`。
+
+| 项目 | 命令 / 入口 | 结果 |
+| --- | --- | --- |
+| 前端构建 | `pnpm --dir apps/mobile run build` | 通过：CSS 28.80 kB(gzip 6.97) / JS 436.91 kB(gzip 147.44)，与 10-11 记录基本一致 |
+| 后端构建 | `pnpm --dir services/api run build` | 通过 |
+| 建库 | `pnpm --dir services/api exec prisma migrate deploy` | 两个迁移全部应用成功 |
+| 健康检查 | `GET /api/health` | 200：`{"status":"ok","name":"yushan-api","node":"v26.7.0"}` |
+| 菜谱列表 | `GET /api/recipes?page=1&pageSize=12` | 200（当时为空库；现为 600 道，见下节） |
+| 筛选选项 | `GET /api/recipes/filters` | 200（当时为空库；现返回 4 品类 + 10 个菜系） |
+| 接口文档 | `GET /api/docs` | 200（Swagger） |
+| 前端页面 | `http://127.0.0.1:5173/`、`/recipes` | 均 200；浏览器实测截图：厨房页与菜谱页渲染正常，「今日安排」示例数据在、菜谱推荐与列表显示空态文案、底部 5 Tab 与手绘水粉风样式正常 |
+
+## 数据库换 MySQL + 后端容器化（2026-10-12 完成）
+
+- ✅ **决策已落档**：`DECISIONS.md` **D-018**（MySQL 8 + 后端与数据库容器化；**前端不进 Docker**，发布走 Capacitor 打 APK）、**D-019**（菜谱数据源走 API 聚合，**不自建爬虫**——实测见 `docs/context/RESEARCH.md` 第三节）。
+- ✅ **数据库**：Prisma provider `sqlite` → `mysql`；SQLite 期迁移归档到 `history/prisma-sqlite-archive/`（未删除），重建单一初始迁移 `20261012021730_init`。原库两表均为 0 行，**零数据损失**。
+- ✅ **修掉一处会在导入数据时爆的隐患**：MySQL 下 Prisma 默认把 String 映射为 `VARCHAR(191)`，而 `searchText`（名称/别名/配料/标签拼接）与 `rawMarkdown` 必然超长 → 已改 `@db.Text`，URL 类字段放宽到 `@db.VarChar(512)`。
+- ✅ **容器化落地**：`services/api/Dockerfile`（多阶段）、`services/api/docker-entrypoint.sh`（启动时自动 `prisma migrate deploy`）、根 `docker-compose.yml`（mysql:8.4 + api，healthcheck + 命名卷 `cook_mysql-data`）、根 `.env.example`。
+- ✅ **后端代码改动**：`main.ts` 的监听地址改为 `HOST` 可配（默认 `127.0.0.1`，容器内由 compose 覆盖为 `0.0.0.0`）——原先硬编码回环地址会导致容器内服务彼此不可达。
+- ❌ **前端不进 Docker**（按用户 2026-10-12 指示）：前端 Dockerfile / nginx 配置已删除，恢复本机 Vite 开发形态。
+
+| 项目 | 命令 / 入口 | 结果 |
+| --- | --- | --- |
+| 起全栈 | `docker compose up -d --build` | ✅ `cook-mysql-1` healthy（3306）+ `cook-api-1`（3000） |
+| 建表 | api 容器 entrypoint 自动 `prisma migrate deploy` | ✅ `AppMeta` / `Recipe` / `_prisma_migrations` 已建；重启显示 "No pending migrations to apply" |
+| 健康检查 | `GET http://127.0.0.1:3000/api/health` | ✅ 200（容器内 node v24.21.0） |
+| 菜谱接口 | `GET /api/recipes?page=1&pageSize=5` | ✅ 200（当时为空库；现为 600 道，见下节） |
+| 跨域联调 | `OPTIONS /api/recipes`，Origin `http://127.0.0.1:5173` | ✅ 204 + `Access-Control-Allow-Origin: http://127.0.0.1:5173` |
+| 前端本地 | `http://127.0.0.1:5173/recipes` | ✅ 浏览器实测：页面正常渲染（当时显示空态；现已显示真实菜谱，数据链路 前端 → api → 容器内 MySQL） |
+| 启动日志 | `docker compose logs api` | ✅ 无 pnpm 告警（entrypoint 改用 `./node_modules/.bin/prisma`，避开 pnpm 的运行时依赖校验） |
+
+## 菜谱数据源接入（2026-10-12 完成，主力源 = 极速数据 jisuapi，库内 600 道）
+
+- ✅ **决策更新**（`DECISIONS.md` D-019 补充）：**HowToCook 弃用**（用户："HowToCook 不需要了"）；**聚合数据因价格搁置**（用户："有点贵"）；**主力源 = 极速数据 jisuapi**（用户已注册并开通「菜谱」接口，实测跑通）；**uapis.cn 保留作免密钥兜底源**。
+- ✅ **适配层**：`services/api/src/modules/recipes/sources/` —— `recipe-source.ts`（源适配接口 + 品类/菜系映射 + 配料/步骤解析 + 统一入库行）、`jisu.source.ts`、`uapis.source.ts`、`jumdata.source.ts`。新增源只需实现 `search()`；支持分类枚举的源再实现 `listCategories()` + `enumerate()`。
+- ✅ **导入命令**：按关键词 `--keywords=…`；按分类批量建库 `--source=jisu --categories=307,305,351 --limit=40`（`--categories=all` 为全部叶子分类）。见 `RUNBOOK.md` R-008。
+- ✅ **导入器重构**：所有源共用 `upsertAll()`，冲突保护（不覆盖用户自建/他源记录）与幂等口径一致；幂等比对用 `canonicalJson()`——**MySQL 的 JSON 列不保留对象键顺序**，直接 `JSON.stringify` 比会误判成"有变化"。
+- ✅ **品类映射改为「源站分类优先」**：源站分类名命中映射表就直接采用（源站事实），未命中才退回菜名关键词规则（汤→主食→素菜→荤菜）。此前只靠菜名猜，把源站「素菜」类下的"姜汁腐竹拌芹菜"判成了荤菜。
+- ✅ **菜系来自源站真实数据**：从源站分类名与标签里提取川菜/粤菜/湘菜等（`deriveCuisine()`），不再一律写"家常"——筛选器因此有了真实菜系可选。
+- ✅ **菜名清理**：`cleanDishName()` 剥掉 `[原创首发]`、`【儿童美食】` 这类编辑/人群前缀；**不无条件剥括号**（源站有「【红烧排骨】万用的炒糖上色法」「【桂圆银耳羹】」这种菜名本身在括号里的写法）。历史行用 `pnpm run normalize:names` 补用规则。
+- ✅ **占位值不再当内容**：源站用「无」占位时不再渲染出"准备 无"；已回填修正 38 行历史数据。
+- ✅ **前端配套修正**：详情页标签去重（源站标签常带"汤""包子"这类品类词，与前面的品类/菜系标签重复）。
+- ⚠️ **聚美智数已实测**：接口可用、入库 2 条（`origin=jumdata`），但**抽到的菜谱均无图片**，不满足"图片必须要有"的硬指标 → **不作主源**；其步骤详细、有小贴士、原料部分带用量，**可作补充源**（多源按 `origin` 隔离、互不覆盖）。这 2 条无图记录**尚未清理**，待用户决定。
+- ❌ **已排除**：聚合数据 id 733（无图片字段）；showapi（用户确认无图）。
+- ⚠️ **图片转存仍是必须项，未开工**：极速数据同样是**第三方域名直链**，其文档写明"图片链接会过期，请尽快保存图片"；uapis 的 9 条是 http 外链（APK 内可能被混合内容策略拦）。→ **MinIO 需尽快加进 compose**。（好消息：极速数据的图 **https 可访问**，本适配器已统一把 http 升到 https，见下表实测。）
+
+**极速数据接口实测结论（2026-10-12，用用户真实 key 调通）**：
+
+- `GET /recipe/class`：`result` 是数组，**14 个顶级分类、子类合计 900+**（菜品 88 个、菜系 106 个…）；分类里混着"功效/人群/疾病"这类筛选型节点，**大部分不是菜品分类**，建库要挑着用。
+- `GET /recipe/byclass`：`result` 是**对象** `{ total, num, list }`（不是数组）；**`num` 硬上限 20**（传 50、100 都只回 20 条），翻页只能靠 `start`；**只认叶子分类**（传顶级 id 返回 `205 没有信息`）。一次即返回含 `material`/`process` 的完整菜谱，**不需要逐条再调详情**（这点比 uapis 省调用）。
+- `material[].type` 是**数字**：1 主料、0 辅料（主料排在数组末尾），按字符串比会全部判成辅料。
+- 图片实测 **230×230 px / 16KB JPEG**，`http://api.jisuapi.com/...`，**该域名 https 同样返回 200**，可规避混合内容。
+- 数据量（`total`）：家常菜 **12710**、热菜 2681、川菜 456。**但按 20 条/页翻页，拉满家常菜需 ~636 次调用**——扩充规模要按调用次数配额分批跑。
+
+| 项目 | 命令 / 入口 | 结果 |
+| --- | --- | --- |
+| 权限校验 | `GET /recipe/class?appkey=…` | ✅ `status=0 msg=ok`（此前为 `103 APPKEY无请求此数据权限`，用户开通接口后解除） |
+| 批量建库 | `pnpm --dir services/api run import:recipes -- --source=jisu --categories=307,314,306,312,305,351,352,320,326,324,335,336,302,304,310,224 --limit=40` | ✅ 16 个分类、**32 次调用 / 52 秒** → 入库 640 条（去重后库内 **600 道**） |
+| 库内构成 | `SELECT origin, COUNT(*) FROM Recipe GROUP BY origin` | ✅ `jisu=589`、`uapis=9`、`jumdata=2`；**598/600 带图**，无图的就是 jumdata 那 2 条 |
+| 品类分布 | `SELECT category, COUNT(*) FROM Recipe GROUP BY category` | ✅ 主食 235 / 素菜 156 / 荤菜 123 / 汤 86 |
+| 菜系分布 | `SELECT cuisine, COUNT(*) FROM Recipe GROUP BY cuisine` | ✅ 10 种：家常 541、川菜 40、苏菜 5、粤菜 4、韩国料理 4… |
+| 数据完整性 | 校验每行的 `ingredients` / `steps` 非空 | ✅ 600/600 都有食材与步骤（极速数据最少 2 项食材、3 步） |
+| 列表接口 | `GET /api/recipes?pageSize=3` | ✅ 返回真实菜名 + `https://` 成品图 + 品类/菜系 |
+| 筛选器 | `GET /api/recipes/filters` | ✅ 4 品类 + 10 个菜系（全部由数据推导，非硬编码） |
+| 后端测试 | `pnpm --dir services/api run test` | ✅ **16/16** 通过（含源站分类映射、菜系派生、菜名清理的新用例） |
+| 前端测试 | `pnpm --dir apps/mobile run test` | ✅ **11/11** 通过 |
+| 前端页面 | `http://127.0.0.1:5173/kitchen`、`/recipes`、`/recipes/jis-921962f7135f17d6590d` | ✅ 浏览器实测截图：推荐位与列表双列卡片均显示真实成品图；详情页食材（含用量、主料在前）、5 步做法、来源许可与原始链接齐全；标签去重生效；备注不再出现"准备 无" |
+
+## 验收证据（2026-10-11，原 Windows 机）
 
 | 项目 | 命令 / 入口 | 结果 |
 | --- | --- | --- |
@@ -50,16 +128,53 @@
 
 > 端口说明：3000 上原为迁移前旧构建进程，已停止并换成含菜谱接口的新构建；本机 CORS 仅放行 `http://127.0.0.1:5173`，用其它端口（如 5174）起前端会被浏览器拦截，需同步改 `services/api/.env` 的 `CORS_ORIGIN`。
 
+## 菜谱图片自托管（MinIO）（2026-10-12 完成，598/600 已备份）
+
+> 目标：图片不再依赖第三方图床（对方文档写明链接会过期），**备份进自己的对象存储，前端只读自己的图**；第三方接口此后只在"首次导入"时用到。
+
+- ✅ **数据模型**：`Recipe` 新增 `imageKey`（自托管对象 key）/ `imageHash`（内容 sha256）/ `imageStoredAt`；迁移 `20261012032044_recipe_image_mirror`。原 `image` 字段**保留为源站原始地址**（溯源与重下用，也避免重新导入时把镜像地址误判成"内容变了"而覆盖）。
+- ✅ **存储实现**：`src/modules/media/media.storage.ts` —— 标准 S3 协议（`@aws-sdk/client-s3`）+ `src/scripts/mirror-images.ts`。**换阿里云 OSS / 腾讯云 COS / AWS S3 只改 `MEDIA_S3_*` 环境变量**，不动业务代码与数据。
+- ✅ **接口行为**：`publicImageUrl()` —— 有自托管副本就用副本，没有才回退源站直链（没配 `MEDIA_BASE_URL` 的环境也不会无图）。前端无需改动。
+- ✅ **备份脚本**（`pnpm run mirror:images`）：**只下载图片文件、不调用数据源业务接口 → 不消耗第三方调用次数**；文件名 = 内容 sha256（同图多菜只存一份、重复执行不重传）；响应非图片类型（如限流返回的 HTML）或体积异常一律拒收；串行 120ms 节流。
+- ✅ **跳过条件以「对象是否真在桶里」为准**（HeadObject 探测），而不是"DB 里有 imageKey"。**这一条是踩坑换来的**：一次被中断的运行给 327 行写了 `imageKey` 但对象没上传，只看 DB 就会让这 327 道菜的图在页面 404；脚本现在会自愈补传。
+- ✅ **容器化**：`docker-compose.yml` 增加 `minio` 服务（命名卷 `minio-data`）+ api 的 `depends_on: service_healthy`；桶不存在时脚本自动创建并设为**公开只读**（菜谱图是公开内容；私有内容应另建私有桶）。
+- ✅ **MinIO 用自建镜像（用户指示"自己部署 minio"）**：`services/minio/Dockerfile` —— 从**官方中国镜像站 `dl.minio.org.cn`** 取 MinIO 官方发布二进制，装进 alpine。**版本固定 + 双架构 sha256 校验**（上游换文件即构建失败，不会静默换版本）；`minio --version` 实测 `RELEASE.2025-04-22T22-12-26Z / GNU AGPLv3 / MinIO, Inc.`，确认是官方产物。镜像 167 MB，运行时不含 curl/wget。背景（官方 Docker 镜像下架、`dl.min.io` 对二进制返回 410）见 `RISKS.md` R-14。
+
+| 项目 | 命令 / 入口 | 结果 |
+| --- | --- | --- |
+| MinIO 服务 | `docker compose up -d minio` | ✅ `cook-minio-1` healthy；`GET /minio/health/live` → 200 |
+| 备份图片 | `pnpm --dir services/api run mirror:images` | ✅ 两次运行合计 **598 张全部成功、失败 0**（第一次 271 张，第二次补传 327 张） |
+| 自建 MinIO 切换 | `docker compose build minio && docker compose up -d minio` | ✅ 镜像构建通过（sha256 校验生效）；换镜像后**数据卷里的 598 个对象原样可用**，再跑备份脚本逐个探测 → `待处理 0 个` |
+| 桶内容 | `mc ls --recursive local/cook-media \| wc -l` | ✅ **598 个对象 / 8.9 MiB** |
+| 图片直连 | `GET http://127.0.0.1:9000/cook-media/recipes/<hash>.jpg` | ✅ HTTP 200、`image/jpeg`、16534 字节（公开只读生效） |
+| 接口返回 | `GET /api/recipes?pageSize=3` | ✅ 图片地址已变为 `http://127.0.0.1:9000/cook-media/recipes/…` |
+| 浏览器实测 | `/recipes` 列表 12 张卡片图 | ✅ **12/12 全部来自 `127.0.0.1:9000`**，`complete && naturalWidth>0` 全为真；厨房页推荐位同样来自 MinIO |
+| 后端测试 | `pnpm --dir services/api run test` | ✅ **20/20** 通过（新增图片类型白名单、命名、地址回退、S3 配置覆盖用例） |
+
 ## 阻塞 / 待确认
 
-1. ⬜ **AI 多模态 provider**：由用户通过配置文件自配（D-009），M16 才能落地识图。
-2. ⬜ **菜谱配图**：HowToCook 无成品图，当前统一占位；后续用 AI 生图补齐（D-005）。
+1. 🚧 **极速数据审核未通过、暂不能购买调用次数（用户 2026-10-12 明确告知）**：现在只有注册赠送的 **100 次免费额度**，已用约 **36 次**（3 次权限探测 + 1 次连通性验证 + 32 次建库），**剩约 64 次**。→ **在审核通过前不要再跑批量导入**。库内现有的 600 道足够开发期使用；扩充等额度到位后再做（详见下方"下一步"第 2 条）。
+2. ⬜ **jumdata 那 2 条无图记录怎么处理**（`懒人版快手菜——盐水排骨…`、`红烧肉（电饭锅）`）：它们不满足"图片必须要有"，但删数据需用户授权。可选：删掉这 2 条 / 保留但后续用 AI 生图（D-005）补齐 / 整源下线。
+3. ⬜ **AI 多模态 provider**：由用户通过配置文件自配（D-009），M16 才能落地识图。
+4. ✅ **菜谱配图缺口已由数据源解决**：极速数据的菜自带成品图（230×230），不再是 HowToCook 时代的"统一占位"。
 
 ## 下一步
 
-1. **M2 注册登录与家庭（P0）**：账号 + 密码注册登录、路由守卫、个人资料、JWT 鉴权。
-2. M1 余项按清单推进：F1-09 收藏（P1）、F1-10 加入菜单（依赖 M4 菜单）、F1-11～F1-13（P1/P2）。
-3. M18 的 9 项按依赖顺序排期（多数依赖 M3/M6/M8/M9/M16）。
+1. **M2 注册登录与家庭（P0）**：账号 + 密码注册登录、路由守卫、个人资料、JWT 鉴权。（已确认，可开工）
+2. **菜谱数据源剩余项**：① ✅ **图片已转存到自有 MinIO**（见上节「菜谱图片自托管」）；② 按用户给定的规模分批扩充菜谱库（**需等极速数据审核通过 + 购买额度**）；③ `steps` 扩展为带图结构（源站每步都有配图 `process[].pic`，适配器已取到 `stepImages`，但数据模型暂未落库；现在也可以顺便把步骤图一起备份进 MinIO）；④ jumdata 那 2 条无图记录的去留；⑤ 少量菜名仍带源站营销后缀（如 `三色春笋丁#多效护理一招制胜#`），可扩展 `cleanDishName` 清理。
+3. **后端基建评估结论**（用户 2026-10-12 提问"还需不需要 redis、消息推送、minio、AI harness"）：见下方「建议」——**AI harness 必须放后端**（密钥不能进 APK）；**MinIO 已落地**（见上节）；Redis 建议纳入；推送不自建。
+4. M1 余项按清单推进：F1-09 收藏（P1）、F1-10 加入菜单（依赖 M4 菜单）、F1-11～F1-13（P1/P2）。
+5. M18 的 9 项按依赖顺序排期（多数依赖 M3/M6/M8/M9/M16）。
+
+**建议（尚未确认，供用户取舍）**：
+
+- **AI harness 放后端（强烈建议，实质是硬约束）**：pi-agent 是 Node 库（D-009 已定），且**模型密钥绝不能打进 APK** —— 否则任何拿到安装包的人都能提取 key 刷你的额度。因此 AI 调用必须在 `services/api` 里，前端只调我们自己的 `/api/ai/*`；顺带解决限流、审计与"用户自配 provider"（配置留在服务端）。**不需要额外基建**，就是后端一个新模块。
+- **Redis（建议纳入，M2 时加）**：`RISKS.md` R-07 要求登录限流与防爆破，`RISKS.md` R-11 的推送去重、M16 的 AI 调用限流与缓存、通知防重发都需要它。一个容器、无状态，成本极低。**暂不引入**消息队列（家庭应用没有高吞吐场景，多一层只会增加运维负担）。
+- **MinIO / 对象存储（✅ 已落地，2026-10-12）**：598/598 张菜谱图已备份进自建 MinIO，接口改为优先返回自托管地址（见上节「菜谱图片自托管」）。代码走标准 S3 协议，将来换成阿里云 OSS/S3 只改 `MEDIA_S3_*` 环境变量。**镜像为自建**（官方二进制 + sha256 校验，见 `services/minio/Dockerfile` 与 `RISKS.md` R-14）。同一套存储也能承接口味档案头像、分享卡片等后续图片需求——但**私有内容应另建私有桶**，别混进公开只读的 `cook-media`。
+- **消息推送（不自建）**：推送没有"自己写一个"的选项——安卓要么走厂商通道/聚合推送服务，要么退化为应用内轮询。建议首版只做**本机可判定**的场景（计时结束、快过期）用本地通知，远端提醒按 `RISKS.md` R-11 在 M10 开工前再定通道。后端只需一个通知表 + 定时任务，**不需要新增基建**。
+- **M17 3D 验证前置**：用户已明确"3D 要做，还要做好"，建议在 M2 之后、M3–M9 大量铺开之前先做一次真机基线 + 资产管线验证（Draco/KTX2、烘焙贴图、首屏不加载），同时补齐 `RISKS.md` R-09 欠的实测。
+- **WebView 交互一致性清单**（对应 `RISKS.md` R-13）：返回键/手势、启动白屏、键盘遮挡、滚动与长按行为，建议作为 M14 打包前的验收条目逐条真机实测。
+- **素材体积优化**（与选型无关）：`apps/mobile/public/img/` 单张手绘 PNG 达 2.4–3.4 MB、字体 726 KB，建议转 WebP/AVIF + 按显示尺寸出图 + 懒加载。
 
 ## 证据入口
 
