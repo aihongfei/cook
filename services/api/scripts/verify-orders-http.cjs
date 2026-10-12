@@ -318,6 +318,15 @@ async function main() {
     `${planned.status} status=${planned.body?.status} next=${JSON.stringify((planned.body?.nextActions ?? []).map(a => a.status))}`,
   )
 
+  // 确认留痕（M4 / F4-05）：定下这一版菜单的人与时间
+  check(
+    '定菜单记下"谁定的、什么时候"（留痕跟着这一版菜单）',
+    planned.body?.confirmedBy?.nickname === '妈妈'
+      && typeof planned.body?.confirmedAt === 'string'
+      && Math.abs(Date.now() - Date.parse(planned.body.confirmedAt)) < 5 * 60_000,
+    `confirmedBy=${JSON.stringify(planned.body?.confirmedBy)} confirmedAt=${planned.body?.confirmedAt}`,
+  )
+
   const lockedAdd = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishB.id, mealDate: TODAY, meal: 'DINNER' } })
   check('已安排的餐不能再加菜 → 409（要加先取消这餐）', lockedAdd.status === 409, `${lockedAdd.status} ${lockedAdd.body?.message ?? ''}`)
 
@@ -329,12 +338,22 @@ async function main() {
 
   const cooking = await callWithRetry('POST', `/orders/meals/${mealKey}/status`, { token: mama.token, body: { status: 'COOKING' } })
   check('「开始做」→ 准备中 200', cooking.status === 200 && cooking.body?.status === 'COOKING', `${cooking.status} ${cooking.body?.status}`)
+  check(
+    '开始做不动留痕：做的还是那一版菜单，谁定的没变',
+    cooking.body?.confirmedBy?.nickname === '妈妈' && cooking.body?.confirmedAt === planned.body?.confirmedAt,
+    `confirmedBy=${JSON.stringify(cooking.body?.confirmedBy)} confirmedAt=${cooking.body?.confirmedAt}`,
+  )
 
   const done = await callWithRetry('POST', `/orders/meals/${mealKey}/status`, { token: mama.token, body: { status: 'DONE' } })
   check(
     '「做好了」→ 已做好 200，且终态没有下一步',
     done.status === 200 && done.body?.status === 'DONE' && (done.body?.nextActions ?? []).length === 0,
     `${done.status} status=${done.body?.status} next=${(done.body?.nextActions ?? []).length}`,
+  )
+  check(
+    '做好了也留着留痕（回看这一餐时知道是谁定的）',
+    done.body?.confirmedBy?.nickname === '妈妈' && done.body?.confirmedAt === planned.body?.confirmedAt,
+    `confirmedBy=${JSON.stringify(done.body?.confirmedBy)}`,
   )
 
   const afterDone = await callWithRetry('POST', `/orders/meals/${mealKey}/status`, { token: mama.token, body: { status: 'CANCELED' } })
@@ -348,11 +367,24 @@ async function main() {
   const eaterCancel = await callWithRetry('POST', `/orders/meals/${cancelKey}/status`, { token: son.token, body: { status: 'CANCELED' } })
   check('吃货取消整餐 → 403', eaterCancel.status === 403, `${eaterCancel.status}`)
 
+  // 先定一次，好在取消时验"留痕被清掉"（取消自己也要有东西可清）
+  const plannedThen = await callWithRetry('POST', `/orders/meals/${cancelKey}/status`, { token: mama.token, body: { status: 'PLANNED' } })
+  check(
+    '另一餐定下时也记留痕（不是只有今天晚餐那一次）',
+    plannedThen.status === 200 && plannedThen.body?.confirmedBy?.nickname === '妈妈',
+    `${plannedThen.status} confirmedBy=${JSON.stringify(plannedThen.body?.confirmedBy)}`,
+  )
+
   const canceled = await callWithRetry('POST', `/orders/meals/${cancelKey}/status`, { token: mama.token, body: { status: 'CANCELED' } })
   check(
     '掌勺人取消整餐 200',
     canceled.status === 200 && canceled.body?.status === 'CANCELED',
     `${canceled.status} status=${canceled.body?.status}`,
+  )
+  check(
+    '取消会清掉留痕：这一版菜单作废了，"谁定的"不再成立',
+    canceled.body?.confirmedBy === null && canceled.body?.confirmedAt === null,
+    `confirmedBy=${JSON.stringify(canceled.body?.confirmedBy)} confirmedAt=${canceled.body?.confirmedAt}`,
   )
 
   // 取消后反悔：必须还能重新点这一餐，否则一家人取消晚餐就再也点不了这一餐了
@@ -361,6 +393,11 @@ async function main() {
     '取消过的餐还能重新点菜，并自动复活成「待确认」',
     revived.status === 201 && revived.body?.mealKey === cancelKey && revived.body?.status === 'PENDING',
     `${revived.status} key=${revived.body?.mealKey} status=${revived.body?.status}`,
+  )
+  check(
+    '复活后留痕仍然是空的（菜单回到收集中，翻篇了）',
+    revived.body?.confirmedBy === null && revived.body?.confirmedAt === null,
+    `confirmedBy=${JSON.stringify(revived.body?.confirmedBy)} confirmedAt=${revived.body?.confirmedAt}`,
   )
   check(
     '复活后的餐里，取消动作带 needsConfirm=true（前端据此弹二次确认）',

@@ -41,6 +41,8 @@ model User {
   checkIns       CheckIn[]
   /// 这个账号组过的常用组合（M4 / F4-04）
   combos         Combo[]
+  /// 这个账号定下来的餐（M4 / F4-05 的确认留痕）
+  confirmedMeals MealOrder[]
 
   @@index([createdAt])
 }
@@ -173,6 +175,12 @@ model MealOrder {
   status    OrderStatus @default(PENDING)
   /// 就餐人数（M4 / F4-05）：含没点菜只吃饭的家人，由掌勺人/帮厨设定；null = 还没定
   dinerCount Int?
+  /// 谁把这一版菜单定下来的（M4 / F4-05 的"确认留痕"）+ 什么时候；null = 还在收集中。
+  /// 取消、或取消后重新加菜（整餐拉回 PENDING）时清空：上一版菜单不算数了，"谁定的"也没意义。
+  /// User 侧用 SetNull：人退出家庭/注销不该让这一餐查不出来。
+  confirmedById String?
+  confirmedBy   User?     @relation(fields: [confirmedById], references: [id], onDelete: SetNull)
+  confirmedAt   DateTime?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   items     OrderItem[]

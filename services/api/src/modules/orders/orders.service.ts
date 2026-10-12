@@ -5,7 +5,7 @@ import { publicImageUrl } from '../media/media.storage'
 import { PrismaService } from '../recipes/prisma.service'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
-  aggregateItems, canAddItem, dateKey, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
+  aggregateItems, canAddItem, confirmStampFor, dateKey, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
   parseItemTarget, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, revivedStatus,
   todayKey, todayMealState, visibleToMember,
   dayOptions, type AggregateItem, type ItemTarget, type MealProgressRow, type PlanDayRow,
@@ -51,6 +51,12 @@ export interface MealCardView {
   mineCount: number
   /** 掌勺人设定的就餐人数（M4 / F4-05）；null = 还没定 */
   dinerCount: number | null
+  /**
+   * 这一版菜单是谁定下来的（M4 / F4-05 的确认留痕）；null = 还在收集中，或这一版已被取消。
+   * 取消/取消后重新加菜会清空两人份（谁、何时）——上一版菜单不算数了。
+   */
+  confirmedBy: { nickname: string; avatar: string } | null
+  confirmedAt: string | null
   /** 这一餐的成品照张数（F9-08）。按视图范围算：看不到的照片不计入（见 cardFromRow 说明） */
   photoCount: number
   nextActions: { status: OrderStatus; label: string; needsConfirm: boolean }[]
@@ -63,6 +69,8 @@ type MealOrderRow = Prisma.MealOrderGetPayload<{ include: typeof MEAL_ORDER_INCL
 const MEAL_ORDER_INCLUDE = {
   items: { include: { user: true }, orderBy: { createdAt: 'asc' } },
   checkIns: { select: { userId: true } },
+  // 「谁定的这餐」要跟着卡片下发（列表里每张卡都可能带着它），只取显示要用的两个字段
+  confirmedBy: { select: { nickname: true, avatar: true } },
 } satisfies Prisma.MealOrderInclude
 
 @Injectable()
@@ -95,9 +103,13 @@ export class OrdersService {
       )
     }
 
-    // 被取消过的餐：加菜时顺带复活成「待确认」（见 orders.rules 的 canAddItem）
+    // 被取消过的餐：加菜时顺带复活成「待确认」（见 orders.rules 的 canAddItem）。
+    // 连带清掉上一版的确认留痕（M4 / F4-05）：菜单回到"收集中"，"谁定过"就不再成立。
     if (mealOrder.status !== revivedStatus(mealOrder.status)) {
-      await this.prisma.mealOrder.update({ where: { id: mealOrder.id }, data: { status: revivedStatus(mealOrder.status) } })
+      await this.prisma.mealOrder.update({
+        where: { id: mealOrder.id },
+        data: { status: revivedStatus(mealOrder.status), confirmedById: null, confirmedAt: null },
+      })
     }
 
     await this.prisma.orderItem.create({
@@ -191,7 +203,20 @@ export class OrdersService {
       throw new ForbiddenException('这个操作需要更高的家庭角色')
     }
 
-    await this.prisma.mealOrder.update({ where: { id: mealOrder.id }, data: { status: target } })
+    /*
+     * 确认留痕（M4 / F4-05）：定下这一版菜单时记「谁、什么时候」；取消时清掉（这一版作废了）；
+     * 开始做/做好了不动它（做的还是那一版菜单）。判据在 orders.rules 的 confirmStampFor，
+     * 服务层只负责把它翻成写入的字段值——三岔的判断不写在这里，单测才钉得住。
+     */
+    const stampFor = confirmStampFor(target)
+    const stamp =
+      stampFor === 'stamp'
+        ? { confirmedById: userId, confirmedAt: new Date() }
+        : stampFor === 'clear'
+          ? { confirmedById: null, confirmedAt: null }
+          : {}
+
+    await this.prisma.mealOrder.update({ where: { id: mealOrder.id }, data: { status: target, ...stamp } })
     return this.card(mealOrder.id, userId)
   }
 
@@ -415,6 +440,9 @@ export class OrdersService {
       })),
       mineCount: aggregated.mineCount,
       dinerCount: row.dinerCount,
+      // 确认留痕（M4 / F4-05）：走的是列表与单卡共用的 MEAL_ORDER_INCLUDE，所以每个视图都带得上
+      confirmedBy: row.confirmedBy,
+      confirmedAt: row.confirmedAt?.toISOString() ?? null,
       nextActions: nextActionsFor(role, row.status),
       submittedAt: row.createdAt.toISOString(),
     }
@@ -472,6 +500,9 @@ function emptyCard(mealDate: Date, meal: MealSlot): MealCardView {
     items: [],
     mineCount: 0,
     dinerCount: null,
+    // 卡都空了，留痕自然也没有（撤回最后一份菜会把整餐删掉，见 removeItem）
+    confirmedBy: null,
+    confirmedAt: null,
     photoCount: 0,
     nextActions: [],
     submittedAt: new Date().toISOString(),

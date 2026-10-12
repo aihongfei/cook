@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { useFamily } from '@/api/family'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
+import ConfirmMenuSheet from './components/ConfirmMenuSheet'
 import DinerCountSheet from './components/DinerCountSheet'
 import SaveComboSheet from './components/SaveComboSheet'
 import FreeDishSheet from './components/FreeDishSheet'
@@ -70,6 +71,13 @@ function formatSubmittedAt(iso: string): string {
   return `${pad(date.getMonth() + 1)} / ${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())} 提交`
 }
 
+/** 确认留痕显示用（M4 / F4-05）：到分钟就够，"谁几点定下的"不需要秒 */
+function formatConfirmedAt(iso: string): string {
+  const date = new Date(iso)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(date.getMonth() + 1)} / ${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 export default function OrderPage() {
   const location = useLocation()
   const family = useFamily()
@@ -77,6 +85,10 @@ export default function OrderPage() {
   const [filter, setFilter] = useState<string>('ALL')
   const [pending, setPending] = useState<PendingAction>(null)
   const [uploadMealKey, setUploadMealKey] = useState<string | null>(null)
+  // 正在定这一餐（M4 / F4-05）：null = 抽屉关着
+  const [confirmFor, setConfirmFor] = useState<MealCard | null>(null)
+  // 确认抽屉里点了「去定人数」：等它真的收起来再开人数抽屉（两个不叠着开）
+  const [openDinersAfterClose, setOpenDinersAfterClose] = useState(false)
   // 正在定人数的餐（M4 / F4-05）：null = 抽屉关着
   const [dinersFor, setDinersFor] = useState<MealCard | null>(null)
   // 「自己写一道」（F3-10）：每次打开 +1 用来给抽屉换 key（抽屉不在 effect 里清状态，靠重挂载拿回干净的一份）
@@ -142,6 +154,25 @@ export default function OrderPage() {
         onError: (error) => toast.error(apiErrorMessage(error)),
       },
     )
+  }
+
+  /**
+   * 卡片上的动作按钮。**只有"定这一餐"这一步先开汇总抽屉**（M4 / F4-05，D-030）：
+   * 它是唯一会让菜单上锁的动作，点下去之前该能看清整桌是什么；
+   * `开始做`/`做好了` 仍直接生效——厨房里干活的人不该被多问一句。
+   *
+   * 判据用 `status === 'PLANNED'`（目标状态），不是按钮文案：文案是给人看的，
+   * 后端改一个字不该让这里的行为跟着变（`nextActions` 里带着目标状态，本来就不用猜）。
+   */
+  const onAction = (card: MealCard, action: { status: OrderStatus; label: string; needsConfirm: boolean }) => {
+    if (action.status === 'PLANNED') {
+      setConfirmFor(card)
+      return
+    }
+    // 影响别人的动作（取消整餐）先问一句；其余正常推进直接生效
+    if (action.needsConfirm)
+      setPending({ kind: 'status', card, status: action.status, label: action.label })
+    else advance(card, action.status)
   }
 
   const dialog =
@@ -300,6 +331,14 @@ export default function OrderPage() {
               <span>{formatSubmittedAt(card.submittedAt)}</span>
             </div>
 
+            {/* 确认留痕（M4 / F4-05）：谁把这一版菜单定下来的。**纯信息，不是可点元素**——
+                它没有能做的事（要改状态走下面的动作按钮），做成按钮只会让人白点一次。 */}
+            {card.confirmedBy && card.confirmedAt && (
+              <p className="order-card__confirmed">
+                🔒 {card.confirmedBy.nickname} {formatConfirmedAt(card.confirmedAt)} 定下这餐
+              </p>
+            )}
+
             {/* 就餐人数（M4 / F4-05）：含没点菜只吃饭的家人，所以和"N 人点了"分开显示。
                 能到这一餐的人才看得到；没定就写"还没定"，别显示 0。 */}
             <button type="button" className="order-card__diners" onClick={() => setDinersFor(card)}>
@@ -344,17 +383,7 @@ export default function OrderPage() {
                       action.status === 'CANCELED' ? 'order-card__action--danger' : 'is-primary',
                     ].join(' ')}
                     disabled={updateStatus.isPending}
-                    onClick={() => {
-                      // 影响别人的动作（取消整餐）先问一句；正常推进（选好了/开始做/做好了）直接生效
-                      if (action.needsConfirm)
-                        setPending({
-                          kind: 'status',
-                          card,
-                          status: action.status,
-                          label: action.label,
-                        })
-                      else advance(card, action.status)
-                    }}
+                    onClick={() => onAction(card, action)}
                   >
                     {action.label}
                   </button>
@@ -374,6 +403,25 @@ export default function OrderPage() {
       )}
 
       {dinersFor && <DinerCountSheet card={dinersFor} onClose={() => setDinersFor(null)} />}
+
+      {/* 定这一餐的汇总视图（M4 / F4-05）。「去定人数」要等它**真的收起来**再开人数抽屉
+          （见下面 onClose 里的 openDinersAfterClose）：两个抽屉同时挂在屏幕上会叠成两层，
+          底下那层还在播退场动画，看起来像卡住了。 */}
+      {confirmFor && (
+        <ConfirmMenuSheet
+          key={confirmFor.mealKey}
+          card={confirmFor}
+          onClose={() => {
+            const card = confirmFor
+            setConfirmFor(null)
+            if (openDinersAfterClose) {
+              setOpenDinersAfterClose(false)
+              setDinersFor(card)
+            }
+          }}
+          onAdjustDiners={() => setOpenDinersAfterClose(true)}
+        />
+      )}
 
       {comboFor && (
         <SaveComboSheet

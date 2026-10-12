@@ -93,6 +93,23 @@ export function revivedStatus(status: OrderStatus): OrderStatus {
   return status === 'CANCELED' ? 'PENDING' : status
 }
 
+/**
+ * 迁到 `target` 时，上一版的**确认留痕**（谁把菜单定下来的）该怎么处理（M4 / F4-05）。
+ *
+ * 三种情况，判据只有一条：**这一版菜单还算不算数**。
+ * - `keep`   开始做/做好了：做的还是那一版菜单，留痕不动；
+ * - `stamp`  定菜单（PLANNED）：记上"我、现在"；
+ * - `clear`  取消：这一版作废了，"谁定过"不再成立——留着会让人以为现在还是他定的那一版。
+ *
+ * 抽成纯规则是为了能在单测里钉住这条判据（不用起 MySQL），也免得服务层写成
+ * `target === 'PLANNED' ? ... : target === 'CANCELED' ? ... : {}` 那种一行三岔的嵌套。
+ */
+export function confirmStampFor(target: OrderStatus): 'keep' | 'stamp' | 'clear' {
+  if (target === 'PLANNED') return 'stamp'
+  if (target === 'CANCELED') return 'clear'
+  return 'keep'
+}
+
 /** 我在这个状态下能做哪几步（后端算好给前端，前端不硬编码状态机） */
 export function nextActionsFor(
   role: FamilyRole,

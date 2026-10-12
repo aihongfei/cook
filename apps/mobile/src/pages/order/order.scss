@@ -245,7 +245,7 @@
   border-radius: 12px;
 }
 
-/* 就餐人数（M4 / F4-05）：一行文字按钮，不抢流转按钮的注意力 */
+/* 「存成常用组合」（M4 / F4-04）：一行文字按钮，不抢流转按钮的注意力 */
 .order-card__combo {
   display: block;
   padding: 7px 0 0;
@@ -277,6 +277,130 @@
 
   &:active {
     opacity: 0.7;
+  }
+}
+
+/* 确认留痕（M4 / F4-05）：「🔒 妈妈 10 / 12 15:20 定下这餐」。
+   纯信息，不是按钮——所以没有 :active、没有下划线，颜色也比正文淡一档。 */
+.order-card__confirmed {
+  margin: 7px 0 0;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+/* ---- 确认菜单抽屉（M4 / F4-05）---- */
+.confirm-menu__head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: #6e3a1c;
+}
+
+.confirm-menu__count {
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+/* 整桌菜一屏看完：一道一行，份数挨着菜名，备注缩进挂在菜下面 */
+.confirm-menu__dishes {
+  max-height: 42vh;
+  padding: 2px 0;
+  overflow-y: auto;
+}
+
+.confirm-menu__dish + .confirm-menu__dish {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--color-line);
+}
+
+.confirm-menu__dish-name {
+  font-size: 13.5px;
+  color: var(--color-ink);
+}
+
+.confirm-menu__times {
+  margin-left: 4px;
+  color: var(--color-brand);
+}
+
+.confirm-menu__note {
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-3);
+}
+
+.confirm-menu__who {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+/* 人数行：可点（去定/改），所以给描边——与卡片上那行纯文字的"就餐人数"不同，
+   这一屏里它是个真入口（D-030 第 2 条：汇总视图里能当场改）。 */
+.confirm-menu__diners {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 9px 12px;
+  margin-top: 12px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+  text-align: left;
+  cursor: pointer;
+  background: var(--color-cream-2);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+
+  &:active {
+    transform: scale(0.99);
+  }
+}
+
+.confirm-menu__diners-go {
+  font-size: 11.5px;
+  color: #c4652a;
+}
+
+/* 锁单说明：定完之后"要加菜先取消"是这一功能的真实代价，不能藏在按钮背后 */
+.confirm-menu__hint {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.confirm-menu__submit {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.confirm-menu__cancel {
+  display: block;
+  width: 100%;
+  padding: 10px 0 2px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+  background: none;
+  border: 0;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirm-menu__diners:active {
+    transform: none;
   }
 }
 

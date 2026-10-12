@@ -66,6 +66,12 @@ export interface MealCard {
   mineCount: number
   /** 掌勺人设定的就餐人数（M4 / F4-05）；null = 还没定 */
   dinerCount: number | null
+  /**
+   * 这一版菜单是谁定下来的（M4 / F4-05 的确认留痕）；null = 还在收集中，或这一版已被取消。
+   * 取消、取消后重新加菜都会清空——上一版菜单不算数了，"谁定的"也就不成立。
+   */
+  confirmedBy: { nickname: string; avatar: string } | null
+  confirmedAt: string | null
   /** 这一餐的成品照张数（F9-08）；按可见范围算，看不到的不计入 */
   photoCount: number
   nextActions: NextAction[]

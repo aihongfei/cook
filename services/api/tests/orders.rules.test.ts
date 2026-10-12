@@ -13,6 +13,7 @@ import {
   STATUS_LABEL,
   aggregateItems,
   canAddItem,
+  confirmStampFor,
   dayOptions,
   dayWindow,
   dateKey,
@@ -386,4 +387,24 @@ test('今日安排的行状态：没点菜单独一类，已做好/已取消归�
   assert.equal(todayMealState('COOKING'), 'open')
   assert.equal(todayMealState('DONE'), 'settled')
   assert.equal(todayMealState('CANCELED'), 'settled', '取消了就不再引导（那是用户自己的决定）')
+})
+
+// ---------- 确认菜单的留痕（M4 / F4-05，口径见 D-030） ----------
+
+/*
+ * 判据只有一条：**这一版菜单还算不算数**。
+ * 抽成纯规则是为了在这里钉住它——服务层那三岔写在 MySQL 里，改错了要跑接口才看得出来。
+ */
+test('定菜单才记留痕：开始做/做好了都不动它（做的还是那一版菜单）', () => {
+  assert.equal(confirmStampFor('PLANNED'), 'stamp', '定下这一版 → 记"谁、何时"')
+  assert.equal(confirmStampFor('COOKING'), 'keep', '开始做：菜单没变，留痕还得在')
+  assert.equal(confirmStampFor('DONE'), 'keep', '做好了：还是那一版菜单')
+  assert.equal(confirmStampFor('CANCELED'), 'clear', '取消了：这一版作废，"谁定的"不再成立')
+})
+
+test('回到待确认（取消后重新加菜）也要清留痕——菜单重开，上一版就翻篇了', () => {
+  // 复活路径在 addItem 里（`revivedStatus(status) !== status` 时清 confirmedById/At），
+  // 这里钉住"它确实会走到 PENDING"这一半；写库那一半由接口验收覆盖（R-024）。
+  assert.equal(revivedStatus('CANCELED'), 'PENDING')
+  assert.equal(confirmStampFor('PENDING'), 'keep', 'PENDING 不经过状态接口（状态机没有回退），清留痕由 addItem 负责')
 })

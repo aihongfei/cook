@@ -256,21 +256,124 @@ it('吃货的点单：后端没给 nextActions 就一个流转按钮都不显示
   expect(screen.getByRole('button', { name: '撤回我这份' })).toBeTruthy()
 })
 
-it('正常推进不打扰用户：点「选好了」直接请求，不弹确认', async () => {
+/*
+ * 定菜单先过汇总视图（M4 / F4-05，口径见 D-030）。
+ *
+ * 原来的行为是点「选好了」直接写库——而它是唯一会让菜单上锁的动作（定完想加菜得先取消）。
+ * 现在改成：先开确认抽屉（不请求）→ 看过整桌菜、按「就这些，定了」才真的定。
+ * 这条同时把"不许提前写库"钉住：只点「选好了」就必须一个请求都没有。
+ */
+it('点「选好了」先开汇总视图，不直接写库（定完就锁单，该看一眼再定）', async () => {
   mockGet({ boards: { family: boardFixture() } })
-  const post = vi
-    .spyOn(apiClient, 'post')
-    .mockResolvedValue({ data: cardFixture({ status: 'PLANNED', statusLabel: '已安排' }) } as never)
+  const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: cardFixture({ status: 'PLANNED' }) } as never)
   renderOrder()
 
   fireEvent.click(await screen.findByRole('button', { name: '选好了' }))
+
+  // 抽屉开了：看得到整桌菜（含随菜备注）、几个人点了，并说明定完会锁上
+  expect(await screen.findByText('定下这一餐')).toBeTruthy()
+  // 备注与人数在卡片上也有一份，所以断言要**限定在抽屉里**（不限定会命中两个元素）
+  const sheet = within(document.querySelector('.sheet__body') as HTMLElement)
+  expect(sheet.getByText('共 2 道')).toBeTruthy()
+  expect(sheet.getByText('妈妈：少放盐')).toBeTruthy()
+  expect(sheet.getByText(/定下来之后菜单就锁上了/)).toBeTruthy()
+  expect(post).not.toHaveBeenCalled()
+
+  // 到这一步才真的定
+  fireEvent.click(screen.getByRole('button', { name: '就这些，定了' }))
   await waitFor(() =>
     expect(post).toHaveBeenCalledWith('/orders/meals/2026-10-13-DINNER/status', {
       status: 'PLANNED',
     }),
   )
+  expect(await screen.findByText('这一餐定了')).toBeTruthy()
+})
+
+it('汇总视图里能看到人数并当场去定：人数没定不拦着定菜单', async () => {
+  mockGet({ boards: { family: boardFixture([cardFixture({ dinerCount: null })]) } })
+  renderOrder()
+
+  fireEvent.click(await screen.findByRole('button', { name: '选好了' }))
+  await screen.findByText('定下这一餐')
+  // 人数行同样在卡片上有一份，所以限定在抽屉里取
+  const sheet = within(document.querySelector('.sheet__body') as HTMLElement)
+  const dinersRow = sheet.getByRole('button', { name: /还没定几个人吃/ })
+  // 没定人数也允许定菜单（拦住只会逼出一个随手填的假数字）：提交键可用
+  expect(sheet.getByRole('button', { name: '就这些，定了' }).hasAttribute('disabled')).toBe(false)
+
+  // 点那一行去定人数：确认抽屉收起后人数抽屉接着开（不叠着开）
+  fireEvent.click(dinersRow)
+  expect(await screen.findByText('定几个人吃')).toBeTruthy()
+})
+
+it('开始做/做好了仍是直接生效，不给厨房里的人多问一句', async () => {
+  // 口径 D-030 第 1 条：只有"上锁"那一步过汇总视图
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({
+          status: 'PLANNED',
+          statusLabel: '已安排',
+          nextActions: [{ status: 'COOKING', label: '开始做', needsConfirm: false }],
+        }),
+      ]),
+    },
+  })
+  const post = vi
+    .spyOn(apiClient, 'post')
+    .mockResolvedValue({ data: cardFixture({ status: 'COOKING', statusLabel: '准备中' }) } as never)
+  renderOrder()
+
+  fireEvent.click(await screen.findByRole('button', { name: '开始做' }))
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith('/orders/meals/2026-10-13-DINNER/status', { status: 'COOKING' }),
+  )
+  // 没有汇总抽屉掺和进来
+  expect(screen.queryByText('定下这一餐')).toBeNull()
+})
+
+it('卡片显示确认留痕：谁把这一版菜单定下来的（纯信息，不是按钮）', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({
+          status: 'PLANNED',
+          statusLabel: '已安排',
+          confirmedBy: { nickname: '妈妈', avatar: '🍳' },
+          confirmedAt: new Date(2026, 9, 12, 15, 20).toISOString(),
+        }),
+      ]),
+    },
+  })
+  renderOrder()
+
+  const trace = await screen.findByText(/定下这餐/)
+  expect(trace.textContent).toContain('妈妈')
+  expect(trace.textContent).toContain('10 / 12 15:20')
+  expect(trace.tagName).toBe('P')
+})
+
+it('还在收集中的那一餐不显示留痕（没有"谁定的"这回事）', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ status: 'PENDING', confirmedBy: null, confirmedAt: null }),
+      ]),
+    },
+  })
+  renderOrder()
+
+  expect(await screen.findByText('2026-10-13 · 晚餐')).toBeTruthy()
+  expect(screen.queryByText(/定下这餐/)).toBeNull()
+})
+
+it('正常推进不打扰用户：点「选好了」不弹确认对话框（那是取消整餐才有的事）', async () => {
+  mockGet({ boards: { family: boardFixture() } })
+  renderOrder()
+
+  fireEvent.click(await screen.findByRole('button', { name: '选好了' }))
+  expect(await screen.findByText('定下这一餐')).toBeTruthy()
   expect(screen.queryByRole('dialog')).toBeNull()
-  expect(await screen.findByText('这餐：已安排')).toBeTruthy()
 })
 
 it('取消整餐要二次确认：取消不请求，确认才发（且文案说清"之后能重新点"）', async () => {

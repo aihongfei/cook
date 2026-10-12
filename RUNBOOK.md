@@ -1020,3 +1020,65 @@ pnpm --dir apps/mobile run lint                 # 6 条警告（与改动前一�
 
 1. 后端 `planAdd` 无视已有的、全都要加 → 单测 `not ok 51 一键加入跳过已经有的菜`；接口验收 4 条红，实测**库里 dishCount=7**（`【桂圆银耳羹】 ×3`…）——正是"点一次得到双份"的样子；
 2. 前端把用户选的餐次写死成 `DINNER` → `expected { mealDate: '2026-10-13', …(1) } to deeply equal …`。
+
+---
+
+## R-024 确认菜单（F4-05）：先看汇总再定，定完留"谁定的"（D-030）（✅ 已验证，2026-10-12）
+
+**改了哪些地方**：`MealOrder` 加 `confirmedById` / `confirmedAt`（迁移 `20261012151637_meal_confirm`，`User` 侧 `SET NULL`）；`orders.rules` 新增 `confirmStampFor`；`orders.service` 在流转与"取消后复活"两处按它写/清留痕，卡片下发 `confirmedBy` / `confirmedAt`；点单页「选好了」不再直接写库，改为开 `ConfirmMenuSheet`（整桌菜 + 份数 + 随菜备注 + 人数入口 + 锁单说明），按「就这些，定了」才真的定；卡片显示「🔒 妈妈 10 / 12 15:20 定下这餐」。
+
+### 怎么验
+
+```bash
+# 单测（不需要 MySQL 与真模型）
+pnpm --dir services/api test                    # 113/113（留痕规则 +2）
+pnpm --dir apps/mobile test                     # 219/219（汇总视图与留痕 +6）
+
+# 类型与 Lint
+pnpm --dir services/api exec tsc --noEmit       # exit=0
+pnpm --dir apps/mobile exec tsc --noEmit        # exit=0
+pnpm --dir apps/mobile run lint                 # 6 条警告（与改动前一致）
+
+# 接口（真请求，需要 docker compose 的 api）
+docker compose up -d --build api
+pnpm --dir services/api run test:http:orders    # 97/97（留痕 +6）
+pnpm --dir services/api run test:http:combos    # 28/28（回归）
+pnpm --dir services/api run test:http:checkins  # 44/44（回归）
+```
+
+### 实测结果（2026-10-12）
+
+| 项 | 结果 |
+| --- | --- |
+| 定菜单记留痕 | `POST .../status {PLANNED}` → `confirmedBy={nickname:"妈妈",avatar:"🐰"}`、`confirmedAt` 是当下的 ISO 时间 |
+| 开始做/做好了不动它 | `COOKING` / `DONE` 两次流转后 `confirmedAt` 与定菜单那一刻**逐字节相同**（做的还是那一版菜单） |
+| 取消清留痕 | `CANCELED` → `confirmedBy=null`、`confirmedAt=null`（这一版作废了） |
+| 取消后复活 | 重新加菜 → 整餐回 `PENDING`，留痕**仍是空的**（与取消各清一次，两条路都堵上） |
+| 锁单仍然生效 | 已安排的餐再加菜 409「这餐已经「已安排」了，想加菜先取消这餐」 |
+| 浏览器（390×844） | 卡片点「选好了」→ 抽屉滑上来（**没有请求发出**）→ 看到「共 1 道 / 【桂圆银耳羹】/ 动效验收 点的 · 1 人点了 / 还没定几个人吃 去定」+ 锁单说明 → 点「去定人数」→ 确认抽屉收起、人数抽屉接着开（屏幕上**同时只有一层** `sheet__body`）→ 加 1 人保存（toast「这餐按 2 人算」）→ 回到卡片看到「2 人吃（1 人点了） · 改」→ 再点「选好了」→ 汇总里显示「2 人吃 改」→「就这些，定了」→ toast「这一餐定了」、卡片变「已安排」并出现「🔒 动效验收 10 / 12 23:44 定下这餐」、动作变成「开始做 / 取消这餐」→ 取消这一餐后**留痕整行消失**、抽屉与遮罩都已卸载、`body.overflow` 复原 |
+
+> 验收期间开发库里改动：2026-10-18 午餐被取消、2026-10-16 晚餐被定下并设为 2 人吃。不想要的话在点菜页取消/撤掉即可。
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| `Found multiple elements with the text: 妈妈：少放盐` | 备注在**卡片上**和**汇总抽屉里**各有一份（这是对的，抽屉就是让人在定之前重看一遍） | 断言限定在抽屉里取：`within(document.querySelector('.sheet__body'))` |
+| 老用例「点「选好了」直接请求」红了 | 它断言的是**改动前的行为**（直接写库），不是 bug | 改写成新契约的用例，并**显式断言"只点「选好了」时一个请求都没有"**——把"不许提前写库"钉住 |
+| AI 接口验收 17/19（问 AI 500、建议卡空） | **与本轮改动无关**（未碰 `modules/ai/**`），是上游偶发要求回传 `reasoning_content`；**同一条命令紧接着再跑一次 19/19 全绿** | 单独记进 `RISKS.md` **R-23**（含两次跑的对照表）；不当成本次回归失败，但也不当噪音放过 |
+| `python replace` 反证又没落盘 | 老问题：脚本里的缩进/引号没对上，替换静默失败 | 两次反证都先在写完后 `grep 反证` 确认落盘，再跑测试 |
+| 反证 2 只红了 1 条接口断言 | 取消与"取消后复活"**是两条清留痕的路**：把取消那条改坏，复活那条仍会把留痕清掉 | 这正是两条路都存在的好处；单测（`confirmStampFor`）与接口断言各钉一条，反证时一起变红 |
+
+### 回归测试
+
+**后端 `tests/orders.rules.test.ts`（新增 2 条）**：`confirmStampFor` 的四态（定菜单 `stamp` / 开始做与做好了 `keep` / 取消 `clear`）；复活路径与 PENDING 不经过状态接口的分工。
+
+**后端 `scripts/verify-orders-http.cjs`（新增 6 条）**：定菜单记下谁与何时；`COOKING` 后 `confirmedAt` 不变；`DONE` 后留痕仍在；另一餐定下也留痕；取消后两人份清空；复活后仍为空。
+
+**前端 `pages/order/order.test.tsx`（改 1 条 + 新增 5 条）**：只点「选好了」不发请求、抽屉内容与锁单说明、按「就这些，定了」才发 `PLANNED`；人数行显示与「去定人数」交接（确认抽屉收起后人数抽屉接着开）；`COOKING` 不走汇总视图直接生效；卡片显示留痕且**是 `<p>` 不是按钮**；收集中的那餐不显示留痕；开汇总抽屉时不弹确认对话框。
+
+**反证 3 组都验过会红**：
+
+1. `confirmStampFor` 里把 `PLANNED → stamp` 改成 `keep` → 单测 `not ok 99`，接口 93/97（4 条留痕断言红，`confirmedBy=null`）；
+2. 把 `CANCELED → clear` 改成 `keep` → 单测 `not ok 99`，接口 96/97（「取消会清掉留痕」红、`confirmedBy={"nickname":"妈妈",…}` 还在）；
+3. 前端 `onAction` 里跳过汇总视图（`if (false && action.status === 'PLANNED')`）→ 3 条前端用例红（「先开汇总视图，不直接写库」「汇总视图里…去定」「不弹确认对话框」）。
