@@ -297,6 +297,38 @@ export function parseSlot(raw: unknown): MealSlot {
   return raw
 }
 
+/**
+ * 自由菜品（F3-10）：菜谱库里没有的菜，直接写个名字点进点单。
+ *
+ * 名字上限 30 字：够写「外婆的糖醋小排」这种家常叫法，又不至于把点单卡撑爆
+ * （想多交代的走备注，那里有 120 字）。
+ */
+export const FREE_DISH_NAME_MAX = 30
+
+export function parseDishName(raw: unknown): string {
+  if (typeof raw !== 'string') throw new BadRequestException('菜名要写成文字')
+  const name = raw.trim()
+  if (!name) throw new BadRequestException('菜名不能为空')
+  if (name.length > FREE_DISH_NAME_MAX) throw new BadRequestException(`菜名最多 ${FREE_DISH_NAME_MAX} 个字`)
+  return name
+}
+
+/**
+ * 点单的目标：**要么**点菜谱库里的一道（`recipeId`），**要么**自己写一个（`dishName`）。
+ * 两个都给会被拒：静默挑一个会把用户的意图藏起来，出错也查不出来。
+ */
+export type ItemTarget = { kind: 'recipe'; recipeId: string } | { kind: 'dish'; dishName: string }
+
+export function parseItemTarget(input: { recipeId?: unknown; dishName?: unknown }): ItemTarget {
+  const hasRecipe = typeof input.recipeId === 'string' && input.recipeId.trim() !== ''
+  // 「给了值」= 非 null/undefined；空串与纯空白交给 parseDishName 报「菜名不能为空」，文案更贴切
+  const providedDish = input.dishName !== undefined && input.dishName !== null
+  if (hasRecipe && providedDish) throw new BadRequestException('一次加一道：要么点菜谱里的，要么自己写一个')
+  if (hasRecipe) return { kind: 'recipe', recipeId: (input.recipeId as string).trim() }
+  if (providedDish) return { kind: 'dish', dishName: parseDishName(input.dishName) }
+  throw new BadRequestException('要么点菜谱里的菜，要么自己写一个菜名')
+}
+
 export function parseStatus(raw: unknown): OrderStatus {
   if (typeof raw !== 'string' || !(raw in STATUS_LABEL)) throw new BadRequestException('状态不对')
   return raw as OrderStatus

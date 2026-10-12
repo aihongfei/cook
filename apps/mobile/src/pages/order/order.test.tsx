@@ -432,7 +432,34 @@ it('一单都没有时给空态与点菜引导', async () => {
   renderOrder()
 
   expect(await screen.findByText('还没有人点菜')).toBeTruthy()
-  expect(screen.getByText('翻到想吃的菜，点「想吃这道」，家里人就能看到。')).toBeTruthy()
+  // 空态要把两条路都说出来：去菜谱挑，或者自己写一道（F3-10）
+  expect(screen.getByText(/点「想吃这道」/)).toBeTruthy()
+  expect(screen.getByText(/也可以自己写一道/)).toBeTruthy()
+})
+
+it('点菜单上有「自己写一道」入口，点开是填写抽屉（F3-10）', async () => {
+  mockGet({
+    boards: {
+      family: {
+        cards: [],
+        counts: { ALL: 0, PENDING: 0, PLANNED: 0, COOKING: 0, DONE: 0, CANCELED: 0 },
+        scope: 'family',
+      },
+    },
+  })
+  renderOrder()
+
+  // 入口与空态同时在（空态是"没有单子"，入口是"加点什么"，两者不互相替代）
+  fireEvent.click(await screen.findByRole('button', { name: /自己写一道/ }))
+  expect(await screen.findByPlaceholderText('如：外婆的糖醋小排')).toBeTruthy()
+})
+
+it('还没加入家庭时不显示「自己写一道」（点菜是家庭内的协作）', async () => {
+  mockGet({ family: null, boards: {} })
+  renderOrder()
+
+  await screen.findByText('点菜单是给家里人一起用的。')
+  expect(screen.queryByRole('button', { name: /自己写一道/ })).toBeNull()
 })
 
 it('还没加入家庭时给引导，不请求点单接口', async () => {

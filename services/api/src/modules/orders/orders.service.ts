@@ -6,9 +6,9 @@ import { PrismaService } from '../recipes/prisma.service'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
   aggregateItems, canAddItem, dateKey, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
-  parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, revivedStatus, todayKey,
-  todayMealState, visibleToMember,
-  dayOptions, type AggregateItem, type MealProgressRow, type PlanDayRow,
+  parseItemTarget, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, revivedStatus,
+  todayKey, todayMealState, visibleToMember,
+  dayOptions, type AggregateItem, type ItemTarget, type MealProgressRow, type PlanDayRow,
 } from './orders.rules'
 
 /**
@@ -70,22 +70,20 @@ export class OrdersService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * 点菜（`order.create`，人人可点）。
+   * 点菜（`order.create`，人人可点）：点菜谱里的，或者自己写一道（F3-10）。
    * 同一餐已有就复用；**已安排之后不能再加菜**（要加先取消这餐，D-022）。
    */
   async addItem(
     userId: string,
-    input: { recipeId?: string; mealDate?: string; meal?: string; note?: string },
+    input: { recipeId?: string; dishName?: string; mealDate?: string; meal?: string; note?: string },
   ): Promise<MealCardView> {
     const { familyId } = await this.requireCapability(userId, CAPABILITIES.ORDER_CREATE)
 
     const slot = parseSlot(input.meal)
     const mealDate = parseMealDate(input.mealDate)
     const note = parseNote(input.note)
-
-    if (typeof input.recipeId !== 'string' || !input.recipeId.trim()) throw new BadRequestException('缺少菜谱')
-    const recipe = await this.prisma.recipe.findUnique({ where: { id: input.recipeId.trim() } })
-    if (!recipe) throw new NotFoundException('这道菜不在菜谱库里')
+    const target = parseItemTarget(input)
+    const item = await this.resolveItem(target)
 
     const mealOrder = await this.ensureMealOrder(familyId, mealDate, slot)
     if (!canAddItem(mealOrder.status)) {
@@ -103,17 +101,32 @@ export class OrdersService {
     }
 
     await this.prisma.orderItem.create({
-      data: {
-        mealOrderId: mealOrder.id,
-        userId,
-        recipeId: recipe.id,
-        recipeName: recipe.name,
-        // 冗余存一份自托管地址：菜谱日后被删/换图，历史点单卡仍显示得出来
-        recipeImage: publicImageUrl(recipe.imageKey, recipe.image),
-        note,
-      },
+      data: { mealOrderId: mealOrder.id, userId, ...item, note },
     })
     return this.card(mealOrder.id, userId)
+  }
+
+  /**
+   * 点单条目落库要用的三个字段（菜名与图片是**冗余快照**：菜谱日后被删/换图，历史点单卡仍显示得出来）。
+   *
+   * 自由菜品（F3-10）在这里做一件"顺手但重要"的事：**菜名与库里某道菜完全同名时挂到那道菜上**——
+   * 不然同一道菜会分成两行（库里点的一条 + 自己写的一条），看起来像 bug。
+   * 只在完全同名（去首尾空格后）时挂接，宁可不猜，不做模糊匹配。
+   */
+  private async resolveItem(
+    target: ItemTarget,
+  ): Promise<{ recipeId: string | null; recipeName: string; recipeImage: string | null }> {
+    if (target.kind === 'recipe') {
+      const recipe = await this.prisma.recipe.findUnique({ where: { id: target.recipeId } })
+      if (!recipe) throw new NotFoundException('这道菜不在菜谱库里')
+      return { recipeId: recipe.id, recipeName: recipe.name, recipeImage: publicImageUrl(recipe.imageKey, recipe.image) }
+    }
+
+    // 重名菜谱理论上可能有多条：按 id 排序取第一条，保证每次挂到同一道，合并结果稳定
+    const matched = await this.prisma.recipe.findFirst({ where: { name: target.dishName }, orderBy: { id: 'asc' } })
+    return matched
+      ? { recipeId: matched.id, recipeName: matched.name, recipeImage: publicImageUrl(matched.imageKey, matched.image) }
+      : { recipeId: null, recipeName: target.dishName, recipeImage: null }
   }
 
   /**

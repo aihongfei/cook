@@ -23,6 +23,8 @@ import {
   parseMealDate,
   parseMealKey,
   parseNote,
+  parseDishName,
+  parseItemTarget,
   parsePlanDays,
   parseSlot,
   parseStatus,
@@ -30,6 +32,7 @@ import {
   photoVisibleTo,
   todayMealState,
   DINER_COUNT_MAX,
+  FREE_DISH_NAME_MAX,
   ORDER_DAY_SPAN,
   revivedStatus,
   visibleToMember,
@@ -166,6 +169,34 @@ test('看几天：默认 3 天、上限 7 天，非法值直接拒', () => {
   for (const bad of ['0', '-1', '8', '2.5', 'abc']) {
     assert.throws(() => parsePlanDays(bad), BadRequestException, `${bad} 应被拒`)
   }
+})
+
+// ---------- 自由菜品（F3-10） ----------
+
+test('加菜目标二选一：菜谱 id 或自写菜名，两个都给要拒', () => {
+  assert.deepEqual(parseItemTarget({ recipeId: 'r1' }), { kind: 'recipe', recipeId: 'r1' })
+  assert.deepEqual(parseItemTarget({ recipeId: '  r1  ' }), { kind: 'recipe', recipeId: 'r1' }, 'id 去首尾空格')
+  assert.deepEqual(parseItemTarget({ dishName: '外婆的红烧肉' }), { kind: 'dish', dishName: '外婆的红烧肉' })
+  assert.deepEqual(parseItemTarget({ dishName: '  外婆的红烧肉  ' }), { kind: 'dish', dishName: '外婆的红烧肉' }, '菜名去首尾空格')
+  // 两个都给：静默挑一个会把用户的意图藏起来
+  assert.throws(() => parseItemTarget({ recipeId: 'r1', dishName: '红烧肉' }), BadRequestException)
+  // 都不给
+  assert.throws(() => parseItemTarget({}), BadRequestException)
+  assert.throws(() => parseItemTarget({ recipeId: '', dishName: null }), BadRequestException)
+})
+
+test('自写菜名：必须是文字、不能空、上限 30 字', () => {
+  assert.equal(parseDishName('蛋炒饭'), '蛋炒饭')
+  assert.equal(FREE_DISH_NAME_MAX, 30)
+  assert.equal(parseDishName('好'.repeat(30)).length, 30, '刚好 30 字要放行')
+  for (const bad of ['', '   ', '好'.repeat(31)]) {
+    assert.throws(() => parseDishName(bad), BadRequestException, `${JSON.stringify(bad)} 应被拒`)
+  }
+  for (const bad of [undefined, null, 123, {}]) {
+    assert.throws(() => parseDishName(bad), BadRequestException, `${String(bad)} 应被拒`)
+  }
+  // 只有空白字符串时走 dish 分支报"菜名不能为空"，而不是报"两个都没给"——文案要贴用户实际做的事
+  assert.throws(() => parseItemTarget({ recipeId: '', dishName: '  ' }), /菜名不能为空/)
 })
 
 test('餐次只认午餐与晚餐', () => {

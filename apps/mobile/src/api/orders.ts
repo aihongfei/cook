@@ -164,7 +164,10 @@ export async function fetchOrderOptions(): Promise<OrderOptions> {
 }
 
 export async function addOrderItem(input: {
-  recipeId: string
+  /** 点菜谱里的菜（与 dishName 二选一） */
+  recipeId?: string
+  /** 自己写一道（F3-10，与 recipeId 二选一）；名字与库里某道菜完全同名时会挂到那道菜上 */
+  dishName?: string
   mealDate: string
   meal: MealSlot
   note?: string

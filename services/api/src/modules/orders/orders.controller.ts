@@ -3,7 +3,7 @@ import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { CurrentUserId, JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { OrdersService } from './orders.service'
 
-interface AddItemBody { recipeId?: string; mealDate?: string; meal?: string; note?: string }
+interface AddItemBody { recipeId?: string; dishName?: string; mealDate?: string; meal?: string; note?: string }
 interface StatusBody { status?: string }
 interface DinersBody { dinerCount?: number | null }
 
@@ -52,7 +52,7 @@ export class OrdersController {
 
   @Post('items')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: '点菜（需 order.create；已安排的餐不能再加）（F3-01/05）' })
+  @ApiOperation({ summary: '点菜：点菜谱里的（recipeId）或自己写一道（dishName），二选一（F3-01/05、F3-10）' })
   async addItem(@CurrentUserId() userId: string, @Body() body: AddItemBody) {
     return this.orders.addItem(userId, body ?? {})
   }

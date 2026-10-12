@@ -23,6 +23,50 @@
 
 /* 各状态的戳色已提到 components/ui/ui.scss（本周菜单也要用同一套，不能各写一份） */
 
+/* 「自己写一道」入口（F3-10）：菜谱库里没有的菜也能点 */
+.order-freedish {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: calc(100% - var(--spacing-page) * 2);
+  margin: 12px var(--spacing-page) 0;
+  padding: 11px 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1.5px dashed #de9057;
+  border-radius: var(--radius-card);
+}
+
+.order-freedish:active {
+  opacity: 0.7;
+}
+
+.order-freedish__icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+}
+
+.order-freedish__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: #6e3a1c;
+}
+
+.order-freedish__text small {
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.order-freedish__arrow {
+  flex: 0 0 auto;
+  color: #c7a97e;
+}
+
 /* 一道菜一行：菜名 + 备注 + 撤回入口 */
 .order-card__dish {
   display: flex;

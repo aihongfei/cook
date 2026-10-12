@@ -4,6 +4,7 @@ import { apiErrorMessage } from '@/api/client'
 import { useFamily } from '@/api/family'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import DinerCountSheet from './components/DinerCountSheet'
+import FreeDishSheet from './components/FreeDishSheet'
 import {
   useOrders,
   useRemoveOrderItem,
@@ -63,6 +64,13 @@ export default function OrderPage() {
   const [uploadMealKey, setUploadMealKey] = useState<string | null>(null)
   // 正在定人数的餐（M4 / F4-05）：null = 抽屉关着
   const [dinersFor, setDinersFor] = useState<MealCard | null>(null)
+  // 「自己写一道」（F3-10）：每次打开 +1 用来给抽屉换 key（抽屉不在 effect 里清状态，靠重挂载拿回干净的一份）
+  const [freeDishOpen, setFreeDishOpen] = useState(false)
+  const [freeDishSeq, setFreeDishSeq] = useState(0)
+  const openFreeDish = () => {
+    setFreeDishSeq((value) => value + 1)
+    setFreeDishOpen(true)
+  }
 
   // 没加入家庭就别请求点单接口（后端会 404）：等 family 查询回来再决定
   const orders = useOrders(scope, filter, { enabled: Boolean(family.data) })
@@ -169,6 +177,19 @@ export default function OrderPage() {
 
         {family.data && orders.data && <Chips items={chips} value={filter} onChange={setFilter} />}
 
+        {/* 自己写一道（F3-10）：菜谱库里没有的菜（家里自己常做的、今天就想吃的）也能点。
+            放在筛选之下、卡片之上：它是"加点什么"的动作，与浏览已有单子不是一回事。 */}
+        {family.data && (
+          <button type="button" className="order-freedish" onClick={openFreeDish}>
+            <span className="order-freedish__icon">✍️</span>
+            <span className="order-freedish__text">
+              自己写一道
+              <small>菜谱库里没有的菜，写个名字就能点</small>
+            </span>
+            <span className="order-freedish__arrow">›</span>
+          </button>
+        )}
+
         {!family.isPending && !family.data && (
           <div className="order-empty">
             <p>点菜单是给家里人一起用的。</p>
@@ -200,7 +221,9 @@ export default function OrderPage() {
           <EmptyState
             title={filter === 'ALL' ? '还没有人点菜' : '这个状态下没有点单'}
             desc={
-              filter === 'ALL' ? '翻到想吃的菜，点「想吃这道」，家里人就能看到。' : '换个状态看看。'
+              filter === 'ALL'
+                ? '翻到想吃的菜，点「想吃这道」，家里人就能看到；也可以自己写一道。'
+                : '换个状态看看。'
             }
           />
         )}
@@ -327,6 +350,11 @@ export default function OrderPage() {
       )}
 
       {dinersFor && <DinerCountSheet card={dinersFor} onClose={() => setDinersFor(null)} />}
+
+      {/* key 每次打开都变：重挂载拿回干净的一份（抽屉不用 effect 清状态，见 FreeDishSheet） */}
+      {freeDishOpen && (
+        <FreeDishSheet key={`free-${freeDishSeq}`} visible onClose={() => setFreeDishOpen(false)} />
+      )}
 
       <ConfirmDialog
         open={pending !== null}

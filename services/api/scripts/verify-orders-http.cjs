@@ -422,10 +422,74 @@ async function main() {
   check('菜谱不存在 → 404', noRecipe.status === 404, `${noRecipe.status} ${noRecipe.body?.message ?? ''}`)
 
   const noRecipeId = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { mealDate: TODAY, meal: 'LUNCH' } })
-  check('没带菜谱 id → 400', noRecipeId.status === 400, `${noRecipeId.status}`)
+  check('既没给菜谱 id 也没给菜名 → 400', noRecipeId.status === 400, `${noRecipeId.status} ${noRecipeId.body?.message ?? ''}`)
 
   const longNote = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: TODAY, meal: 'LUNCH', note: '辣'.repeat(121) } })
   check('备注超长（>120 字）→ 400', longNote.status === 400, `${longNote.status}`)
+
+  // ---------- 自由菜品（F3-10）：自己写一道，不进菜谱库 ----------
+  const bothTargets = await callWithRetry('POST', '/orders/items', {
+    token: mama.token,
+    body: { recipeId: dishA.id, dishName: '外婆的红烧肉', mealDate: TODAY, meal: 'LUNCH' },
+  })
+  check('同时给菜谱与菜名 → 400（静默挑一个会把用户意图藏起来）', bothTargets.status === 400, `${bothTargets.status} ${bothTargets.body?.message ?? ''}`)
+
+  const blankName = await callWithRetry('POST', '/orders/items', {
+    token: mama.token,
+    body: { dishName: '   ', mealDate: TODAY, meal: 'LUNCH' },
+  })
+  check('菜名只有空白 → 400', blankName.status === 400, `${blankName.status} ${blankName.body?.message ?? ''}`)
+
+  const longName = await callWithRetry('POST', '/orders/items', {
+    token: mama.token,
+    body: { dishName: '好'.repeat(31), mealDate: TODAY, meal: 'LUNCH' },
+  })
+  check('菜名超长（>30 字）→ 400', longName.status === 400, `${longName.status} ${longName.body?.message ?? ''}`)
+
+  const freeDish = await callWithRetry('POST', '/orders/items', {
+    token: son.token,
+    body: { dishName: '  外婆的糖醋小排  ', mealDate: DAY_AFTER, meal: 'LUNCH', note: '少放糖' },
+  })
+  check(
+    '自己写一道 → 201，菜名去首尾空格、recipeId 为空、备注照常带上',
+    freeDish.status === 201
+      && freeDish.body?.mealKey === `${DAY_AFTER}-LUNCH`
+      && freeDish.body?.dishes?.some(d => d.name === '外婆的糖醋小排' && d.recipeId === null && d.count === 1)
+      && (freeDish.body?.items ?? []).some(i => i.name === '外婆的糖醋小排' && i.recipeId === null && i.note === '少放糖'),
+    `${freeDish.status} ${JSON.stringify(freeDish.body?.dishes)}`,
+  )
+
+  const freeAgain = await callWithRetry('POST', '/orders/items', {
+    token: mama.token,
+    body: { dishName: '外婆的糖醋小排', mealDate: DAY_AFTER, meal: 'LUNCH' },
+  })
+  check(
+    '同一道自由菜被两个人点 → 合并成一条、份数 2（合并键退回菜名）',
+    freeAgain.status === 201
+      && (freeAgain.body?.dishes ?? []).filter(d => d.name === '外婆的糖醋小排').length === 1
+      && (freeAgain.body?.dishes ?? []).find(d => d.name === '外婆的糖醋小排')?.count === 2,
+    JSON.stringify(freeAgain.body?.dishes),
+  )
+
+  // 菜名与库里某道菜完全同名：挂到那道菜上，不然同一道菜会分成两行
+  const sameName = await callWithRetry('POST', '/orders/items', {
+    token: mama.token,
+    body: { dishName: dishA.name, mealDate: DAY_AFTER, meal: 'DINNER' },
+  })
+  check(
+    '自己写的菜名与库里完全同名 → 挂到菜谱上（不是新开一行）',
+    sameName.status === 201
+      && (sameName.body?.dishes ?? []).some(d => d.name === dishA.name && d.recipeId === dishA.id),
+    JSON.stringify(sameName.body?.dishes),
+  )
+
+  const freeOnPlan = await callWithRetry('GET', '/orders/plan', { token: son.token })
+  const dayAfterLunch = (freeOnPlan.body?.days ?? []).find(d => d.date === DAY_AFTER)?.meals?.find(m => m.meal === 'LUNCH')
+  check(
+    '自由菜也进得了本周菜单（与菜谱点的菜无区别）',
+    (dayAfterLunch?.dishes ?? []).some(d => d.includes('外婆的糖醋小排')),
+    JSON.stringify(dayAfterLunch?.dishes),
+  )
 
   // 注意不能写成 `GET /orders/meals/...`：那个路由压根不存在，404 来自"路由未匹配"，
   // 就算这一餐真的存在也会通过——是个永远绿的假断言。真要走服务层的"餐次不存在"分支。
