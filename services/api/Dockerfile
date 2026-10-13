@@ -6,7 +6,11 @@
 FROM node:24-alpine AS base
 # 国内网络下 npm 下载很慢，可用 --build-arg NPM_REGISTRY=https://registry.npmmirror.com 换源
 ARG NPM_REGISTRY=https://registry.npmjs.org/
-RUN npm config set registry "$NPM_REGISTRY" && npm i -g pnpm@12.11.2
+# Alpine 软件源：国内服务器直连官方站拉不到 APKINDEX（apk add openssl 会失败），
+# 用 build arg 换镜像站；默认值仍是官方站，海外/本机构建行为不变。
+ARG ALPINE_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories \
+ && npm config set registry "$NPM_REGISTRY" && npm i -g pnpm@12.11.2
 # Prisma 引擎在 alpine 上需要 openssl
 RUN apk add --no-cache openssl
 WORKDIR /app

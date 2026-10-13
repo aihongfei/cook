@@ -25,7 +25,12 @@ ARG MINIO_SHA256_AMD64=53e2a2cb16c5366ea6fbbc479c19ddb4c6a0948273e752f740fb1fbf2
 # 中国镜像站默认；海外服务器可用 build arg 覆盖为 https://dl.min.io
 ARG MINIO_DOWNLOAD_BASE=https://dl.minio.org.cn/server/minio/release
 
+# Alpine 软件源。默认官方站；国内服务器实测直连官方站拉不到 APKINDEX（apk 报
+# "no such package: ca-certificates"），用 build arg 换成镜像站即可，默认值不变。
+ARG ALPINE_MIRROR=https://dl-cdn.alpinelinux.org/alpine
+
 RUN set -eux; \
+    sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories; \
     apk add --no-cache ca-certificates curl; \
     case "${TARGETARCH:-$(apk --print-arch)}" in \
       arm64|aarch64) arch=arm64; sum="${MINIO_SHA256_ARM64}" ;; \

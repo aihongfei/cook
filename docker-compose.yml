@@ -33,21 +33,14 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-cook}
       MYSQL_USER: ${MYSQL_USER:-cook}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 里设置 MYSQL_PASSWORD}
-      # 找回密码的发信通道（F2-04）：console=只写日志（开发期），smtp=真发信。
-      # **部署到公网前必须改成 smtp**，否则重置链接会由接口返回（见 RISKS R-16）。
-      MAIL_TRANSPORT: ${MAIL_TRANSPORT:-console}
-      MAIL_SMTP_HOST: ${MAIL_SMTP_HOST:-}
-      MAIL_SMTP_PORT: ${MAIL_SMTP_PORT:-465}
-      MAIL_SMTP_USER: ${MAIL_SMTP_USER:-}
-      MAIL_SMTP_PASSWORD: ${MAIL_SMTP_PASSWORD:-}
-      MAIL_FROM: ${MAIL_FROM:-}
-      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://127.0.0.1:5173}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - mysql-data:/var/lib/mysql
     ports:
-      # 暴露到宿主机，方便本机用 prisma studio / migrate dev 连库调试
-      - "${MYSQL_PORT:-3306}:3306"
+      # 暴露到宿主机，方便本机用 prisma studio / migrate dev 连库调试。
+      # 绑定地址由 MYSQL_BIND 控制：本机开发默认 0.0.0.0（与改动前行为一致）；
+      # **部署到公网服务器时在 .env 里设 127.0.0.1**，否则安全组一放开就是公网裸库。
+      - "${MYSQL_BIND:-0.0.0.0}:${MYSQL_PORT:-3306}:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 5s
@@ -63,6 +56,9 @@ services:
       args:
         # 海外服务器可改为 https://dl.min.io（该站已对 server 二进制返回 410，需自行确认）
         MINIO_DOWNLOAD_BASE: ${MINIO_DOWNLOAD_BASE:-https://dl.minio.org.cn/server/minio/release}
+        # 国内服务器直连 Alpine 官方源拉不到 APKINDEX，设成镜像站（如
+        # https://mirrors.aliyun.com/alpine）；默认官方源，本机构建不受影响。
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?请在 .env 里设置 MINIO_ROOT_USER}
@@ -72,9 +68,10 @@ services:
       # 数据卷根目录即 MinIO 的数据目录（桶直接落在卷根下），故挂到 /data
       - minio-data:/data
     ports:
-      # 9000 = S3 API（图片经此访问）；9001 = 网页控制台
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      # 9000 = S3 API（图片经此访问，**必须公网可达**——接口返回的图片地址指到这里）；
+      # 9001 = 网页控制台（部署时用 MINIO_CONSOLE_BIND=127.0.0.1 收回本机）。
+      - "${MINIO_BIND:-0.0.0.0}:${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_BIND:-0.0.0.0}:${MINIO_CONSOLE_PORT:-9001}:9001"
     # 桶（cook-media）与公开只读权限由 `pnpm run mirror:images` 幂等创建，镜像里不预置。
     # healthcheck 见 Dockerfile（用镜像自带的 minio 二进制，容器内无需 curl/wget）
 
@@ -83,6 +80,7 @@ services:
       context: ./services/api
       args:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
     restart: unless-stopped
     environment:
       # 容器内用服务名 mysql 连库（与宿主机开发用的 127.0.0.1 不同，故此处显式覆盖）
@@ -90,8 +88,10 @@ services:
       PORT: 3000
       # 容器内必须监听 0.0.0.0，否则宿主机的浏览器/前端连不上
       HOST: 0.0.0.0
-      # 前端在宿主机跑 Vite(5173)，因此必须放行该来源；移动端 APK 走 WebView，Origin 为 capacitor:// 需一并放行
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://127.0.0.1:5173,http://localhost:5173}
+      # 前端在宿主机跑 Vite(5173)，因此必须放行该来源；APK 里的 WebView 挂在 http://localhost
+      # （androidScheme: 'http'，见 apps/mobile/capacitor.config.ts），Origin 就是它，不放行则 APK 数据全空。
+      # 注：本项目**不是** capacitor:// —— 那是 iOS 与 androidScheme:'https' 时的形态，别照着抄。
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://127.0.0.1:5173,http://localhost:5173,http://localhost}
       # 登录令牌签名密钥（F2-02）：从根 .env 传入；容器内不设默认值，没配就启动失败
       JWT_SECRET: ${JWT_SECRET:?请在 .env 里设置 JWT_SECRET（至少 32 个字符）}
       # 接口返回图片时拼的对外前缀。必须是**浏览器能访问到的地址**——
@@ -116,6 +116,20 @@ services:
       AI_MODEL: ${AI_MODEL:-}
       AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-}
       AI_JSON_SCHEMA: ${AI_JSON_SCHEMA:-}
+      # ---- 找回密码的发信通道（F2-04）----
+      # console=只写日志（开发期）；smtp=真发信。**部署到公网前必须改成 smtp**，
+      # 否则 `forgot` 接口会把重置链接直接回给调用方（见 RISKS R-16）。
+      # ⚠️ 这组变量必须挂在 **api** 服务上：读它们的是后端进程（MailService）。
+      # 2026-10-14 实测发现它们原先被挂在 mysql 服务上，等于从没生效过——
+      # 即使 .env 里写了 smtp，API 容器也收不到，仍走 console 并泄露重置链接。
+      MAIL_TRANSPORT: ${MAIL_TRANSPORT:-console}
+      MAIL_SMTP_HOST: ${MAIL_SMTP_HOST:-}
+      MAIL_SMTP_PORT: ${MAIL_SMTP_PORT:-465}
+      MAIL_SMTP_USER: ${MAIL_SMTP_USER:-}
+      MAIL_SMTP_PASSWORD: ${MAIL_SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      # 邮件里重置链接的站点前缀；部署时必须改成公网可达地址，否则用户点不开
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://127.0.0.1:5173}
       TZ: ${TZ:-Asia/Shanghai}
     depends_on:
       mysql:
@@ -123,7 +137,8 @@ services:
       minio:
         condition: service_healthy
     ports:
-      - "${API_PORT:-3000}:3000"
+      # 后端接口：前端与 APK 都要访问，服务器上保持公网可达（API_BIND 可覆盖）
+      - "${API_BIND:-0.0.0.0}:${API_PORT:-3000}:3000"
 
 volumes:
   mysql-data:

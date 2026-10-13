@@ -110,10 +110,41 @@ cook/
 - **包管理器**：前后端统一用 **pnpm 12**（原 npm 锁文件归档在 `history/`）。**密钥（数据库密码、第三方 API key 等）一律放 `.env`，不写入文档、不入库、不进对话记录。**
 - **CORS**：后端只放行 `CORS_ORIGIN`（默认 `http://127.0.0.1:5173`）。换端口起前端必须同步加白名单，否则页面显示"暂时连不上厨房"。**APK 走 WebView，其 Origin 与网页不同，接入 M14 时需一并放行。**
 
-## 部署（服务器待定，形态已定）
+## 部署（已落地，2026-10-14）
 
-- **形态**：本地与服务器共用 `docker-compose.yml` —— 起 `mysql` + `minio` + `api` 三个容器；前端不入容器（开发本机跑 Vite，发布由 Capacitor 打包 APK）。
-- **数据落盘**：库数据在命名卷 `cook_mysql-data`，菜谱图片在命名卷 `minio-data`，都不随容器删除丢失；删卷即丢数据，别乱 `down -v`。
-- **迁移**：api 容器启动时自动执行 `prisma migrate deploy`，无需手工建表。
-- **数据**：落在命名卷 `cook_mysql-data`，`docker compose down` 不丢数据（`down -v` 才会删）。
-- **待定**：服务器厂商与配置、域名与 HTTPS、数据库备份策略、强密码。确定后在此登记实际地址与流程，不提前虚构。
+- **服务器**：百度云北京 · `120.48.142.161` · CentOS Linux 8.4 · x86_64 · 2 核 / 1.9 GB / 40 GB（部署时剩 15 GB，已加 2 GB swap 兜底）
+- **代码位置**：`/opt/cook`（`docker-compose.yml` + `services/` + `.env`，`.env` 权限 `600`）；数据迁移的原始包留在 `/opt/cook/migration/`
+- **形态**：本地与服务器共用同一份 `docker-compose.yml` —— 起 `mysql` + `minio` + `api` 三个容器；前端不入容器（开发本机跑 Vite，发布由 Capacitor 打包 APK）
+- **SSH**：本机 `ssh cook`（别名在 `~/.ssh/config.d/cook`）· **端口 2222**（本机所在网络封禁出站 22，服务器同时监听 22 与 2222）· root **仅密钥登录**
+- **运维**：`cd /opt/cook && docker compose ps / logs -f <服务> / restart <服务>`
+- **数据落盘**：库数据在命名卷 `cook_mysql-data`，菜谱图片在命名卷 `cook_minio-data`，都不随容器删除丢失；删卷即丢数据，别乱 `down -v`
+- **迁移**：api 容器启动时自动执行 `prisma migrate deploy`，无需手工建表
+
+### 对外端口（安全组按此放行）
+
+| 端口 | 服务 | 绑定地址 | 安全组 |
+| --- | --- | --- | --- |
+| 3000 | 后端 API `http://120.48.142.161:3000/api`（Swagger 在 `/api/docs`） | `0.0.0.0` | ✅ 已放行 |
+| 9000 | MinIO S3 API —— **接口返回的图片地址指到这里**，必须公网可达 | `0.0.0.0` | ✅ 已放行 |
+| 9001 | MinIO 网页控制台 | **`127.0.0.1`** | ❌ 不放行（要看走 SSH 隧道） |
+| 3306 | MySQL | **`127.0.0.1`** | ❌ 不放行 |
+| 22 / 2222 | SSH | `0.0.0.0` | ✅ 已放行 |
+
+端口绑定地址由 `docker-compose.yml` 的 `${MYSQL_BIND:-0.0.0.0}` / `${MINIO_BIND:-0.0.0.0}` / `${MINIO_CONSOLE_BIND:-0.0.0.0}` / `${API_BIND:-0.0.0.0}` 控制，**默认值与加这组变量之前完全一致**，本机开发行为不受影响。
+
+### 服务器专用 `.env`（只改服务器上那份，本机 `.env` 不受影响）
+
+- `MEDIA_BASE_URL=http://120.48.142.161:9000/cook-media` —— **必须是公网可达地址**，写错则全站图片打不开
+- `CORS_ORIGIN` 含 `http://localhost` —— APK WebView 的 Origin，漏了则 APK 数据全空
+- `MAIL_TRANSPORT=smtp` —— **公网部署必须**，否则 `forgot` 接口会把重置链接回给调用方（见 `RISKS.md` R-16）
+- `MYSQL_BIND=127.0.0.1` / `MINIO_CONSOLE_BIND=127.0.0.1` —— 把数据库与控制台收回本机
+- `ALPINE_MIRROR=https://mirrors.aliyun.com/alpine` —— 服务器直连 Alpine 官方源拉不到 APKINDEX（`apk add` 直接失败）
+- `NPM_REGISTRY=https://registry.npmmirror.com/` —— 国内构建提速
+- 三个密码（`MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` / `MINIO_ROOT_PASSWORD`）与 `JWT_SECRET` 均为**服务器上重新生成的强密码**，与本机开发值不同
+
+### 待办
+
+- **SMTP 真实凭据 + `PUBLIC_APP_URL`**：配好前找回密码不可用（已注册邮箱返回 500），且存在用户枚举侧信道——见 `RISKS.md` R-16
+- 域名与 HTTPS（现在用公网 IP 直连，MinIO 图片走 9000 明文端口）
+- 数据库自动备份策略
+- CentOS 8 已停止维护（2021 年底 EOL，无安全补丁），需评估迁移到 Rocky / AlmaLinux

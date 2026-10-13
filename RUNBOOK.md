@@ -2702,3 +2702,132 @@ pnpm --dir apps/mobile run dev                   # http://127.0.0.1:5173/fridge
 - 抽屉里的小节标题**不再自带左右栏距**（`.sheet__body .section-title { padding-inline: 0 }`）：内容区已有 16px，两处都加就是 32px，比抽屉外同款小节明显内缩。
 - 抽屉用的是 antd-mobile `Popup`，**不带 `role="dialog"`**——本项目所有抽屉都如此（FridgeItemSheet 的测试同样按类名断言）。给共享 `BottomSheet` 补弹层语义是另一件事，本次没做。
 - 截图在抽屉打开时偶发 `surface preparation timed out`（本项目已知的桥接问题，与页面无关）：改用 DOM 结构化读值当证据（与 R-028 那次同一手法）。
+
+## R-056 后端部署到服务器 + 数据迁移（✅ 已验证，2026-10-14）
+
+**目标环境**：`120.48.142.161`（百度云北京 · CentOS Linux 8.4 · x86_64 · 2 核 / 1.9 GB / 40 GB）。地址、端口、绑定与 `.env` 清单见 `MAP.md`「部署」一节；本条只记**怎么做**与**踩到的坑**。
+
+### 0. SSH 通道（前置，本机网络封禁出站 22）
+
+本项目所在网络**封掉所有出站 22 端口**（连 github/gitee 的 22 都超时，443 正常），所以服务器上 `sshd` 同时监听 22 与 **2222**，本机走 2222：
+
+```bash
+ssh cook            # 别名在 ~/.ssh/config.d/cook（Port 2222、仅密钥登录）
+```
+
+- 改端口时**必须把 `Port 22` 一起写上**：CentOS 默认 `#Port 22` 是注释状态，只加 `Port 2222` 会让 22 停止监听（可能影响控制台 smartterm）。
+- root 已改为**仅密钥登录**（`PasswordAuthentication no` + `PermitRootLogin prohibit-password`）；改之前先验证密钥能进再关密码，否则会把自己锁在外面。
+
+### 1. 服务器清理与准备
+
+```bash
+# 停掉用户自装的服务（openclaw 是 root 用户级 systemd 单元，不是系统服务）
+export XDG_RUNTIME_DIR=/run/user/0
+systemctl --user stop openclaw-gateway.service && systemctl --user disable openclaw-gateway.service
+loginctl disable-linger root
+systemctl stop alist.service && systemctl disable alist.service
+# openclaw 的两个容器占着 3000 端口，必须停掉并取消自启
+docker update --restart=no openclaw-qq openclaw-wechat && docker stop openclaw-qq openclaw-wechat
+
+# Docker 已装（docker-ce 26.1.3）但没启动
+systemctl enable --now docker
+
+# 无 swap 的 1.9 GB 机器跑 MySQL 有 OOM 风险，加 2 GB 兜底
+fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab && sysctl -w vm.swappiness=10
+```
+
+**不要停**：`sshd`、`NetworkManager`、`getty`/`serial-getty`（控制台恢复通道）、以及百度云的 `has-agent` / `bcm-agent`（停了会影响控制台，包括 smartterm 这条后路）。
+
+### 2. 传代码
+
+`rsync` 在本机是 openrsync（参数受限），用 tar over ssh 更稳：
+
+```bash
+cd <项目根>
+tar czf - --exclude='node_modules' --exclude='dist' --exclude='.env' --exclude='.git' \
+  docker-compose.yml services/ | ssh cook 'mkdir -p /opt/cook && tar xzf - -C /opt/cook'
+ssh cook 'find /opt/cook -name "._*" -delete'      # 清掉 macOS 的 AppleDouble 元数据
+scp .env cook:/opt/cook/.env                        # .env 单独传，内容不回显
+```
+
+### 3. 服务器 `.env` 要改的项
+
+见 `MAP.md` 清单。生成强密码**在服务器上做**，通过环境变量传给改写脚本，**全程不打印值**（密钥不进对话记录）：
+
+```bash
+export NEW_MYSQL_ROOT_PW=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-28)
+# …同法生成 MYSQL_PASSWORD / MINIO_ROOT_PASSWORD / JWT_SECRET（JWT 用 -base64 48）
+# 再用一段 python 按键名替换 /opt/cook/.env，只回显「改了哪些键」不回声值
+chmod 600 /opt/cook/.env
+```
+
+- **`MAIL_TRANSPORT=smtp` 必设**，且**必须挂在 `api` 服务上**——见下方「坑 1」。
+- `MEDIA_BASE_URL` 写公网地址，写错则全站图片打不开。
+- `CORS_ORIGIN` 要含 `http://localhost`（APK WebView 的 Origin）。
+
+### 4. 构建
+
+```bash
+cd /opt/cook && docker compose build
+```
+
+**坑 2：服务器直连 Alpine 官方源拉不到 APKINDEX**（`apk add` 直接报 `no such package: ca-certificates`）。已在两个 Dockerfile 里加 `ARG ALPINE_MIRROR`（默认仍是官方源，不影响本机构建），服务器 `.env` 设 `ALPINE_MIRROR=https://mirrors.aliyun.com/alpine`。Docker Hub 拉基础镜像慢（`node:24-alpine` 约 3 分钟），daemon.json 里已有国内 registry mirror。
+
+### 5. 数据迁移
+
+**MySQL**（`cook` 库，20 张表约 3.66 MB）：
+
+```bash
+# 本机导出（--single-transaction 不锁表）
+docker exec -e MYSQL_PWD="$ROOT_PW" cook-mysql-1 \
+  mysqldump -uroot --single-transaction --routines --triggers --default-character-set=utf8mb4 cook > cook-dump.sql
+
+# ⚠️ 必做：改写库里的绝对地址。OrderItem.recipeImage 冗余存了完整图片 URL（561 处），
+#    Recipe.image 也有 4 处 —— 不改写则这些图在服务器上全部指向 127.0.0.1 打不开。
+sed -i '' 's|http://127.0.0.1:9000|http://120.48.142.161:9000|g' cook-dump.sql
+
+# 服务器导入（密码从容器自身环境变量取，不落命令行）
+docker exec -i cook-mysql-1 sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" cook' < cook-dump.sql
+```
+
+**MinIO**（`cook-media` 600 + `cook-checkins` 18 个对象，13.6 MB）——整卷搬，不走 mc：
+
+```bash
+# 本机打包（⚠️ 排除 .root_user / .root_password：那是 MinIO 持久化的根凭据，
+#   带过去会和服务器新密码冲突；凭据应由服务器 .env 注入）
+docker run --rm -v cook_minio-data:/data -v /tmp:/backup alpine:latest \
+  tar czf /backup/minio-data.tgz -C /data --exclude=./.root_password --exclude=./.root_user .
+
+# 服务器解包（⚠️ 卷要用 compose 标签创建，否则每次 up 都告警「not created by Docker Compose」）
+docker volume create --label com.docker.compose.project=cook \
+  --label com.docker.compose.volume=minio-data --label com.docker.compose.version=2.27.0 cook_minio-data
+docker run --rm -v cook_minio-data:/data -v /opt/cook/migration:/mnt alpine:latest tar xzf /mnt/minio-data.tgz -C /data
+```
+
+### 6. 启动与验证
+
+```bash
+cd /opt/cook && docker compose up -d
+docker compose ps                                   # 三个容器都应 healthy/running
+curl -s http://127.0.0.1:3000/api/health             # {"status":"ok","name":"yushan-api",...}
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9000/cook-media/recipes/<某个真实 imageKey>
+```
+
+**行数比对**（`information_schema.table_rows` 是估算值，必须用 `COUNT(*)`）：
+
+```sql
+SELECT 'Recipe' t, COUNT(*) c FROM `Recipe` UNION ALL SELECT 'OrderItem', COUNT(*) FROM `OrderItem` …
+```
+
+两侧结果应逐表一致。唯一可能不一致的是 `RefreshToken`（活库导出后还会新增会话）。
+
+### 注意（本次踩到的坑，按代价排序）
+
+1. **`MAIL_TRANSPORT` 等发信变量原先被挂在 `mysql` 服务上，等于从没生效**——读它们的是后端进程。后果：`.env` 里写了 `smtp` 也无效，API 容器仍走 `console` 默认值并**把重置链接回给调用方**（R-16）。已移到 `api` 服务。**方法教训**：验证安全设置不能只看到"配置里写了"，要**在容器内 `docker exec <容器> env | grep XXX` 确认变量真的到了读它的那个进程**，再用**真实存在的数据**打一次接口（我第一次用不存在的邮箱测，服务提前返回、根本没走到发信分支，测试无效）。
+2. **库里有绝对地址**：`OrderItem.recipeImage` 冗余存完整图片 URL（561 处）。迁移前必须 `sed` 改写，否则历史点单卡全部无图。`MAP.md` 里"图片地址由运行时拼 `MEDIA_BASE_URL`"的说法只对 `Recipe.imageKey` 成立。
+3. **Alpine 官方源在国内服务器不可直接用**，见「坑 2」。
+4. **端口别裸奔**：compose 原本把 `3306:3306` 映射到 `0.0.0.0`，安全组一放开就是公网裸库。已改成 `${MYSQL_BIND:-0.0.0.0}` 形式（默认值不变），服务器 `.env` 设 `127.0.0.1`；MinIO 控制台 9001 同理。9000 必须公网可达（图片走它）。
+5. **`docker compose config` 会打印含密钥的完整配置**，要过滤后再输出。
+6. **`GROUP_CONCAT` 默认 1024 字符**会截断生成的长 SQL（表多时少几张表且不报错），先 `SET SESSION group_concat_max_len=1000000`。
+7. **Prisma 存 UTC，MySQL 的 `NOW()` 是本地时间**（容器 `TZ=Asia/Shanghai` 差 8 小时）。按时间删测试数据要用 `UTC_TIMESTAMP()`，否则 `ROW_COUNT()` 为 0、看着像删成功了其实没删。
