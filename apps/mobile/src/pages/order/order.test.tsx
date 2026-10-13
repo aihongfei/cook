@@ -562,6 +562,23 @@ it('点菜单上有「自己写一道」入口，点开是填写抽屉（F3-10�
   expect(await screen.findByPlaceholderText('如：外婆的糖醋小排')).toBeTruthy()
 })
 
+it('「点单历史」与「自己写一道」并排在同一行里', async () => {
+  mockGet({ boards: { family: boardFixture() } })
+  renderOrder()
+
+  // 两个入口随 family 数据一起出现，先等它们渲染出来再断言结构
+  const historyEntry = await screen.findByRole('link', { name: /点单历史/ })
+  const freeEntry = screen.getByRole('button', { name: /自己写一道/ })
+
+  // 两个入口同为"进另一个地方"的动作，各占半行（用户 2026-10-13 要求并排）。
+  // 这里是 DOM 结构断言：分行的样式（.order-shortcuts 的 flex）挂在这一个共同父节点上，
+  // 谁被移出去谁就会掉回整行——jsdom 算不了布局，守着这个父节点才守得住"在同一行"。
+  const row = document.querySelector('.order-shortcuts')
+  expect(row).toBeTruthy()
+  expect(historyEntry.parentElement).toBe(row)
+  expect(freeEntry.parentElement).toBe(row)
+})
+
 it('还没加入家庭时不显示「自己写一道」（点菜是家庭内的协作）', async () => {
   mockGet({ family: null, boards: {} })
   renderOrder()

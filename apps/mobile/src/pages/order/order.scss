@@ -23,13 +23,27 @@
 
 /* 各状态的戳色已提到 components/ui/ui.scss（本周菜单也要用同一套，不能各写一份） */
 
+/* 「点单历史」和「自己写一道」并排一行：整行栏距与段间距由这一层给，
+   两个入口自己不再带外边距，各占一半宽度、等高对齐 */
+.order-shortcuts {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin: 12px var(--spacing-page) 0;
+}
+
+.order-shortcuts > * {
+  flex: 1 1 0;
+  min-width: 0;
+  /* button 默认 nowrap，半行宽度下说明文字会撑破卡片；两个入口统一按可换行处理 */
+  white-space: normal;
+}
+
 /* 「自己写一道」入口（F3-10）：菜谱库里没有的菜也能点 */
 .order-freedish {
   display: flex;
   gap: 10px;
   align-items: center;
-  width: calc(100% - var(--spacing-page) * 2);
-  margin: 12px var(--spacing-page) 0;
   padding: 11px 13px;
   font-family: inherit;
   text-align: left;
@@ -74,8 +88,6 @@
   display: flex;
   gap: 10px;
   align-items: center;
-  width: calc(100% - var(--spacing-page) * 2);
-  margin: 10px var(--spacing-page) 0;
   padding: 11px 13px;
   font-family: inherit;
   text-align: left;

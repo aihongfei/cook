@@ -227,31 +227,33 @@ export default function OrderPage() {
 
         {family.data && orders.data && <Chips items={chips} value={filter} onChange={setFilter} />}
 
-        {/* 点单历史（F3-09）：列表只看得到最近 60 张卡（约一个月，见 R-19），
-            更早的点单在这一页往前翻。做成一行入口而不是又一个 Tab：
-            它是"偶尔回看"，不是每天要用的那一屏。 */}
+        {/* 两个整行入口并排一行：都是"进另一个地方"的动作，各占半行。
+            说明文字随之改短——半行宽度放不下原来那句长说明。 */}
         {family.data && (
-          <Link className="order-history-link" to="/order/history" state={{ from: location.pathname }}>
-            <span className="order-history-link__icon">📖</span>
-            <span className="order-history-link__text">
-              点单历史
-              <small>翻翻这阵子家里都吃过什么</small>
-            </span>
-            <span className="order-history-link__arrow">›</span>
-          </Link>
-        )}
+          <div className="order-shortcuts">
+            {/* 点单历史（F3-09）：列表只看得到最近 60 张卡（约一个月，见 R-19），
+                更早的点单在这一页往前翻。做成一行入口而不是又一个 Tab：
+                它是"偶尔回看"，不是每天要用的那一屏。 */}
+            <Link className="order-history-link" to="/order/history" state={{ from: location.pathname }}>
+              <span className="order-history-link__icon">📖</span>
+              <span className="order-history-link__text">
+                点单历史
+                <small>翻翻最近吃过的</small>
+              </span>
+              <span className="order-history-link__arrow">›</span>
+            </Link>
 
-        {/* 自己写一道（F3-10）：菜谱库里没有的菜（家里自己常做的、今天就想吃的）也能点。
-            放在筛选之下、卡片之上：它是"加点什么"的动作，与浏览已有单子不是一回事。 */}
-        {family.data && (
-          <button type="button" className="order-freedish" onClick={openFreeDish}>
-            <span className="order-freedish__icon">✍️</span>
-            <span className="order-freedish__text">
-              自己写一道
-              <small>菜谱库里没有的菜，写个名字就能点</small>
-            </span>
-            <span className="order-freedish__arrow">›</span>
-          </button>
+            {/* 自己写一道（F3-10）：菜谱库里没有的菜（家里自己常做的、今天就想吃的）也能点。
+                放在筛选之下、卡片之上：它是"加点什么"的动作，与浏览已有单子不是一回事。 */}
+            <button type="button" className="order-freedish" onClick={openFreeDish}>
+              <span className="order-freedish__icon">✍️</span>
+              <span className="order-freedish__text">
+                自己写一道
+                <small>写个名字就能点</small>
+              </span>
+              <span className="order-freedish__arrow">›</span>
+            </button>
+          </div>
         )}
 
         {!family.isPending && !family.data && (
