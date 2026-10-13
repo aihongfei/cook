@@ -204,9 +204,9 @@
 }
 
 .today__shake,
+.today__decide,
 .today__ai {
   display: flex;
-  flex: 1;
   gap: 7px;
   align-items: center;
   justify-content: center;
@@ -215,11 +215,11 @@
   font: inherit;
   font-size: 13px;
   /*
-   * 边框宽度两边**必须一致**（用户 2026-10-13：「为什么有时候会歪」）。
+   * 边框宽度同一行里**必须一致**（用户 2026-10-13：「为什么有时候会歪」）。
    * 这两个按钮是 `flex: 1`（flex-basis: 0%）平分一行，而 0% 基准下**边框不参与**
    * 那份平分：只有「AI 帮你想」带 1px 描边时它就多占 2px（左右各 1px），
    * 实测 159 / 161 —— 两个按钮不等宽、中间那道缝也偏左 1px。
-   * 所以两边都给 1px 透明边框占位，「AI 帮你想」只改颜色（见下）。
+   * 所以都先给 1px 透明边框占位，需要描边的只改颜色（见下）。
    */
   border: 1px solid transparent;
   border-radius: 14px;
@@ -234,11 +234,51 @@
   }
 }
 
+/*
+ * 两条出路一行（都**立刻给一道**），「AI 帮你想」自己一行（给几道、要等十几秒）。
+ *
+ * 分行的依据是**承诺不同**，不是重要程度：用户一眼要能看出"这两个马上有答案，
+ * 那个要等"。三件挤一行的话每格只剩 103px（391 宽的屏），"AI 帮你想"会被截成
+ * 省略号——一个说不全名字的按钮比多占一行糟得多。
+ */
+.today__row {
+  display: flex;
+  gap: 9px;
+  margin-top: 11px;
+}
+
+.today__row .today__shake,
+.today__row .today__decide {
+  flex: 1;
+}
+
+/* 第二行只有它一个，所以自己撑满；margin 由行容器统一给 */
+.today__row--ai {
+  margin-top: 9px;
+}
+
+/* 「AI 帮你想」独行时也要撑满：实测不撑满只有 102px 宽（内容宽），
+   与上面一行两个 160px 的按钮并排看着像"没做完"。它确实是同一张卡里的
+   第三条出路，宽度上不该矮一头。 */
+.today__row--ai .today__ai {
+  flex: 1;
+}
+
 /* 「摇一道」是纸色实底：它是**立刻给结果**的那条路，最常被点 */
 .today__shake {
   color: #a8542a;
   background: var(--color-paper);
   box-shadow: 0 3px 8px rgb(150 100 60 / 12%);
+}
+
+/*
+ * 「帮我决定」用品牌橙的淡底：它给的也是**一道**，但那道是"照着冰箱和口味挑的"。
+ * 与「摇一道」同一行、宽度相同、边框一致，靠底色区分"这一个更懂你家"。
+ */
+.today__decide {
+  color: #8a4a1e;
+  background: rgb(255 251 242 / 62%);
+  border-color: rgb(224 123 57 / 34%);
 }
 
 /* 「AI 帮你想」用半透明底：同一条路上的另一种解法，别抢走视觉重心 */
@@ -249,12 +289,14 @@
 }
 
 .today__shake-emoji,
+.today__decide-emoji,
 .today__ai-emoji {
   font-size: 16px;
   line-height: 1;
 }
 
 .today__shake-text,
+.today__decide-text,
 .today__ai-text {
   overflow: hidden;
   white-space: nowrap;

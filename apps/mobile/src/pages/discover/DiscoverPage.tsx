@@ -6,10 +6,12 @@ import { toast } from '@/components/ui/toast'
 import { apiErrorMessage } from '@/api/client'
 import { fetchRandomRecipe } from '@/api/recipes'
 import { useAiSuggestSession } from '@/stores/ai-suggest-session'
+import { useDecideSession } from '@/stores/decide-session'
 import FamilyPicks from './components/FamilyPicks'
 import WeekPlan from './components/WeekPlan'
 import AiSuggestSheet from './components/AiSuggestSheet'
 import AiChatSheet from './components/AiChatSheet'
+import DecideSheet from './components/DecideSheet'
 import '../shared.scss'
 import './discover.scss'
 
@@ -37,6 +39,15 @@ export default function DiscoverPage() {
   const suggestOpen = useAiSuggestSession((state) => state.open)
   const startSuggest = useAiSuggestSession((state) => state.start)
   const closeSuggest = useAiSuggestSession((state) => state.close)
+  /*
+   * 「帮我决定」的开合也放 store（`stores/decide-session`），理由与「AI 帮你想」一样：
+   * 这里的菜名能点进详情，而路由跳转会卸载本页——放 useState 的话用户看完做法返回，
+   * 抽屉是关着的、刚在评估的那道菜也没了（他只能重新点一次，而重新点给出的是**另一道**）。
+   * 「问 AI」没有可点的菜名入口，所以它仍是本地 state。
+   */
+  const decideOpen = useDecideSession((state) => state.open)
+  const startDecide = useDecideSession((state) => state.start)
+  const closeDecide = useDecideSession((state) => state.close)
   const [shaking, setShaking] = useState(false)
   const navigate = useNavigate()
 
@@ -71,13 +82,28 @@ export default function DiscoverPage() {
             <span className="today__title">今天吃什么？</span>
           </div>
 
-          <div className="today__actions">
+          {/*
+            三条出路按**承诺**分两行：
+            - 这一行两个都**立刻给一道**——「摇一道」是库里随机抽（不知道你家有什么），
+              「帮我决定」是照着冰箱、口味与平时爱吃的挑（F5-05，零选择成本）；
+            - 「AI 帮你想」给**几道**让你挑、要等十几秒，自己一行。三件挤一行的话每格只剩
+             103px，"AI 帮你想"会被截成省略号（见 shared.scss 的 .today__row）。
+          */}
+          <div className="today__row">
             <button type="button" className="today__shake" disabled={shaking} onClick={() => void shake()}>
               <span className="today__shake-emoji" aria-hidden>
                 🎲
               </span>
               <span className="today__shake-text">{shaking ? '正在摇…' : '摇一道'}</span>
             </button>
+            <button type="button" className="today__decide" onClick={startDecide}>
+              <span className="today__decide-emoji" aria-hidden>
+                ✨
+              </span>
+              <span className="today__decide-text">帮我决定</span>
+            </button>
+          </div>
+          <div className="today__row today__row--ai">
             <button type="button" className="today__ai" onClick={startSuggest}>
               <span className="today__ai-emoji" aria-hidden>
                 🍳
@@ -107,6 +133,10 @@ export default function DiscoverPage() {
           key 只在"新开一次"时变（start 会清空 picks），所以续上时是同一个实例、内容原样 */}
       {suggestOpen && <AiSuggestSheet key="suggest" visible onClose={closeSuggest} />}
       {sheet === 'chat' && <AiChatSheet key="chat" visible onClose={() => setSheet(null)} />}
+      {/* 「帮我决定」的开关来自 store（见上面那段注释）：点菜名进详情再返回时它还得开着，
+          而且**不许重新挑**——用户正要评估刚才那道菜，换一道等于把答案抽走了。
+          key 只在"新开一次"时变（start 会清空 result），所以续上时是同一个实例、内容原样 */}
+      {decideOpen && <DecideSheet key="decide" visible onClose={closeDecide} />}
     </Page>
   )
 }

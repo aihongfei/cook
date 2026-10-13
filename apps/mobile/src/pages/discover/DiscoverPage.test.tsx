@@ -160,33 +160,73 @@ it('问 AI 那行只有后半句可点：前半句是说明，不该看着像按
   expect(await screen.findByText(/拿不准的都能问/)).toBeTruthy()
 })
 
-it('「摇一道」与「AI 帮你想」的边框宽度一致（否则 flex:1 下两个按钮不等宽，看着就是歪的）', () => {
+it('三条出路都在，且按"马上给一道 / 等一会儿给几道"分成两行（F5-05 新增第三个）', async () => {
+  mockRecipes(12)
+  renderDiscover()
+
+  await screen.findByText('摇一道')
+  expect(screen.getByText('帮我决定')).toBeTruthy()
+  // 「AI 帮你想」在按钮与抽屉标题里各有一处，所以这里只断言"按钮"有一处
+  expect(screen.getAllByRole('button', { name: /AI 帮你想/ })).toHaveLength(1)
+
   /*
-   * 用户 2026-10-13：「为什么有时候会歪」。实测根因不是随机的：这两个按钮是
-   * `flex: 1`（flex-basis: 0%）平分一行，而 0% 基准下**边框不参与**那份平分——
-   * 只有「AI 帮你想」带 1px 描边时它多占 2px（左右各 1），实测宽度 159 / 161，
-   * 中间那道缝也随之偏左 1px。去掉边框两边都是 160；给「摇一道」也加 1px 又都是 160。
-   *
-   * jsdom 算不了布局，所以守**决定这件事的那条规则**（与 corner-art.test 同一手法）：
-   * 谁哪天只给其中一个加/去边框，这条就会红。
+   * 分行不是排版偏好，是**承诺**的区别：上面两个立刻给一道，下面那个给几道、要等十几秒。
+   * 三件挤一行的话每格只剩 103px（391 宽的屏），"AI 帮你想"会被截成省略号——
+   * 一个说不全名字的按钮比多占一行糟得多（见 shared.scss 的 .today__row）。
+   */
+  const rows = [...document.querySelectorAll('.today__row')].map((row) =>
+    [...row.querySelectorAll('button')].map((button) => button.textContent?.replace(/\s+/g, '')),
+  )
+  expect(rows).toEqual([['🎲摇一道', '✨帮我决定'], ['🍳AI帮你想']])
+
+  /*
+   * 第二行那一个必须**撑满整行**：不撑满时实测只有 102px（内容宽），与上面一行
+   * 两个 160px 的按钮并排，看着像"这张卡没做完"。jsdom 算不了布局，所以守规则。
    */
   const css = readFileSync(join(srcDir, 'pages/shared.scss'), 'utf8')
-  const common = css.match(/\.today__shake,\s*\.today__ai\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
-  expect(common, '没读到 .today__shake, .today__ai 的公共规则').toBeTruthy()
-  expect(common, '两个按钮的边框宽度必须在公共规则里定死（1px 透明占位）').toContain('border: 1px solid transparent')
+  const aiRow = css.match(/\.today__row--ai\s+\.today__ai\s*\{[^}]*\}/)?.[0] ?? ''
+  expect(aiRow, '没读到「AI 帮你想」在独行时撑满的规则').toMatch(/flex:\s*1/)
+})
+
+it('同一行里几个按钮的边框宽度一致（否则 flex:1 下不等宽，看着就是歪的）', () => {
+  /*
+   * 用户 2026-10-13：「为什么有时候会歪」。实测根因不是随机的：这些按钮是
+   * `flex: 1`（flex-basis: 0%）平分一行，而 0% 基准下**边框不参与**那份平分——
+   * 只有其中一个带 1px 描边时它多占 2px（左右各 1），实测宽度 159 / 161，
+   * 中间那道缝也随之偏左 1px。去掉边框两边都是 160；两边都给 1px 又都是 160。
+   *
+   * 2026-10-13 加了第三个出口「帮我决定」（F5-05）之后这条守卫的范围也跟着变大：
+   * 现在**三个**按钮共用同一块公共规则（各自只准改颜色），谁哪天给其中一个
+   * 单独加宽度就会破坏等宽——那正是这条用例要拦住的。
+   *
+   * jsdom 算不了布局，所以守**决定这件事的那条规则**（与 corner-art.test 同一手法）。
+   */
+  const css = readFileSync(join(srcDir, 'pages/shared.scss'), 'utf8')
+  const common =
+    css.match(/\.today__shake,\s*\.today__decide,\s*\.today__ai\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+  expect(common, '没读到 .today__shake, .today__decide, .today__ai 的公共规则').toBeTruthy()
+  expect(common, '边框宽度必须在公共规则里定死（1px 透明占位）').toContain('border: 1px solid transparent')
 
   /*
-   * 找「AI 帮你想」那条独立规则时**必须先跳过公共块**：公共块的第二行正好是
-   * `.today__ai {`，直接在整个文件里匹配会先抓到它（第一版就是这么红的——
-   * 断言读到的其实是公共块，看着像"AI 那句没写边框颜色"）。
+   * 找各按钮的独立规则时**必须先跳过公共块**：公共块里正好也有 `.today__ai {` 那一行，
+   * 直接在整个文件里匹配会先抓到它（第一版就是这么红的——断言读到的其实是公共块，
+   * 看着像"AI 那句没写边框颜色"）。
    */
   const after = css.slice(css.indexOf(common) + common.length)
-  const ai = after.match(/\.today__ai\s*\{[^}]*\}/)?.[0] ?? ''
-  expect(ai, '没读到 .today__ai 的独立规则').toBeTruthy()
-  expect(ai, '「AI 帮你想」只该改边框颜色').toMatch(/border-color\s*:/)
-  expect(ai, '「AI 帮你想」不该再写边框宽度（写了就破坏等宽）').not.toMatch(/border\s*:/)
+  /*
+   * ⚠️ 必须匹配**行首**的独立规则（`m` + `^`）：`.today__row .today__decide { flex: 1 }`
+   * 这种后代选择器里也含 `.today__decide {`，不锚行首就会先抓到它，
+   * 于是断言读到的是"只写了 flex"的那条，看着像"没写边框颜色"。
+   */
+  const ruleOf = (name: string) => after.match(new RegExp(`^\\.${name}\\s*\\{[^}]*\\}`, 'm'))?.[0] ?? ''
 
-  const shake = after.match(/\.today__shake\s*\{[^}]*\}/)?.[0] ?? ''
-  expect(shake, '没读到 .today__shake 的独立规则').toBeTruthy()
-  expect(shake, '「摇一道」不该自带边框宽度（会与公共规则打架）').not.toMatch(/border\s*:/)
+  for (const name of ['today__shake', 'today__decide', 'today__ai']) {
+    const rule = ruleOf(name)
+    expect(rule, `没读到 .${name} 的独立规则`).toBeTruthy()
+    // 只准改颜色（需要描边的写 border-color）；再写一遍 border 就破坏同排等宽
+    expect(rule, `.${name} 不该自带边框宽度（写了就破坏同排等宽）`).not.toMatch(/border\s*:/)
+  }
+
+  expect(ruleOf('today__ai'), '「AI 帮你想」只该改边框颜色').toMatch(/border-color\s*:/)
+  expect(ruleOf('today__decide'), '「帮我决定」只该改边框颜色').toMatch(/border-color\s*:/)
 })
