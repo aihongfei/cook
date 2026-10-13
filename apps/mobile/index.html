@@ -2,9 +2,10 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <!-- 图标：矢量优先（任意缩放都清晰），位图给不吃 SVG 图标的浏览器兜底。
-         两者都从品牌母图产出，见 scripts/build-brand-assets.sh 与 gen-brand-svg.py -->
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- 图标：从品牌母图产出（scripts/build-brand-assets.sh）。
+         只出位图不出 SVG：这一版母图是细节较多的场景插画，手描不现实、
+         自动描摹对水彩笔触效果差，而 favicon 实际就渲染在 16~32px，
+         位图在这个尺寸反而更干净 -->
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta

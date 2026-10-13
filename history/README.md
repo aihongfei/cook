@@ -13,3 +13,4 @@
 | 日期 | 文件 | 内容 |
 | --- | --- | --- |
 | 2026-10-11 | `package-lock.mobile.pre-pnpm.json` | 前端迁到 pnpm 前保留的 npm 锁文件（`apps/mobile`，lockfileVersion 3，包名 `mobile`）。仅用于回溯迁移前的依赖树，不再是活动锁文件（活动锁为 `apps/mobile/pnpm-lock.yaml`）。 |
+| 2026-10-14 | `brand/2026-10-14-icon-master-house-1024.png` | 应用图标的**第一版母图**（手绘水粉房子 + 烟囱爱心）。装机后用户说「不好看」、要求改动画风，已换成卡通厨房场景，故归档。要回退：换回 `docs/brand/icon-master-1024.png` 并重跑 `apps/mobile/scripts/build-brand-assets.sh`，**但 `FG_ART_DP` / `LEGACY_ART_RATIO` 这两个尺寸参数是按新母图的宽高比重量的，必须按 R-060 重算**。 |

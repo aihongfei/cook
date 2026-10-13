@@ -3142,9 +3142,11 @@ const kb = (n) => {
 
 ---
 
-## R-060 应用图标与启动图：从一张母图产出全族素材（F14-04，✅ 已验证，2026-10-14）
+## R-060 应用图标与启动图：从一张母图产出全族素材（F14-04，✅ 已验证，2026-10-14；同日换过一版母图）
 
-**要解决的问题**：装上去的 App 图标一直是 **Capacitor 默认的蓝白 X**（`FEATURES.md` F14-04 此前标"图标与启动图仍是默认素材，待做"）。这一刀把图标、自适应图标、启动图、Web favicon 全部换成本项目的手绘水粉房子。
+**要解决的问题**：装上去的 App 图标一直是 **Capacitor 默认的蓝白 X**（`FEATURES.md` F14-04 此前标"图标与启动图仍是默认素材，待做"）。这一刀把图标、自适应图标、启动图、Web 图标全部换掉。
+
+**母图换过一版（同日）**：第一版是"手绘水粉房子"（与 `logo-t.png` 里那个「家」的符号同造型），用户看过装机效果后说「不好看」，要求出**动画风格、多元素**的版本。出了四版动画风候选（3D 电影感 / 日式赛璐璐 / 卡通角色 / 手绘场景），用户**选定 D**——卡通厨房场景：戴厨师帽的陶锅 + 挂着的平底锅 + 一摞三只碗 + 番茄/胡萝卜/大葱 + 木托盘。第一版母图归档在 `history/brand/2026-10-14-icon-master-house-1024.png`（**没删**，要回退直接换回去，但 `FG_ART_DP` 那组尺寸是按当前图标重量的，得按注释重算）。
 
 ### 一、一条命令产出全族
 
@@ -3161,40 +3163,34 @@ cd apps/mobile/android && ./gradlew assembleRelease
 
 ### 二、四个必须知道的约束（脚本注释里也写了）
 
-1. **自适应图标的 108dp / 16.7% 内缩**：Android 对自适应图标的源图**四边各内缩 16.7%**，可见区只有 `108 × (1-2×0.167) ≈ 72dp`、安全圈 66dp。source 1024px 对应 108dp，所以「房子在源图里多少 px」= 「显示多少 dp × 1024/108」，与内缩无关（内缩只是裁，不缩放）。脚本里是 `FG_ART_DP=62`：实测**严格圆遮罩下只溢出 1 像素**（62dp→0.0028%、58→0、66→0.63%），再大就会被切。
+1. **自适应图标的 108dp / 16.7% 内缩**：Android 对自适应图标的源图**四边各内缩 16.7%**，可见区只有 `108 × (1-2×0.167) ≈ 72dp`、安全圈 66dp。source 1024px 对应 108dp，所以「场景在源图里多少 px」= 「显示多少 dp × 1024/108」，与内缩无关（内缩只是裁，不缩放）。脚本里是 `FG_ART_DP=52`：**这个值由母图的形状决定，不能照抄**——当前母图是近方形构图（内容框 869×903，宽高比 0.96），塞进圆形遮罩时四个角最先被切，实测「艺术像素落在 66dp 安全圈外」的比例：**52dp→0%、54dp→0.11%、56dp→1.03%、58dp→2.62%**，取 52dp 就是"仍 0% 被切的上限"。上一版房子母图是瘦高形，能放到 62dp（62→0.0028%、58→0、66→0.63%）。**换母图必须重新量这个值。**
 2. **前景层必须透明底**：它叠在背景层上，带底色会露出一个方块。母图是米色底的水粉画，脚本按底色 floodfill 抠 alpha（`KEY_FUZZ=12`；实测 8% 抠不净、20% 会吃掉边缘）。
-3. **传统图标要按比例反推**：`@capacitor/assets` 生成 `ic_launcher.png` 时会**再内缩 8px**（192px 档缩到 176px 再居中）。所以 `LEGACY_ART_RATIO=63`（不是 57）才能让老机型上的图标跟自适应图标**看起来一样大**——实测：63% → 房子占 57.6%，与自适应的 62/108 = 57.4% 齐平；用 57% 只有 52.6%。传统图标只在 API 24/25 生效（`minSdk 24`）。
+3. **传统图标要按比例反推**：`@capacitor/assets` 生成 `ic_launcher.png` 时会**再内缩 8px**（192px 档缩到 176px 再居中）。所以 `LEGACY_ART_RATIO=53`（不是 48）才能让老机型上的图标跟自适应图标**看起来一样大**：自适应里场景占 52/108 = 48.1% 的图标位，则源图占比 = 48.1% × 192/176 = 52.5% → 取 53%。实测两边落在 **49.0% vs 48.1%**。传统图标只在 API 24/25 生效（`minSdk 24`）。
 4. **启动图标 = 启动器图标本身**：`styles.xml` 里 `windowSplashScreenAnimatedIcon` 指着 `@mipmap/ic_launcher`，所以 Android 12+ 冷启动画的就是刚生成的那张自适应图标。`drawable*/splash.png` 那 11 张是 Capacitor 遗留资源（本项目无代码引用），脚本仍重画，只为把默认的蓝色 X 素材清出包。
 
-### 三、矢量 favicon 是"量"出来的，不是另画的
+### 三、为什么现在**只出位图**、没有矢量 favicon
 
-`public/favicon.svg` 由 **`scripts/gen-brand-svg.py` 生成，不要手改**。做法：把 `assets/icon-foreground.png` 裁到内容框后逐行扫红/黄两色的 x 区间，得到屋顶弧线、屋檐六个波浪、房身/门窗/烟囱/爱心的真实边界，再按「房子占 57.3%」等比映射到 64×64，颜色也是从原图各部位取的中位色。脚本里把换算收在一个 `T()` 函数里，避免手写 path 时逐个坐标换算出错（**第一版就错了**：门的右边界算成 38.36 而不是 30.36，渲染出来门糊住了半个房子）。
+第一版house母图曾配过一版矢量 `favicon.svg`（`gen-brand-svg.py` 把外轮廓逐行量出来用 path 重画）。换成本版场景母图后**把它删了**，理由是：那个房子只有五个几何色块，量得出来；现在这个场景（陶锅 + 挂锅 + 一摞碗 + 三样菜 + 木托盘，还带描边与水彩笔触）细节太多，手描不现实，自动描摹本机也没有（`potrace` / `autotrace` 都没装，且对笔触效果很差）。而 favicon 实际就渲染在 16~32px，**位图在这个尺寸本来就比描摹图干净**。
 
-**验证要挑对渲染器**：ImageMagick 在本机**没有 librsvg**（`magick -list format` 只有内部 `MSVG`/`XML`），它渲染这个 SVG 不可信。用真浏览器看：
+**留一条给将来**：真要矢量版，先装 `potrace` 或 `inkscape`，或者干脆请人重画一个"简化版"图标（只保留陶锅轮廓）专门当 favicon——不是把这张场景硬描一遍。
 
-```bash
-"/Users/aihf/Library/Caches/ms-playwright/chromium-1148/chrome-mac/Chromium.app/Contents/MacOS/Chromium" \
-  --headless --disable-gpu --allow-file-access-from-files \
-  --screenshot=/tmp/check.png --window-size=1160,330 file:///tmp/svgcheck.html
-```
-
-重画形状的完整步骤：改 `gen-brand-svg.py` 里的量测常量 → 跑 → 用上面的 Chromium 与 `favicon.png` 并排比对。
+**验图别用 ImageMagick 渲染 SVG**：本机 ImageMagick **没有 librsvg**（`magick -list format` 只有内部 `MSVG`/`XML`），渲染 SVG 不可信。要看 SVG 用真浏览器（Playwright 带的 Chromium 即可，见本文件 R-057 那台机器上的路径）。
 
 ### 四、验证（2026-10-14）
 
 | 项目 | 命令 / 入口 | 结果 |
 | --- | --- | --- |
-| 图标产出 | `bash apps/mobile/scripts/build-brand-assets.sh` | ✅ 48 个资源；`icon-foreground` 房子 587/1024px、`icon-only` 645/1024px |
-| 传统 vs 自适应大小 | 抠底后量房子高度占比 | ✅ 传统 58.3% vs 自适应 57.3%（差 1%，肉眼不可分） |
-| 装机实测（模拟器 Android 16 / 1080×2400 / 420dpi） | App info 截图 | ✅ **默认蓝白 X → 手绘房子**；圆盘直径 120px、房子高 68px = **56.7%**，与设计的 57.4% 一致 |
+| 图标产出 | `bash apps/mobile/scripts/build-brand-assets.sh` | ✅ 48 个资源；`icon-foreground` 场景 493/1024px、`icon-only` 542/1024px |
+| 传统 vs 自适应大小 | 抠底后量场景高度占比 | ✅ 传统 49.0% vs 自适应 48.1%（差 0.9%，肉眼不可分） |
+| 装机实测（模拟器 Android 16 / 1080×2400 / 420dpi） | App info 截图 | ✅ **默认蓝白 X → 卡通厨房场景**；圆盘直径 120px、场景高 56px = **46.7%**，与设计的 48.1% 一致 |
 | 自适应图标 XML | `mipmap-anydpi-v26/ic_launcher.xml` | ✅ 由 `@capacitor/assets` 写入，两层各 `inset 16.7%` |
 | 包内解析 | `aapt2 dump resources app-release.apk` | ✅ `windowSplashScreenAnimatedIcon=@mipmap/ic_launcher`、`windowSplashScreenBackground=@color/splashBackground(#fffcf1da)`、`mipmap/ic_launcher` 六个密度 + `anydpi-v26` XML 都在 |
-| 前端回归 | `pnpm --dir apps/mobile run test` | ✅ **517/517** |
-| APK 出包 | `./gradlew assembleRelease` | ✅ 21.1MB 签名包，装机成功 |
+| 前端回归 | `pnpm --dir apps/mobile run test` | ✅ **519/519** |
+| APK 出包 | `./gradlew assembleRelease` | ✅ 21.3MB 签名包，装机成功 |
 
 ### 五、注意（本次踩到的坑）
 
-1. **改母图不会自动改矢量 favicon**：`favicon.svg` 读的是 `gen-brand-svg.py` 里的**量测常量**，不是母图。真动了造型要按 §三 重新量一遍，否则两份图标会越长越不像。
+1. **换母图后必须重量的两个数**：`FG_ART_DP`（由图形宽高比决定，方形构图被圆遮罩切角，能放的尺寸比瘦高形小得多）与 `LEGACY_ART_RATIO`（= FG_ART_DP/108 × 192/176，取整）。照抄上一版的值会不是被切、就是大小不一致。
 2. **验证启动图别用 `adb shell screenrecord`**：模拟器上录出来是**全黑 5 秒**（这段画面录不到）。要用 `adb exec-out screencap -p` 连拍，但要连拍十几帧才抓得到中间那几帧——而且**启动窗口只显示一瞬**，连拍窗口不好对齐。更可靠的是把 `splashBackground` 临时改成 `#FF00FF` 重新出包，一眼就能看出系统到底画了什么（**验证完必须改回来**——本次就是这么确认"米色已经生效、只是中间夹了个白帧"的）。
 3. **`@capacitor/assets` 会顺手改 `AndroidManifest.xml`**：它把 `android:icon`/`roundIcon` 设成 `@mipmap/ic_launcher`（好在这与本项目原值一致），但它是**直接改源文件**的，所以 `git status` 里会多出这个文件的修改，提交时注意别把它当成无关改动。
 4. **png 会带进 ldpi 一整套新目录**：本次新增 `mipmap-ldpi/`（旧版模板没有这档）。不影响运行（`minSdk 24` 的机器几乎不会是 ldpi），但会让 diff 变长。

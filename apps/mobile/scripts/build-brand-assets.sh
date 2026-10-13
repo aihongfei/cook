@@ -6,7 +6,11 @@
 # 自适应图标 XML + 启动图 + Web favicon）。手改一次容易，但要保证"改母图后
 # 全族一起变、且尺寸对得上"就只能靠脚本。母图改了重跑本脚本即可。
 #
-# 母图：docs/brand/icon-master-1024.png（手绘水粉房子 + 烟囱爱心，AI 生成后人工选定）
+# 母图：docs/brand/icon-master-1024.png（卡通厨房场景：戴厨师帽的陶锅 + 挂锅 + 一摞碗 +
+#       番茄/胡萝卜/大葱，AI 生成后经用户从四版动画风候选里选定 D）。上一版"手绘水粉房子"
+#       归档在 history/brand/2026-10-14-icon-master-house-1024.png，要回退把它换回
+#       icon-master-1024.png 即可
+#       （但注意 FG_ART_DP 那组尺寸是按本图重量的，换回去要按注释重算）
 #
 # 关键约束（改脚本前先读）：
 #  1. 自适应图标的 Android 契约：画布 108dp，系统对源图**四边各内缩 16.7%**，
@@ -33,18 +37,20 @@ RES="$REPO_ROOT/apps/mobile/android/app/src/main/res"
 
 # --- 参数 ---
 CREAM="#FCF1DA"        # 品牌米色（= 前端 color-cream = splashBackground）
-KEY_FUZZ=12            # 抠底容差（%）：母图底色不是纯色，实测 8% 抠不净、20% 吃边缘
+KEY_FUZZ=12            # 抠底容差（%）：母图底色不是纯色，实测 8% 抠不净、20% 吃边缘；
+                       # 本母图背景很均匀（四角都是 251,238,207），10% 起结果就稳定
 DP=1024                # 源图画布边长（px），对应自适应图标 108dp
-FG_ART_DP=62           # 自适应前景里房子显示高度（dp）。实测：严格圆遮罩下只溢出 1 像素
-                       # （62→0.0028%、58→0、66→0.63%），再大就开始被切
-LEGACY_ART_RATIO=63    # 传统方形图标里房子占源图的比例（%）。
-                       # 为什么是 63 而不是 57（= 62dp/108dp）：传统图标要跟自适应图标
-                       # **看起来一样大**。@capacitor/assets 生成传统图标时会再内缩 8px
-                       # （192px 那档缩到 176px 再居中，见其 generateLegacyLauncherIcon），
-                       # 房子实际只剩 63% × 176/192 ≈ 57.7%，与自适应的 62/108 = 57.4% 齐平。
-                       # 实测（xxxhdpi，抠底后量房子高度）：63% → 约 57.6%；57% → 52.6%。
-                       # 传统图标只在 API 24/25 上生效，但两边一样大没有额外成本
-SPLASH_ART_DP=150      # 启动图里房子高度（dp）
+FG_ART_DP=52           # 自适应前景里**场景**的显示高度（dp）。本母图是近方形构图
+                       # （内容框 869×903，宽高比 0.96），塞进圆形遮罩时四个角最先被切，
+                       # 所以这个值比上一版房子母图（62dp）小得多。实测「艺术像素落在
+                       # 66dp 安全圈外」的比例：52dp→0%、54dp→0.11%、56dp→1.03%、
+                       # 58dp→2.62%。取 52dp 是**仍然 0% 被切的上限**
+LEGACY_ART_RATIO=53    # 传统方形图标里场景占源图的比例（%）。
+                       # 目标同样是"与自适应图标看起来一样大"。自适应里场景占
+                       # 52/108 = 48.1% 的图标位；@capacitor/assets 生成传统图标会再内缩
+                       # 8px（192px 档缩到 176px 再居中），所以要 48.1% × 192/176 = 52.5%
+                       # → 取 53%。传统图标只在 API 24/25 上生效（minSdk 24）
+SPLASH_ART_DP=150      # 启动图里场景高度（dp）
 
 [ -f "$MASTER" ] || { echo "找不到母图：$MASTER" >&2; exit 1; }
 command -v magick >/dev/null || { echo "需要 ImageMagick（magick）" >&2; exit 1; }
@@ -119,11 +125,11 @@ PUBLIC="$REPO_ROOT/apps/mobile/public"
 # 位图版：直接缩母图，与启动器图标同一张观感
 magick "$ASSETS/icon-only.png" -resize 64x64 "$PUBLIC/favicon.png"
 magick "$ASSETS/icon-only.png" -resize 180x180 "$PUBLIC/apple-touch-icon.png"
-# 矢量版：由量测脚本生成（房子按实测形状用 path 重画，任意放大都清晰）。
-# 它读的是**量测常量**而不是母图，所以改母图后这边的形状不会自动跟着变——
-# 真动了造型要按 RUNBOOK R-060 重新量一遍再改 gen-brand-svg.py 里的常量。
-python3 "$REPO_ROOT/apps/mobile/scripts/gen-brand-svg.py" | sed 's/^/   /'
-echo "   已写 public/favicon.png(64) / favicon.svg / apple-touch-icon.png(180)"
+# 为什么没有矢量版 favicon：上一版母图是个"只有五个几何块"的小房子，还能把外轮廓
+# 逐行量出来用 path 重画；现在这个场景（陶锅 + 挂锅 + 一摞碗 + 三样菜 + 木托盘）细节太多，
+# 手描不现实、自动描摹（potrace 等）本机没有且对水彩笔触效果很差，所以只出位图。
+# favicon 实际就渲染在 16~32px，位图在这个尺寸上本来就比描摹图干净。
+echo "   已写 public/favicon.png(64) / apple-touch-icon.png(180)"
 
 echo "== 6/6 清掉遗留的默认矢量素材 =="
 # 默认模板的白色 X 前景矢量：新自适应图标用的是 @mipmap/ic_launcher_foreground，
@@ -138,6 +144,6 @@ echo "  assets/icon-{only,foreground,background}.png      （源图，入库）"
 echo "  android/.../mipmap-*/ic_launcher{,_round,_foreground,_background}.png"
 echo "  android/.../mipmap-anydpi-v26/ic_launcher{,_round}.xml"
 echo "  android/.../drawable*/splash.png"
-echo "  public/favicon.png + favicon.svg + apple-touch-icon.png"
+echo "  public/favicon.png + apple-touch-icon.png"
 echo
 echo "改母图后重跑本脚本即可全族同步；之后用 pnpm run build:apk 出包装机复核。"
