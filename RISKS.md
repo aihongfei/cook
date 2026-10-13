@@ -177,7 +177,7 @@
 - **将来要改时**：① 做删除时先做引用计数（同 `imageKey` 被几条记录引用）或改成"删记录不删对象"；② 若要在意重复，加"同一用户同一天同一图只记一条"的唯一约束（`@@unique([userId, checkDate, imageHash])`），前端提示"这张今天传过了"。
 - **相关**：D-023 的遗留项「本次不做删除」。
 
-## R-23 AI 网关要求回传"思维链"，偶发把多轮对话 400 拒掉（🟡 2026-10-12 发现，待修）
+## R-23 AI 网关要求回传"思维链"，偶发把多轮对话 400 拒掉（🟢 2026-10-13 查清：pi-ai 已内置该处理，待迁移落地）
 
 - **现状**：`deepseek-v4.1-flash` 走的是**思维模式**。上游在某些轮次要求把助手消息里的 `reasoning_content` **原样回传**，而本项目的 `ai.client.ts` 只回传 `role/content/tool_calls`（`WireMessage` 没有这个字段），于是那一轮被上游 400 拒：
   `The reasoning_content in the thinking mode must be passed back to the API`。
@@ -190,6 +190,11 @@
 - **这不是本轮改动引起的**：本次 F4-05 只动了 orders 模块与订单前端，未碰 `services/api/src/modules/ai/**`（`git diff --name-only` 核对过）；容器日志里的 400 直接来自网关。
 - **影响面**：AI 问答的多轮场景（带历史追问、对话内点菜的工具循环）会**偶发**失败——正好落在用户最常用的那条路上，所以不能当噪音放着。单轮提问若上游在 system+user 阶段就要求推理回传，也会中招。
 - **将来要改时**：① `WireMessage` 加 `reasoning_content?: string | null`，从流式回包（增量段）与 JSON 回包里读出来并**原样回传**——这是网关要的，也是唯一可靠的修法；② 回传时保持"上游没给就不带"（别塞空串）；③ 回归必须**真网关跑一遍**：stub 只按我们自己的形状回，这类协议问题它天然看不见（与 D-026 第三次补充里"stub 拦不住协议错"同一个教训）。
+- **2026-10-13 查清（spike 实测，见 D-042）**：
+  1. **官方早就处理了这件事**：pi-ai 内置了 `providers/opencode-go` 目录，`deepseek-v4.1-flash` 的条目里显式写着 `requiresReasoningContentOnAssistantMessages: true` 与 `thinkingFormat: "deepseek"`——这正是本条描述的那个怪癖。
+  2. **pi-ai 重放 assistant 消息时自动带 `reasoning_content`**：抓上游报文对照，只重放正文是 `{"role","content"}`，pi-ai 的方式是 `{"role","content","reasoning_content"}`。
+  3. **但本次两个变体都被网关接受**（都 `stop=stop`）——所以本条的 400 确实是**偶发**（不是"缺它就必然失败"，与上面"推测的触发条件"一致）；pi-ai 的价值是让重放的字段**一个不少**，把偶发面收窄，而不是"换上去就不再发生"。
+- **处置**：随 harness 迁移（D-042）一并落地；迁移后再跑几轮真网关多轮对话观察。**在迁移完成前，本条仍是"自研客户端的已知缺陷"。**
 - **相关**：`DECISIONS.md` D-026（AI 落地与工具循环）、`RUNBOOK.md` R-018/R-020；F16-09、F18-02 的"多轮"部分**偶发受影响**。
 
 ## R-24 AI 网关偶发连不上（fetch failed → 502），会被误当成代码回归（🟡 2026-10-13 发现，待定处理）

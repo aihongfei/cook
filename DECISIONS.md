@@ -713,3 +713,26 @@
   4. **不动的部分**：兜底池不删、失败静默、清洗后不够一屏判失败、两个抽屉共用一次在途请求——这些仍是 D-032 的口径。
 - **验证**（见 `RUNBOOK.md` R-034）：stub 上游现在**记录每次请求实际带的 schema 名**，接口验收据此断言"提示词那条路发的是 prompts、推荐那条路发的是 picks"（28/28）；反证（把 service 改回发 `PICKS_SCHEMA`）该断言**变红**；真网关连打三次 `/ai/prompts` 返回**三批不同**的快问；浏览器里重新打开抽屉，XHR 记录到**每一次打开各发一次**生成（1→2 次），界面上那 5 条快问与 3 条示例**都取自该次 AI 返回的批次**（`shownSubsetOfBatch=true`），且**没有一条**落在写死池子里。
 - **相关**：`RISKS.md` R-29（本类"发错 schema → 静默降级"的陷阱已记为风险）；D-032（本条是它的修正与补完，不是推翻）；F16-09 / F18-02 的条目已按本条订正。
+
+## D-042 harness 迁移到 pi-agent 的可行性验证（用户 2026-10-13 指出"我说的是让你用 pi-agent"；本轮只做验证不改应用代码）（2026-10-13）
+
+- **背景**：用户问「你现在智能体那块是自己实现的harness吗，我不是说了让你用pi-agent或者其他现成的吗，哪种方案好啊」。核查属实——D-009 定的 harness 就是 pi-agent，做工具调用时（D-026 第三次补充）改成了自研薄客户端。当时的原文是「piAgent **或其他**智能体」，我把"或其他"读成了"也可以自己写"，而用户的本意是"或其他**现成的**"。**这个解读偏宽，是我的问题**。用户选定"先小验证再迁移"。
+- **验证方式**：在 `/tmp/pi-spike` 独立安装 `@earendil-works/pi-ai@1.2.0` + `@earendil-works/pi-agent-core@1.2.0`（86 个包），**不碰应用代码**，直连真网关与本地 stub 逐项实测。密钥从 `.env` 读进内存，未打印、未入库。
+- **实测结果（全过）**：
+  | 项 | 结果 |
+  | --- | --- |
+  | 基础对话 | ✅ `stop=stop`，正文正确 |
+  | 会话头（网关强制） | ✅ `transformHeaders` 能加；**不带时上游回 400 `MissingSessionID`**（错误原文），证明这个头必须 |
+  | 工具调用 | ✅ `stop=toolUse`，参数解析正确；**流式里也能拿到**（`toolcall_delta` 11 段拼成 `{"keyword":"红烧肉"}`） |
+  | 多轮工具循环 | ✅ 第 1 轮要工具 → 回喂 → 第 2 轮给正文。**注意**：回喂必须塞**整条** assistant 消息（含 `usage`），只塞 `content` 会炸 pi-ai 内部的 `totalTokens`（我第一次就这么写的） |
+  | 结构化输出 | ✅ 选项里没有 `responseFormat`，但 `onPayload` 能注入 `json_schema` + `strict`；真网关回干净 JSON，stub 侧也记到了 `schemaName=prompts` |
+  | 流式 | ✅ `text_delta` 增量正常；stub 的**碎片化** tool_calls 也拼对了 |
+  | stub 兼容 | ✅ 现有 28 条接口验收依赖的 stub 上游，pi-ai 完全认得（含工具协议形状校验那一层） |
+  | 图片输入 | ✅ **意外收获**：现用模型实测收图并正确描述（1×1 纯色图），内置目录里它的 `input` 就标了 `["text","image"]` |
+  | CJS 加载 | ✅ 真 `import()` 在 Node 22.19 / 24.21（容器）/ 26.7 上都成功（68 个导出）；**但 TS 的 commonjs 预设会把 `await import()` 降级成 `require`**（编译产物实测），要嘛用 `new Function('s','return import(s)')`、要嘛把后端切 NodeNext——**这是迁移必须铺的一座桥** |
+- **两个"官方早就处理了"的发现（对 R-23 的直接价值）**：
+  1. **pi-ai 内置了这个网关的目录**（`providers/opencode-go`，含 `deepseek-v4.1-flash`），条目里显式写着 `requiresReasoningContentOnAssistantMessages: true` 与 `thinkingFormat: "deepseek"`——**R-23 那个"网关要求回传思维链、偶发 400"的坑，官方已经编码并处理**。
+  2. **pi-ai 重放 assistant 消息时会自动带上 `reasoning_content`**：我抓了上游报文，变体①（只重放正文）→ `{"role","content"}`；变体②（pi-ai 的方式）→ `{"role","content","reasoning_content"}`。两个变体这次都被网关接受，所以 R-23 的 400 是**偶发**（不是"缺思维链必然失败"），但 pi-ai 让重放的字段**一个不少**，偶发面变小。
+- **结论**：**pi-ai 能满足后端现有全部调用形态**（推荐 / 提示词 / 问答 / 流式 / 工具循环），且顺带把 R-23 的成因处理掉了。迁移代价明确：① 一座 ESM 加载桥（`new Function` 或切 NodeNext）；② 86 个包的依赖树；③ 把 `chatJson` / `chatStreamEvents` 两个函数的内部实现换掉（**HTTP 契约、工具定义、schema 常量、28 条验收脚本都不动**）。
+- **决定（待用户确认后执行）**：按用户选定的"先验证再迁移"——验证已通过，**下一步做迁移**。迁移范围严格限定在 `services/api/src/modules/ai/ai.client.ts`（以及新增的 ESM 桥文件），service / controller / rules / tools 与前端一行不动。
+- **相关**：D-009（harness 原定 pi-agent）、D-026 第三次补充（偏离自研的记录，本条是对它的修正）、`RISKS.md` R-23（思维链，pi-ai 已处理）、R-24（网关偶发连不上，与本次无关）。
