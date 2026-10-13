@@ -17,6 +17,7 @@
 | 回溯选型依据（为什么不用现成项目、数据从哪来） | `docs/context/RESEARCH.md` |
 | 确认需求依据、技术路线、验收标准、边界 | `docs/context/PLAN.md` |
 | 查/领功能条目（要做什么、优先级、状态） | `docs/context/FEATURES.md` |
+| 全局 AI 助手（F16-10）的形态、对话样式、工具分档、待拍板项 | `DECISIONS.md` D-052（**尚未开工**） |
 | 查已确认的产品/技术决策及理由 | `DECISIONS.md` |
 | 查已知风险、验证缺口 | `RISKS.md` |
 | 定位目录、端口、配置、部署位置关系 | `MAP.md` |
