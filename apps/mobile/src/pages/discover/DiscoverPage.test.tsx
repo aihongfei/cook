@@ -118,17 +118,13 @@ it('空库时说人话，不跳走也不静默', async () => {
   expect(await screen.findByText(/还没有菜/)).toBeTruthy()
 })
 
-it('两个 AI 入口都还在（合并成一块之后位置变了，别改丢）', async () => {
+it('问答入口（问 AI）还在，且打得开', async () => {
   mockRecipes(12)
   renderDiscover()
 
-  const suggest = await screen.findByText('AI 帮你想')
-  expect(suggest).toBeTruthy()
-  expect(screen.getByText(/问 AI/)).toBeTruthy()
-
-  // 点开「AI 帮你想」：抽屉里的引导文案出现即入口有效
-  fireEvent.click(suggest)
-  expect(await screen.findByText(/说说想吃什么/)).toBeTruthy()
+  expect(await screen.findByText(/问 AI/)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '点这里问 AI →' }))
+  expect(await screen.findByText(/拿不准的都能问/)).toBeTruthy()
 })
 
 it('发现页不再有那三格假数字，也不再有重复的入口胶囊（2026-10-13 信息架构改版，D-040）', async () => {
@@ -160,73 +156,62 @@ it('问 AI 那行只有后半句可点：前半句是说明，不该看着像按
   expect(await screen.findByText(/拿不准的都能问/)).toBeTruthy()
 })
 
-it('三条出路都在，且按"马上给一道 / 等一会儿给几道"分成两行（F5-05 新增第三个）', async () => {
+it('两条出路并排一行，AI 收进抽屉（2026-10-13 用户提出重复后合并，D-061）', async () => {
   mockRecipes(12)
   renderDiscover()
 
   await screen.findByText('摇一道')
   expect(screen.getByText('帮我决定')).toBeTruthy()
-  // 「AI 帮你想」在按钮与抽屉标题里各有一处，所以这里只断言"按钮"有一处
-  expect(screen.getAllByRole('button', { name: /AI 帮你想/ })).toHaveLength(1)
-
   /*
-   * 分行不是排版偏好，是**承诺**的区别：上面两个立刻给一道，下面那个给几道、要等十几秒。
-   * 三件挤一行的话每格只剩 103px（391 宽的屏），"AI 帮你想"会被截成省略号——
-   * 一个说不全名字的按钮比多占一行糟得多（见 shared.scss 的 .today__row）。
+   * 「AI 帮你想」**不再单独占一行**：它已经收进「帮我决定」那个抽屉的第二半。
+   * 这条守住的就是这件事——哪天有人把它加回卡上，用户提出的那个重复就又回来了
+   * （三个出口里两个都叫"我替你决定"）。
    */
+  expect(screen.queryByText('AI 帮你想')).toBeNull()
+
   const rows = [...document.querySelectorAll('.today__row')].map((row) =>
     [...row.querySelectorAll('button')].map((button) => button.textContent?.replace(/\s+/g, '')),
   )
-  expect(rows).toEqual([['🎲摇一道', '✨帮我决定'], ['🍳AI帮你想']])
+  expect(rows).toEqual([['🎲摇一道', '✨帮我决定']])
 
   /*
-   * 第二行那一个必须**撑满整行**：不撑满时实测只有 102px（内容宽），与上面一行
-   * 两个 160px 的按钮并排，看着像"这张卡没做完"。jsdom 算不了布局，所以守规则。
+   * 两个按钮必须**等宽平分**那一行（用户 2026-10-13：「为什么有时候会歪」那条的延续）：
+   * jsdom 算不了布局，所以守决定这件事的规则。
    */
   const css = readFileSync(join(srcDir, 'pages/shared.scss'), 'utf8')
-  const aiRow = css.match(/\.today__row--ai\s+\.today__ai\s*\{[^}]*\}/)?.[0] ?? ''
-  expect(aiRow, '没读到「AI 帮你想」在独行时撑满的规则').toMatch(/flex:\s*1/)
+  const rowRule = css.match(/\.today__row\s+\.today__shake,\s*\n\.today__row\s+\.today__decide\s*\{[^}]*\}/)?.[0] ?? ''
+  expect(rowRule, '没读到同一行两个按钮平分的规则').toMatch(/flex:\s*1/)
 })
 
-it('同一行里几个按钮的边框宽度一致（否则 flex:1 下不等宽，看着就是歪的）', () => {
+it('同一行里两个按钮的边框宽度一致（否则 flex:1 下不等宽，看着就是歪的）', () => {
   /*
    * 用户 2026-10-13：「为什么有时候会歪」。实测根因不是随机的：这些按钮是
    * `flex: 1`（flex-basis: 0%）平分一行，而 0% 基准下**边框不参与**那份平分——
    * 只有其中一个带 1px 描边时它多占 2px（左右各 1），实测宽度 159 / 161，
    * 中间那道缝也随之偏左 1px。去掉边框两边都是 160；两边都给 1px 又都是 160。
    *
-   * 2026-10-13 加了第三个出口「帮我决定」（F5-05）之后这条守卫的范围也跟着变大：
-   * 现在**三个**按钮共用同一块公共规则（各自只准改颜色），谁哪天给其中一个
-   * 单独加宽度就会破坏等宽——那正是这条用例要拦住的。
-   *
    * jsdom 算不了布局，所以守**决定这件事的那条规则**（与 corner-art.test 同一手法）。
    */
   const css = readFileSync(join(srcDir, 'pages/shared.scss'), 'utf8')
-  const common =
-    css.match(/\.today__shake,\s*\.today__decide,\s*\.today__ai\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
-  expect(common, '没读到 .today__shake, .today__decide, .today__ai 的公共规则').toBeTruthy()
+  const common = css.match(/\.today__shake,\s*\n\.today__decide\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+  expect(common, '没读到 .today__shake, .today__decide 的公共规则').toBeTruthy()
   expect(common, '边框宽度必须在公共规则里定死（1px 透明占位）').toContain('border: 1px solid transparent')
 
   /*
-   * 找各按钮的独立规则时**必须先跳过公共块**：公共块里正好也有 `.today__ai {` 那一行，
-   * 直接在整个文件里匹配会先抓到它（第一版就是这么红的——断言读到的其实是公共块，
-   * 看着像"AI 那句没写边框颜色"）。
-   */
-  const after = css.slice(css.indexOf(common) + common.length)
-  /*
-   * ⚠️ 必须匹配**行首**的独立规则（`m` + `^`）：`.today__row .today__decide { flex: 1 }`
+   * 各自的独立规则**必须锚行首**（`m` + `^`）：`.today__row .today__decide { flex: 1 }`
    * 这种后代选择器里也含 `.today__decide {`，不锚行首就会先抓到它，
    * 于是断言读到的是"只写了 flex"的那条，看着像"没写边框颜色"。
    */
+  const after = css.slice(css.indexOf(common) + common.length)
   const ruleOf = (name: string) => after.match(new RegExp(`^\\.${name}\\s*\\{[^}]*\\}`, 'm'))?.[0] ?? ''
 
-  for (const name of ['today__shake', 'today__decide', 'today__ai']) {
+  for (const name of ['today__shake', 'today__decide']) {
     const rule = ruleOf(name)
     expect(rule, `没读到 .${name} 的独立规则`).toBeTruthy()
     // 只准改颜色（需要描边的写 border-color）；再写一遍 border 就破坏同排等宽
     expect(rule, `.${name} 不该自带边框宽度（写了就破坏同排等宽）`).not.toMatch(/border\s*:/)
   }
 
-  expect(ruleOf('today__ai'), '「AI 帮你想」只该改边框颜色').toMatch(/border-color\s*:/)
+  // 需要描边的那个必须用 border-color（不是重新写一遍 border）
   expect(ruleOf('today__decide'), '「帮我决定」只该改边框颜色').toMatch(/border-color\s*:/)
 })

@@ -170,7 +170,8 @@
    入口本身并进了首页的「今天吃什么」卡（见 shared.scss 的 .today）；
    这里管**对话界面的公用语汇**：提示、快问、等待态、推荐结果、问答气泡、建议卡。
 
-   ⚠️ 这份表被**三个抽屉**共用：这里的「AI 帮你想」「问 AI」，以及外壳层的全局 AI 助手
+   ⚠️ 这份表被**三处**共用：「今天吃什么」抽屉的下半（2026-10-13 合并后的
+   `components/AiSuggestPanel`）、这里的「问 AI」，以及外壳层的全局 AI 助手
    （`components/ai/AiAssistantSheet`——它在任意页都在，所以不能只写在发现页里）。
    助手独有的部分（回执卡、「新对话」）在 `components/ai/ai-assistant.scss`，
    改动**公用的**这几条时记得那边也在用。 */
@@ -853,28 +854,50 @@
   align-items: center;
 }
 
-/* 「就它了」是这一屏唯一的主按钮（用户来这儿就是要一个答案，而不是继续挑） */
-.decide__take {
-  flex: 1;
-}
-
+/*
+ * 这一行是**一对**：两个按钮的几何必须完全一致（内边距、圆角、边框宽度、外边距），
+ * 只有颜色不同。不然"一个胶囊、一个圆角矩形，再错开几像素"，看着就是没对齐
+ * ——用户 2026-10-13 当场指出的就是这块。
+ *
+ * 实测第一版：「就它了」借用了 `.recipe-button`（菜谱详情页那个），而它带着
+ * `margin-top: 12px` 与 `border-radius: 999px`；「换一道」是我另写的 14px 圆角、无外边距。
+ * 结果两个按钮**顶边差 6px**（320 / 314），形状也不一样。所以这一对**不借用别处的按钮类**：
+ * 几何在下面这条公共规则里定死，各自的规则只准改颜色。
+ */
+.decide__take,
 .decide__swap {
-  flex: 0 0 auto;
   padding: 10px 14px;
+  margin-top: 0;
   font: inherit;
   font-size: 13px;
-  color: #8a4a1e;
-  background: rgb(255 251 242 / 62%);
-  border: 1px solid rgb(224 123 57 / 34%);
+  /* 边框宽度写在这里（两边都 1px 透明占位）：`flex: 1` 是 basis 0%，宽度不吃边框，
+     只有一边带边框时两边就不等宽了——与「今天吃什么」那张卡上两个按钮同一条道理 */
+  border: 1px solid transparent;
   border-radius: 14px;
+  transition: transform 0.12s ease;
 
   &:active {
     transform: scale(0.97);
   }
 
   &:disabled {
-    opacity: 0.55;
+    opacity: 0.6;
   }
+}
+
+/* 「就它了」是这一屏唯一的主按钮（用户来这儿就是要一个答案，而不是继续挑） */
+.decide__take {
+  flex: 1;
+  color: #ab5527;
+  background: var(--color-paper);
+  border-color: #de9057;
+}
+
+.decide__swap {
+  flex: 0 0 auto;
+  color: #8a4a1e;
+  background: rgb(255 251 242 / 62%);
+  border-color: rgb(224 123 57 / 34%);
 }
 
 .decide__done {
@@ -923,4 +946,124 @@
   font-size: 11px;
   line-height: 1.7;
   color: var(--color-ink-3);
+}
+
+/* ---------------------------------------------------------------
+ * 「今天吃什么」抽屉的下半：「都不合意？说说想吃什么」（D-061 合并后新增）
+ *
+ * 这一行必须**看得出来与上面那道菜是一体的**（"都不合意"承接的是上面），
+ * 而不是又一个并列的按钮——那正是用户提出的那个重复问题。
+ * 所以它用虚线上边框连起来，与采购清单那条「家里有 N 样，不用买」同一套语汇
+ * （都是"可展开的一句话"）。
+ *
+ * ⚠️ 用户 2026-10-13 两条反馈都在这一块，所以下面这几条**不是装饰**：
+ * 「右侧展开按钮不明显」→ 箭头从 12px 裸字符改成**带底的圆形矢量图标**（见 __arrow）；
+ * 「展开要加过渡动画」→ 展开/收起各一段（`today-ai-in` / `today-ai-out`），
+ * 收起的卸载时机由 JS 那边的 `AI_EXIT_MS` 对齐。
+ * --------------------------------------------------------------- */
+.today-ai-block {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-line);
+}
+
+.today-ai-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  padding: 7px 2px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+  text-align: left;
+  background: none;
+  border: 0;
+  /* 展开时这一行本身也换色：它从"一句可选的说法"变成"正在用的东西" */
+  transition: color 0.15s ease;
+
+  &.is-open {
+    color: #8a4a1e;
+  }
+}
+
+.today-ai-toggle__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.6;
+}
+
+/*
+ * 箭头：**带底的圆形矢量图标**，不是裸的 ⌄ 字符。
+ *
+ * 用户说"右侧展开按钮不明显"——裸字符只有 12px、没有底色，在一行灰字尾巴上
+ * 几乎看不见，也不像能点。现在给它 22px 的圆底 + 描边（可点控件的最小尺寸），
+ * 并把旋转做成 transition（字符版 ⌄/⌃ 互换是"跳"的一下，没有过渡可言）。
+ */
+.today-ai-toggle__arrow {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: #8a4a1e;
+  background: rgb(224 123 57 / 13%);
+  border: 1px solid rgb(224 123 57 / 28%);
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+
+  /* 展开时转 180°（箭头朝上）：与面板的入场动画同时发生 */
+  &.is-open {
+    transform: rotate(180deg);
+  }
+}
+
+/* 展开后的那一块（AiSuggestPanel）：与上面的菜之间留一口气，
+   不然"输入框紧贴着菜名"看着像同一个表单里的字段 */
+.today-ai {
+  margin-top: 8px;
+  animation: today-ai-in 0.2s ease-out both;
+}
+
+/* 正在收起的那一段（`AiSuggestPanel` 的 closing）：播完由外层卸载 */
+.today-ai.is-closing {
+  animation: today-ai-out 0.18s ease-in both;
+}
+
+@keyframes today-ai-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes today-ai-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* 关了动效偏好就只留状态变化（与 ai-in 那处的处理一致）：动画不是信息 */
+@media (prefers-reduced-motion: reduce) {
+  .today-ai,
+  .today-ai.is-closing {
+    animation: none;
+  }
+
+  .today-ai-toggle__arrow {
+    transition: none;
+  }
 }

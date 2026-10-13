@@ -1,23 +1,26 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DotLoading } from 'antd-mobile'
-import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
 import { toast } from '@/components/ui/toast'
 import { useAiPrompts, useAiSuggest, useAiStatus, type SuggestedPick } from '@/api/ai'
 import { useAddOrderItem, useOrderOptions } from '@/api/orders'
 import { useFamily } from '@/api/family'
 import { nextMealDefaults } from '@/pages/order/next-meal'
-import { useAiSuggestSession } from '@/stores/ai-suggest-session'
+import { useTodaySession } from '@/stores/today-session'
 import { pickHints } from '../ai-prompts'
 import '../../shared.scss'
 
 /**
- * 「AI 帮你想」（M16 子集 / D-026）。
+ * 「AI 帮你想」这一块（M16 子集 / D-026）。2026-10-13 起它是**合并抽屉的下半部**
+ * （见 D-061）：上半部是「帮我决定」立刻给的那一道，「想吃点特别的？」之后才轮到它。
+ *
+ * ⚠️ 它**不再自带 BottomSheet**：外层由 `TodaySheet` 提供。所以这里的根节点是
+ * 一个普通 `<div>`，而引导语/错误那几处的措辞也不再需要提"抽屉"。
  *
  * 定位是**掌勺人的参谋**：说一句想吃什么，从**本库真实的菜**里挑几道，直接就能点。
  * 推荐里的菜名与 id 都由后端按库里数据回填（模型编造的 id 会被丢掉），
- * 所以这里可以放心把 pick 当"库里存在的菜"用。
+ * 所以这里可以放心把 pick 当"库里存在的菜"用。口味与忌口已经在后端排过（F5-03）。
  *
  * 五个刻意的设计：
  * - **未配置时明说去哪配**，不给假的推荐撑场面（假数据会让用户以为 AI 在工作）；
@@ -25,7 +28,7 @@ import '../../shared.scss'
  *   等于白推荐（这是他为什么来用 AI，而不是去菜谱库翻）；
  * - **菜名点得进详情、返回时抽屉原样还在**（用户 2026-10-13 提）：「点这道」是"我要吃"，
  *   "它到底怎么做"是另一件事——想看一眼做法再决定点哪道，是这个入口最自然的用法。
- *   会话状态因此放在 `stores/ai-suggest-session`（路由跳转会卸载本组件，放 useState 会全丢）；
+ *   会话状态因此放在 `stores/today-session`（路由跳转会卸载本组件，放 useState 会全丢）；
  * - **快问由 AI 按这家人的情况现生成**（用户 2026-10-12：「内置的这些不够用」），
  *   写死的那份只作兜底：没配、还没生成好、生成失败时照旧能用（见 ai-prompts）；
  * - **「换一批」不再调模型**，就在拿到的那批里抽——点一下等十几秒的话，那按钮等于没了。
@@ -34,12 +37,23 @@ import '../../shared.scss'
 /** 等结果时的阶段提示（模型要 11～40 秒，明说在干什么比一个转圈更有耐心） */
 const SUGGEST_TIPS = ['正在翻菜谱小书…', '在挑荤素搭配…', '快好了，看看合不合口…']
 
-interface AiSuggestSheetProps {
-  visible: boolean
-  onClose: () => void
+/**
+ * `onNavigate`：用户点菜名去看做法前调用。合并之后**抽屉的开关在上层**，
+ * 所以这里不需要（也不能）自己关抽屉——只需要在跳走前把"这一场已经开始"的标记打上，
+ * 这样从详情返回时抽屉还开着（`start()` 会清空一切，绝不能在那条路上调）。
+ */
+interface AiSuggestPanelProps {
+  onNavigate: () => void
+  /**
+   * 正在播退场动画（用户刚把它收起来）。
+   *
+   * 交给外层控制：**卸载**这件事由外层在动画结束后做（这样展开状态仍只由 store 决定，
+   * 面板自己不去记"我是不是正在消失"）。这一块只据此换一个类名，让退场动画有起始值。
+   */
+  closing?: boolean
 }
 
-export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps) {
+export default function AiSuggestPanel({ onNavigate, closing = false }: AiSuggestPanelProps) {
   const status = useAiStatus()
   const family = useFamily()
   const options = useOrderOptions()
@@ -49,21 +63,21 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
    * 会话状态全部来自 store（见该文件的说明）：推荐、输入、已加入标记、快问那一排。
    * 这样"点菜名进详情 → 返回"时它们都还在，抽屉也还是开着的。
    */
-  const hint = useAiSuggestSession((state) => state.hint)
-  const picks = useAiSuggestSession((state) => state.picks)
-  const added = useAiSuggestSession((state) => state.added)
-  const quickHints = useAiSuggestSession((state) => state.quickHints)
-  const setHint = useAiSuggestSession((state) => state.setHint)
-  const setPicks = useAiSuggestSession((state) => state.setPicks)
-  const markAdded = useAiSuggestSession((state) => state.markAdded)
-  const clearAdded = useAiSuggestSession((state) => state.clearAdded)
-  const setQuickHints = useAiSuggestSession((state) => state.setQuickHints)
+  const hint = useTodaySession((state) => state.hint)
+  const picks = useTodaySession((state) => state.picks)
+  const added = useTodaySession((state) => state.aiAdded)
+  const quickHints = useTodaySession((state) => state.quickHints)
+  const setHint = useTodaySession((state) => state.setHint)
+  const setPicks = useTodaySession((state) => state.setPicks)
+  const markAdded = useTodaySession((state) => state.markAiAdded)
+  const clearAdded = useTodaySession((state) => state.clearAiAdded)
+  const setQuickHints = useTodaySession((state) => state.setQuickHints)
   /*
    * 这次挂载是"续上"还是"新开"：新开时 `start()` 会把 picks 清成 null，
    * 所以**有推荐就是续上**（从详情返回、或切走再回来）。
    * 用 useState 定住：后面 ask() 会改 picks，判定不能跟着变。
    */
-  const [resumed] = useState(() => useAiSuggestSession.getState().picks !== null)
+  const [resumed] = useState(() => useTodaySession.getState().picks !== null)
   // 快问：优先用 AI 按这个家现生成的那批（见 api/ai 的 useAiPrompts）。
   // `enabled` 等 status 回来再开——没配 AI 时不该白发一次注定 503 的请求。
   // **续上时不再生成**：那不是"新点开一次"，重生成只会让用户刚看到的那排快问自己换掉；
@@ -145,17 +159,18 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
   }
 
   return (
-    <BottomSheet visible={visible} title="AI 帮你想" onClose={onClose}>
+    <div className={['today-ai', closing && 'is-closing'].filter(Boolean).join(' ')}>
       {status.data && !status.data.configured ? (
         // 未配置就把话说清楚：怎么配、配完会怎样。不给假推荐。
         <p className="ai__tip">
-          还没接上 AI，所以这里先不给推荐——省得你以为是真在想。
+          还没接上 AI，所以想提要求这一块先不给推荐——省得你以为是真在想。
           在根目录 .env（本机直跑则 services/api/.env）里填 AI_API_BASE / AI_API_KEY / AI_MODEL，
           重启后端就能用。其余功能不受影响。
         </p>
       ) : (
         <>
-          <p className="ai__lead">说说想吃什么，我从菜谱小书里挑几道能直接安排的。</p>
+          {/* 展开行已经说了"说说想吃什么"，这里只说**怎么问**（不重复请一次） */}
+          <p className="ai__lead">说一句就行：想吃酸的、有小孩、要快一点的。挑出来的都能直接点。</p>
 
           <div className="ai__hint-row">
             <span className="ai__hint-label">常问</span>
@@ -226,7 +241,7 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
           {picks?.length === 0 && !suggest.isPending && (
             <p className="ai__hint">
               这次没挑出来（可能库里没有合口味的）。换个说法再试，或去
-              <Link className="weekplan__link" to="/recipes" onClick={onClose}>
+              <Link className="weekplan__link" to="/recipes" onClick={onNavigate}>
                 菜谱小书
               </Link>
               自己翻翻。
@@ -250,11 +265,16 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
                      * 另一件事。链到详情页，带上来源 `/discover`（返回按钮回发现页）。
                      *
                      * 返回时抽屉为什么还在、推荐为什么原样：本组件不因这次跳转卸载吗？——
-                     * 会卸载。所以会话状态在 stores/ai-suggest-session 里（推荐/输入/已加入
+                     * 会卸载。所以会话状态在 stores/today-session 里（推荐/输入/已加入
                      * 标记都在那儿），`open` 也一直没被改过；详情页的返回按钮回到 /discover，
                      * 抽屉据此重建、内容照旧。**这条路径不调任何 store 动作**，正是关键。
                      */}
-                    <Link className="ai__pick-main" to={`/recipes/${encodeURIComponent(pick.recipeId)}`} state={{ from: '/discover' }}>
+                    <Link
+                      className="ai__pick-main"
+                      to={`/recipes/${encodeURIComponent(pick.recipeId)}`}
+                      state={{ from: '/discover' }}
+                      onClick={onNavigate}
+                    >
                       <span className="ai__pick-name">{pick.name}</span>
                       {pick.reason && <span className="ai__pick-reason">{pick.reason}</span>}
                     </Link>
@@ -282,6 +302,6 @@ export default function AiSuggestSheet({ visible, onClose }: AiSuggestSheetProps
           )}
         </>
       )}
-    </BottomSheet>
+    </div>
   )
 }

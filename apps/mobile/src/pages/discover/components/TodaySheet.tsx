@@ -9,49 +9,105 @@ import { useAddOrderItem, useOrderOptions } from '@/api/orders'
 import { useFamily } from '@/api/family'
 import { nextMealDefaults } from '@/pages/order/next-meal'
 import RecipeImage from '@/pages/recipes/components/RecipeImage'
-import { useDecideSession } from '@/stores/decide-session'
+import { useTodaySession } from '@/stores/today-session'
+import AiSuggestPanel from './AiSuggestPanel'
 import '../../shared.scss'
 
 /**
- * 「帮我决定」（M5 / F5-05）。口径见 D-060。
+ * 「今天吃什么」（M5 / F5-05 + M16 子集合并后，见 D-061）。
  *
- * 定位是**零选择成本的兜底**：连"从几条里挑一条"都省掉，**只给一道**。
- * 所以它与「AI 帮你想」在形态上有一处根本不同——那边是列表、可以连着点几道；
- * 这边一次只有一道菜，用户能做的是「就它了」或「换一道」。
+ * 2026-10-13 用户提出「帮我决定」与「AI 帮你想」看着重复。合并的方式是**保留两半、
+ * 收进一个抽屉**，因为它们回答的其实是两个问题：
+ *
+ * - **上半：立刻给一道**（F5-05）。纯规则、懂冰箱与口味、毫秒级，**没配 AI 也能用**。
+ *   用户来这儿最常见的心态是"随便，你定"——这时让他等十几秒、或者让他先回答一个问题，
+ *   都是把成本还给他。
+ * - **下半：想提要求时才问 AI**（M16 子集）。"想吃酸的、有小孩" 这类条件只有模型能处理，
+ *   但它是**可选的第二步**，而不是进门的前提。
+ *
+ * 这样合并的好处不只是少一个按钮（三个出口里两个都说"我替你决定"）：
+ * **这条最常用的路不再依赖 AI 配置**。原先没配密钥时「AI 帮你想」只能显示一句"还没接上 AI"，
+ * 而「帮我决定」在同一次点击里就已经把菜摆出来了。
  *
  * 五件事刻意的：
  *
- * - **打开即要一个主意**：抽屉一出现就发请求，不让用户再按一下——他已经按过按钮了，
- *   "再按一次才给答案"是把成本又还给他；
- * - **会话状态在 store 里**（`stores/decide-session`）：菜名能点进详情，返回时那道菜
- *   必须还在（与「AI 帮你想」同一条，用户 2026-10-13 对那边的原话是"返回时还是打开的、
- *   保持原样"）。回来后**不重新挑**——他正要评估刚才那道菜，换一道等于把答案抽走；
- * - **说清为什么是这道**（`reason`，后端拼的那句）：这是它与「摇一道」的全部区别，
- *   不说理由的话，用户没有理由相信它比随机好；
- * - **点完不自动关**：用户可能想「换一道」再看两眼，或者点菜名去看做法。关不关交给他；
- * - **拿不出菜时给出去路**（空库 / 冰箱空 / 口味排掉了全部）：三种情况的下一步完全不同，
- *   说错了他会白折腾一趟。
+ * - **打开即要一个主意**：不让用户再按一下——他已经按过按钮了；
+ * - **会话状态在 store 里**（`stores/today-session`）：菜名能点进详情，那是一次路由跳转，
+ *   返回时上面那道菜、下面那份 AI 推荐都必须原样还在（用户对「AI 帮你想」的原话是
+ *   "返回时还是打开的、保持原样"）；
+ * - **说清为什么是这道**（后端拼的那句）：这是它与「摇一道」的全部区别；
+ * - **点完不自动关**：用户可能想换一道、想去看做法，也可能接着用下半去提要求；
+ * - **拿不出菜时给出去路**（空库 / 冰箱空 / 口味排掉了全部）：三种情况下一步完全不同。
  */
-export default function DecideSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+/**
+ * 下半收起时那段退场动画的时长（ms）。要**与 CSS 里的 `today-ai-out` 对上**：
+ * JS 用它决定何时真正卸载面板，CSS 用它播动画，两边差太多会看到"动画没完就消失"
+ * 或者"动画完了还空着一块"。
+ */
+const AI_EXIT_MS = 180
+
+export default function TodaySheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const family = useFamily()
   const options = useOrderOptions()
   const decide = useDecide()
   const addItem = useAddOrderItem()
 
-  const result = useDecideSession((state) => state.result)
-  const seen = useDecideSession((state) => state.seen)
-  const added = useDecideSession((state) => state.added)
-  const setResult = useDecideSession((state) => state.setResult)
-  const pushSeen = useDecideSession((state) => state.pushSeen)
-  const setAdded = useDecideSession((state) => state.setAdded)
-  const reset = useDecideSession((state) => state.reset)
+  const result = useTodaySession((state) => state.result)
+  const seen = useTodaySession((state) => state.seen)
+  const added = useTodaySession((state) => state.decideAdded)
+  const setResult = useTodaySession((state) => state.setResult)
+  const pushSeen = useTodaySession((state) => state.pushSeen)
+  const setAdded = useTodaySession((state) => state.setDecideAdded)
+  const reset = useTodaySession((state) => state.reset)
+
+  /**
+   * 下半（AI）是**用户主动展开**的：默认收着，点一下才展开。
+   *
+   * 收着而不是直接铺开，是因为铺开会让抽屉打开时很高（快捷词 + 输入框 + 结果），
+   * 而多数人此刻要的只是上面那一道。展开状态**在 store 里**：点 AI 推荐的菜名去看做法、
+   * 再返回时那块必须还是展开的（用户对「AI 帮你想」的原话："返回时还是打开的、保持原样"）。
+   */
+  const aiOpen = useTodaySession((state) => state.aiOpen)
+  const setAiOpen = useTodaySession((state) => state.setAiOpen)
+
+  /**
+   * 展开/收起。
+   *
+   * 收起时先进入 `closing`（动画期间面板还在），动画结束再真正卸载——见下面那段注释。
+   * 用 `setTimeout` 而不是 `transitionend`：这一块是**内容高矮变化**（height: auto 没法过渡），
+   * 靠的是子元素的入场/退场两段动画，`transitionend` 在容器上不会触发。
+   */
+  const [closing, setClosing] = useState(false)
+  const closeTimer = useRef<number | null>(null)
+
+  const toggleAi = () => {
+    if (aiOpen) {
+      setAiOpen(false)
+      setClosing(true)
+      if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
+      closeTimer.current = window.setTimeout(() => setClosing(false), AI_EXIT_MS)
+    } else {
+      // 展开时若上一次的收起还没走完，取消它（连点两下不能把面板卸载掉）
+      if (closeTimer.current !== null) {
+        window.clearTimeout(closeTimer.current)
+        closeTimer.current = null
+      }
+      setClosing(false)
+      setAiOpen(true)
+    }
+  }
+
+  // 卸载时清掉计时器：它回调的是 setState，组件没了还跑就是白跑（React 会警告）
+  useEffect(() => () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
+  }, [])
 
   /*
    * 这次挂载是"续上"还是"新开"：`start()` 会把 result 清成 null，所以**有结果就是续上**
    * （从详情返回）。用 useState 定住：后面 ask() 会改 result，判定不能跟着变
-   * （与 AiSuggestSheet 的 `resumed` 同一处理）。
+   * （与 AiSuggestPanel 的 `resumed` 同一处理）。
    */
-  const [resumed] = useState(() => useDecideSession.getState().result !== null)
+  const [resumed] = useState(() => useTodaySession.getState().result !== null)
 
   /*
    * 新开时问一次，**在 effect 里**（不要在渲染期做这件事）。
@@ -70,7 +126,7 @@ export default function DecideSheet({ visible, onClose }: { visible: boolean; on
   useEffect(() => {
     if (!visible || askedRef.current) return
     askedRef.current = true
-    const session = useDecideSession.getState()
+    const session = useTodaySession.getState()
     if (session.asked) return
     session.markAsked()
     // 续上（从详情返回）时不重新挑：用户正要看的是刚才那道菜
@@ -115,15 +171,17 @@ export default function DecideSheet({ visible, onClose }: { visible: boolean; on
   }
 
   return (
-    <BottomSheet visible={visible} title="帮我决定" onClose={onClose}>
+    <BottomSheet visible={visible} title="今天吃什么" onClose={onClose}>
       <p className="decide__lead">按你家冰箱、口味和平时爱吃的，替你挑一道。</p>
 
       {decide.isPending && (
         <>
-          {/* 纯规则、毫秒级，但要走几次库查询：给一句话而不是一个静止的界面 */}
-          <p className="decide__waiting">
+          {/* 纯规则、毫秒级，但要走几次库查询：给一句话而不是一个静止的界面。
+              用 div 不用 p：DotLoading 自己渲染的是块级元素，套在 p 里会触发
+              validateDOMNesting 警告（React 会把它踢出去，布局就散了） */}
+          <div className="decide__waiting">
             <DotLoading color="currentColor" /> 正在翻冰箱…
-          </p>
+          </div>
           <div className="decide__skeleton" aria-hidden>
             <span className="decide__skeleton-title" />
             <span className="decide__skeleton-line" />
@@ -199,7 +257,7 @@ export default function DecideSheet({ visible, onClose }: { visible: boolean; on
             ) : (
               <button
                 type="button"
-                className="recipe-button decide__take"
+                className="decide__take"
                 disabled={addItem.isPending || !family.data}
                 onClick={take}
               >
@@ -216,10 +274,57 @@ export default function DecideSheet({ visible, onClose }: { visible: boolean; on
               换一道 ↻
             </button>
           </div>
+        </div>
+      )}
 
-          <p className="decide__foot">
-            点菜名能看做法；「就它了」会加进今天这一餐，进了菜单随时能撤。
-          </p>
+      {/*
+       * 下半：想提要求时才展开问 AI。
+       *
+       * 收着的那一行必须**说清它与上面那道的关系**（"都不合意？"），否则它看起来像
+       * 又一个"帮你决定"的按钮——正是用户提出的那个重复问题。
+       * 它**不看上面那道有没有挑出来**：上面空了（库空、口味排掉全部）时，用户更该有
+       * 第二条路可走，而不是看着一个空状态无路可去。
+       */}
+      {!decide.isPending && (
+        <div className="today-ai-block">
+          <button
+            type="button"
+            className={['today-ai-toggle', aiOpen && 'is-open'].filter(Boolean).join(' ')}
+            aria-expanded={aiOpen}
+            onClick={toggleAi}
+          >
+            <span className="today-ai-toggle__text">
+              {aiOpen ? '想问就说说想吃什么' : '都不合意？说说想吃什么，让 AI 挑几道'}
+            </span>
+            {/*
+             * 箭头用**矢量**而不是 ⌄/⌃ 两个字符：字符版没法做旋转过渡
+             * （换字符就是"跳"一下）。展开时整块转 180°，与它自己的收起动画同时发生。
+             */}
+            <span className={['today-ai-toggle__arrow', aiOpen && 'is-open'].filter(Boolean).join(' ')} aria-hidden>
+              <svg viewBox="0 0 12 12" width="12" height="12">
+                <path
+                  d="M2.5 4.4 L6 7.9 L9.5 4.4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+          </button>
+          {/*
+           * 收起时**先播完那一小段再卸载**（`closing`）：直接卸载是"啪"地消失，
+           * 而用户刚点的那一下需要一个回应。上线的条件是 `aiOpen || closing`，
+           * 所以收起动画期间组件还在、动画结束才真正走人（AI 的请求也因此只在
+           * 真的展开时发一次，收起后不留着轮询）。
+           */}
+          {(aiOpen || closing) && (
+            <AiSuggestPanel
+              closing={closing}
+              onNavigate={() => { /* 跳走前不打任何标记：返回时原样 */ }}
+            />
+          )}
         </div>
       )}
     </BottomSheet>

@@ -2,22 +2,26 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import { Toaster, useToasts } from '@/components/ui/toast'
 import type { DecideResult } from '@/api/decide'
-import { useDecideSession } from '@/stores/decide-session'
+import { useTodaySession } from '@/stores/today-session'
 import { useAuth } from '@/stores/auth'
-import DecideSheet from './DecideSheet'
+import TodaySheet from './TodaySheet'
 
 /**
- * 「帮我决定」（M5 / F5-05）。要盯住的五件事（与组件文件头一一对应）：
+ * 「今天吃什么」（M5 / F5-05 与 M16 子集合并后，D-061）。要盯住的六件事：
  * ① **打开就问**（不让用户再按一次才给答案）；
  * ② **会话状态活过路由跳转**——点菜名去详情再返回，那道菜还在、抽屉还开着，
  *    而且**不重新挑**（重新挑会把用户正要评估的那道菜换成另一道）；
  * ③ **「换一道」真排除**已经看过的（含"换空了"这种脏情况）；
  * ④ **说清为什么**（后端那句原样显示，前端不改字）；
- * ⑤ **拿不出菜时给去路**，不给一道编的。
+ * ⑤ **拿不出菜时给去路**，不给一道编的；
+ * ⑥ **下半（AI）默认收着、点一下才展开**，而且展开状态与推荐都活过路由跳转
+ *    ——用户点的是 AI 推荐里的菜名，回来却要再点一次才看见那几条，就是这条要防的。
  */
 
 const clients: QueryClient[] = []
@@ -60,7 +64,7 @@ function renderSheet() {
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/discover']}>
         <Routes>
-          <Route path="/discover" element={<DecideSheet visible onClose={() => {}} />} />
+          <Route path="/discover" element={<TodaySheet visible onClose={() => {}} />} />
           <Route path="/recipes/:id" element={<Probe />} />
         </Routes>
       </MemoryRouter>
@@ -107,7 +111,7 @@ function decideCalls(spy: ReturnType<typeof vi.spyOn>) {
 
 beforeEach(() => {
   localStorage.clear()
-  useDecideSession.getState().close()
+  useTodaySession.getState().close()
   useAuth.getState().setSession({
     token: 't', refreshToken: 'r',
     user: { id: 'u1', account: 'a', nickname: '妈妈', avatar: '🍳', email: null, createdAt: '' },
@@ -292,6 +296,64 @@ it('**重挂载不会问第二次**（StrictMode 的双挂载：问两次的话�
   await new Promise((resolve) => setTimeout(resolve, 30))
 
   expect(decideCalls(spy)).toHaveLength(1)
+})
+
+it('下半（AI）**默认收着**：不先铺一堆输入框，用户此刻要的是上面那道', async () => {
+  mockApi([decideResult()])
+  renderSheet()
+  await screen.findByText('番茄炒蛋')
+
+  // 收着时只给一行说明，AI 的输入框与快问都不在
+  expect(screen.getByText(/都不合意/)).toBeTruthy()
+  expect(screen.queryByPlaceholderText(/想吃酸的/)).toBeNull()
+
+  // 点一下才展开：这时才出现那种"要等十几秒"的东西
+  fireEvent.click(screen.getByText(/都不合意/))
+  expect(await screen.findByPlaceholderText(/想吃酸的/)).toBeTruthy()
+  expect(useTodaySession.getState().aiOpen).toBe(true)
+})
+
+it('**拿不出菜时下半仍然可用**：上面挑不出来，用户还得有第二条路', async () => {
+  mockApi([decideResult({ recipe: null, reason: '菜谱小书里还没有菜，先去加几道', canSwap: false })])
+  renderSheet()
+
+  await screen.findByText('菜谱小书里还没有菜，先去加几道')
+  // 上面空了，但"说说想吃什么"那一行还在（不然用户看着一个空状态无路可去）
+  expect(screen.getByText(/都不合意/)).toBeTruthy()
+})
+
+it('「就它了」与「换一道」的**几何完全一致**（用户 2026-10-13：这块没对齐）', () => {
+  /*
+   * 现场：两个按钮顶边差 6px（320 / 314）、一个是 999px 胶囊、一个是 14px 圆角。
+   * 根因是「就它了」借用了菜谱详情页的 `.recipe-button`，而它带着 `margin-top: 12px`
+   * 和 `border-radius: 999px`；「换一道」是我另写的。所以现在这一对**不借用别处的类**，
+   * 几何写在一条公共规则里、各自只准改颜色。
+   *
+   * jsdom 算不了布局，所以守**决定这件事的那条规则**（与 corner-art / DiscoverPage
+   * 那两处同一手法）：谁哪天给其中一个单独加内边距、圆角或边框，这条就会红。
+   */
+  const srcDir = join(__dirname, '..', '..', '..')
+  const css = readFileSync(join(srcDir, 'pages/discover/discover.scss'), 'utf8')
+  const common = css.match(/\.decide__take,\s*\n\.decide__swap\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+  expect(common, '没读到 .decide__take, .decide__swap 的公共规则').toBeTruthy()
+  for (const [property, label] of [
+    ['padding', '内边距'],
+    ['border-radius', '圆角'],
+    ['margin-top', '外边距'],
+    ['border: 1px solid transparent', '边框宽度'],
+  ] as const) {
+    expect(common, `${label}必须在公共规则里定死`).toContain(property)
+  }
+
+  // 各自的独立规则只准改颜色（再写一遍几何就又不一致了）
+  const after = css.slice(css.indexOf(common) + common.length)
+  for (const name of ['decide__take', 'decide__swap']) {
+    const rule = after.match(new RegExp(`^\\.${name}\\s*\\{[^}]*\\}`, 'm'))?.[0] ?? ''
+    expect(rule, `没读到 .${name} 的独立规则`).toBeTruthy()
+    for (const geometry of ['padding', 'border-radius', 'margin-top', 'border:']) {
+      expect(rule, `.${name} 不该再写${geometry}（几何统一在公共规则里）`).not.toContain(geometry)
+    }
+  }
 })
 
 it('拿不出菜时**不画**「就它了」与「换一道」：没有菜可加、也没有菜可换', async () => {

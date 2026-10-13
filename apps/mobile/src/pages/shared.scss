@@ -196,16 +196,16 @@
   color: #7a3b1e;
 }
 
-/* 两条出路并排：摇一道（立刻给结果）/ AI 帮你想（要等十几秒） */
-.today__actions {
+/* 两条出路并排：摇一道（库里随机）/ 帮我决定（照着冰箱与口味挑）。
+   两个都**立刻给结果**，所以并排；要等十几秒的 AI 收在抽屉里（D-061）。 */
+.today__row {
   display: flex;
   gap: 9px;
   margin-top: 11px;
 }
 
 .today__shake,
-.today__decide,
-.today__ai {
+.today__decide {
   display: flex;
   gap: 7px;
   align-items: center;
@@ -234,33 +234,9 @@
   }
 }
 
-/*
- * 两条出路一行（都**立刻给一道**），「AI 帮你想」自己一行（给几道、要等十几秒）。
- *
- * 分行的依据是**承诺不同**，不是重要程度：用户一眼要能看出"这两个马上有答案，
- * 那个要等"。三件挤一行的话每格只剩 103px（391 宽的屏），"AI 帮你想"会被截成
- * 省略号——一个说不全名字的按钮比多占一行糟得多。
- */
-.today__row {
-  display: flex;
-  gap: 9px;
-  margin-top: 11px;
-}
-
+/* 两个按钮平分一行（`flex: 1` = basis 0%，所以边框宽度必须一致，见上面的公共规则） */
 .today__row .today__shake,
 .today__row .today__decide {
-  flex: 1;
-}
-
-/* 第二行只有它一个，所以自己撑满；margin 由行容器统一给 */
-.today__row--ai {
-  margin-top: 9px;
-}
-
-/* 「AI 帮你想」独行时也要撑满：实测不撑满只有 102px 宽（内容宽），
-   与上面一行两个 160px 的按钮并排看着像"没做完"。它确实是同一张卡里的
-   第三条出路，宽度上不该矮一头。 */
-.today__row--ai .today__ai {
   flex: 1;
 }
 
@@ -281,23 +257,14 @@
   border-color: rgb(224 123 57 / 34%);
 }
 
-/* 「AI 帮你想」用半透明底：同一条路上的另一种解法，别抢走视觉重心 */
-.today__ai {
-  color: #7a3b1e;
-  background: rgb(255 251 242 / 52%);
-  border-color: rgb(255 251 242 / 70%);
-}
-
 .today__shake-emoji,
-.today__decide-emoji,
-.today__ai-emoji {
+.today__decide-emoji {
   font-size: 16px;
   line-height: 1;
 }
 
 .today__shake-text,
-.today__decide-text,
-.today__ai-text {
+.today__decide-text {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;

@@ -6,12 +6,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import type { ChatTurn, SuggestedPick } from '@/api/ai'
 import { Toaster, toast } from '@/components/ui/toast'
-import { useAiSuggestSession } from '@/stores/ai-suggest-session'
+import { useTodaySession } from '@/stores/today-session'
 import { useAuth } from '@/stores/auth'
 import { HINT_POOL } from '../ai-prompts'
 import DiscoverPage from '../DiscoverPage'
 import AiChatSheet from './AiChatSheet'
-import AiSuggestSheet from './AiSuggestSheet'
+import AiSuggestPanel from './AiSuggestPanel'
 
 // 发现页的 AI 两个入口（M16 子集 / D-026）。要盯住的事：
 // ① **没配 AI 时明说去哪配**，不给假推荐（假数据会让用户以为 AI 在工作）；
@@ -20,6 +20,16 @@ import AiSuggestSheet from './AiSuggestSheet'
 // ③ 问答失败时用户问过的那句要留着（重问一遍还得重新打字，最气人的就是这个）。
 
 const clients: QueryClient[] = []
+
+/**
+ * 渲染下半（AI）那一块。
+ *
+ * 2026-10-13 合并之后它**不再是独立抽屉**（D-061）：外层由 `TodaySheet` 提供，
+ * 它自己只是一个面板，所以这里也不再传 visible/onClose。
+ */
+function renderSuggest() {
+  return renderSheet(<AiSuggestPanel onNavigate={() => {}} />)
+}
 
 function renderSheet(node: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -173,7 +183,7 @@ beforeEach(() => {
    * 组件会以为自己是"续上"（resumed）、连 AI 那批都不去要，三条用例因此假红。
    * 等于"每条用例从一个干净的新开开始"（与用户点开抽屉时同一状态）。
    */
-  useAiSuggestSession.getState().close()
+  useTodaySession.getState().close()
   useAuth.getState().setSession({
     token: 't', refreshToken: 'r',
     user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🍳', email: null, createdAt: new Date().toISOString() },
@@ -190,7 +200,7 @@ afterEach(() => {
 it('没配 AI 时不编推荐，明说去哪配（两个入口同一口径）', async () => {
   mockApi({ configured: false })
 
-  const suggest = renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+  const suggest = renderSuggest()
   expect(await screen.findByText(/还没接上 AI/)).toBeTruthy()
   expect(screen.getByText(/AI_API_BASE/)).toBeTruthy()
   // 关键：不能出现"想几道"这种能按的按钮——按下去只会得到 503
@@ -209,7 +219,7 @@ it('推荐落地的菜点得动，而且带着日期与餐次（少一个后端�
   freezeClock()
   try {
     const { post } = mockApi()
-    renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+    renderSuggest()
 
     // 等快问标签出现再点（它们是从池子里随机抽的，所以按 class 找第一个，不写死某个词）
     await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
@@ -229,7 +239,7 @@ it('推荐落地的菜点得动，而且带着日期与餐次（少一个后端�
 it('「换一批」真的换掉那一组（且**不重新调模型**：那是本地换，点一下等十几秒等于没了）', async () => {
   const { post } = mockApi({ prompts: { hints: AI_HINTS, examples: AI_EXAMPLES } })
 
-  renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+  renderSuggest()
   // **先等 AI 那批到手**：抽屉一打开就会拉一次 /ai/prompts，没落地就取基线的话，
   // 它会在"基线之后、断言之前"补上——我第一次就是这么写的，报"期望 0 实际 1"。
   await waitFor(() =>
@@ -263,7 +273,7 @@ it('「换一批」真的换掉那一组（且**不重新调模型**：那是本
 
 it('AI 给的快问会被用上（不再是写死的那批）', async () => {
   mockApi({ prompts: { hints: AI_HINTS, examples: AI_EXAMPLES } })
-  renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+  renderSuggest()
 
   // AI 那批到手后重抽：界面上出现的应当是模型写的那几句
   await waitFor(() =>
@@ -280,7 +290,7 @@ it('AI 给的快问会被用上（不再是写死的那批）', async () => {
 
 it('AI 生成失败时静默回退写死的那份：不给用户看错误，入口照样能用', async () => {
   mockApi({ promptsFail: true })
-  renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+  renderSuggest()
 
   await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
   const texts = [...document.querySelectorAll<HTMLButtonElement>('.ai__hint:not(.ai__hint--more)')].map((b) => b.textContent ?? '')
@@ -293,7 +303,7 @@ it('AI 生成失败时静默回退写死的那份：不给用户看错误，入�
 
 it('没配 AI 时不请求生成快问（少一次注定 503 的往返）', async () => {
   const { post } = mockApi({ configured: false })
-  renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+  renderSuggest()
 
   expect(await screen.findByText(/还没接上 AI/)).toBeTruthy()
   expect(post.mock.calls.filter(([url]) => url === '/ai/prompts')).toHaveLength(0)
@@ -315,7 +325,7 @@ it('「问 AI」的示例问题也走 AI 那批（两个入口共用一份生成
 
 it('每次打开都重新生成一批（用户 2026-10-12：「不然都是这几个推荐和问题」）', async () => {
   const { post } = mockApi({ prompts: { hints: AI_HINTS, examples: AI_EXAMPLES } })
-  // 同一个 QueryClient 跨两次挂载：这才是"同一个用户重新打开抽屉"（缓存还在）
+  // 同一个 QueryClient 跨两次挂载：这才是"同一个用户重新展开这一块"（缓存还在）
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   clients.push(client)
   const promptsCalls = () => post.mock.calls.filter(([url]) => url === '/ai/prompts').length
@@ -323,7 +333,7 @@ it('每次打开都重新生成一批（用户 2026-10-12：「不然都是这�
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <AiSuggestSheet visible onClose={() => {}} />
+          <AiSuggestPanel onNavigate={() => {}} />
         </MemoryRouter>
       </QueryClientProvider>,
     )
@@ -340,7 +350,7 @@ it('每次打开都重新生成一批（用户 2026-10-12：「不然都是这�
 
 it('推荐为空时说实话（不给"正在想"的假象），并指路去菜谱小书', async () => {
   mockApi({ picks: [], candidates: 0 })
-  renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+  renderSuggest()
 
   await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
   clickFirstHint()
@@ -542,7 +552,7 @@ it('再问一次时先把上一次的推荐清掉（旧结果留着会被当成�
       throw new Error(`未预期的请求：${url}`)
     })
 
-    renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+    renderSuggest()
     await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
 
     clickFirstHint()
@@ -580,7 +590,7 @@ it('点过的那道置灰并说"已加入"，不能再点第二次（同一道�
       throw new Error(`未预期的请求：${url}`)
     })
 
-    renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
+    renderSuggest()
     await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
     clickFirstHint()
     await screen.findByText('番茄炒蛋')
@@ -592,8 +602,14 @@ it('点过的那道置灰并说"已加入"，不能再点第二次（同一道�
     // 点过的变成"已加入"，另一道仍可点（用户要接着挑下一道）
     expect(await screen.findByText('已加入')).toBeTruthy()
     expect(buttons()).toHaveLength(1)
-    // 抽屉**不关**：一次问好几道，关掉就得重新问一遍
-    expect(document.querySelector('.sheet__body')).not.toBeNull()
+    /*
+     * 这一块**不收起**：一次问好几道，收起来就得重新问一遍。
+     *
+     * 合并之后它不再是独立抽屉（D-061），所以这里守的是"面板还在、结果还在"
+     * ——真机上它的外部抽屉由 TodaySheet 管，那条链路由 TodaySheet 自己的用例守。
+     */
+    expect(document.querySelector('.ai__picks')).not.toBeNull()
+    expect(screen.getByText('红烧排骨')).toBeTruthy()
   } finally {
     vi.useRealTimers()
   }
@@ -650,9 +666,14 @@ it('点菜名进详情，返回后抽屉还开着、推荐原样（会话状态�
     mockApi()
     renderDiscoverWithDetail()
 
-    // 开抽屉 → 问一批
-    // 入口按钮按角色查：页面上"AI 帮你想"有两处（这个按钮 + 抽屉标题），按文案抓会抓到两个
-    fireEvent.click(await screen.findByRole('button', { name: /AI 帮你想/ }))
+    /*
+     * 开抽屉 → 展开下半（AI 那一块）→ 问一批。
+     *
+     * 合并之后页面上没有「AI 帮你想」这个按钮了（D-061）：它收在「帮我决定」抽屉里，
+     * 点那一行"都不合意？"才展开。这两步正是用户要走的路，所以用例也照这个走。
+     */
+    fireEvent.click(await screen.findByText('帮我决定'))
+    fireEvent.click(await screen.findByText(/都不合意/))
     await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
     clickFirstHint()
     expect(await screen.findByText('番茄炒蛋')).toBeTruthy()
@@ -673,12 +694,16 @@ it('点菜名进详情，返回后抽屉还开着、推荐原样（会话状态�
      * ① 抽屉还开着（`open` 没被谁改掉）；② 推荐原样在屏幕上（列表、理由、序号都在）。
      */
     fireEvent.click(screen.getByTestId('back'))
-    // 抽屉标题（不是页面那个入口按钮）：按文案抓会同时命中两个，所以限定到 .sheet__title
-    expect(await screen.findByText('AI 帮你想', { selector: '.sheet__title' })).toBeTruthy()
+    expect(await screen.findByText('今天吃什么', { selector: '.sheet__title' })).toBeTruthy()
     expect(document.querySelector('.sheet__body')).not.toBeNull()
     expect(screen.getByText('番茄炒蛋')).toBeTruthy()
     expect(screen.getByText('快手')).toBeTruthy()
-    expect(useAiSuggestSession.getState().open).toBe(true)
+    expect(useTodaySession.getState().open).toBe(true)
+    /*
+     * 下半那块也要**还是展开的**：用户点的是 AI 推荐里的菜名，回来后却要再点一次才看见
+     * 自己刚看的那几条——那正是"保持原样"要防的事（展开状态因此也在 store 里）。
+     */
+    expect(useTodaySession.getState().aiOpen).toBe(true)
   } finally {
     vi.useRealTimers()
   }
@@ -688,7 +713,8 @@ it('关掉抽屉再打开是干净的一次（点菜名那条路不背这个锅�
   mockApi()
   renderDiscoverWithDetail()
 
-  fireEvent.click(await screen.findByText('AI 帮你想'))
+  fireEvent.click(await screen.findByText('帮我决定'))
+  fireEvent.click(await screen.findByText(/都不合意/))
   await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
   clickFirstHint()
   expect(await screen.findByText('番茄炒蛋')).toBeTruthy()
@@ -698,11 +724,13 @@ it('关掉抽屉再打开是干净的一次（点菜名那条路不背这个锅�
   await waitFor(() => expect(document.querySelector('.adm-mask')).not.toBeNull())
   const mask = document.querySelector('.adm-mask') as HTMLElement
   fireEvent.click(mask)
-  await waitFor(() => expect(useAiSuggestSession.getState().open).toBe(false))
+  await waitFor(() => expect(useTodaySession.getState().open).toBe(false))
   // 推荐与已加入标记一起清掉：下次打开是干净的一次
-  expect(useAiSuggestSession.getState().picks).toBeNull()
+  expect(useTodaySession.getState().picks).toBeNull()
 
-  fireEvent.click(await screen.findByRole('button', { name: /AI 帮你想/ }))
-  await waitFor(() => expect(useAiSuggestSession.getState().open).toBe(true))
+  // 重新打开：抽屉开、**上面的菜重新挑**、下面的推荐是空的（干净的一场）
+  fireEvent.click(await screen.findByText('帮我决定'))
+  await waitFor(() => expect(useTodaySession.getState().open).toBe(true))
+  fireEvent.click(await screen.findByText(/都不合意/))
   expect(screen.queryByText('番茄炒蛋')).toBeNull()
 })

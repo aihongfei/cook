@@ -56,7 +56,7 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
   // （在渲染里抽的话每轮渲染都换一批，用户刚要点的那个会自己跑掉）
   const [examples, setExamples] = useState(() => pickExamples())
   // AI 那批到手后重抽一次（打开头几秒必然是兜底那批；不重抽的话 AI 生成的就白花了）。
-  // 与 AiSuggestSheet 那处同一写法、同一理由（见那边对 react(set-state-in-effect) 的说明）
+  // 与 AiSuggestPanel 那处同一写法、同一理由（见那边对 react(set-state-in-effect) 的说明）
   const aiBatch = aiPrompts.data?.examples
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect

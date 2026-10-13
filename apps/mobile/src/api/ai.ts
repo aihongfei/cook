@@ -181,7 +181,7 @@ export function useAiStatus() {
  * （同一个 queryKey，在途请求会合并）。
  *
  * `refetchOnWindowFocus` 关掉：移动端切出去再回来就会重新聚焦，那会在用户正要点的时候
- * 把标签换掉——"刚要点的那个自己跑掉"，与 AiSuggestSheet 里那处要避免的是同一个毛病。
+ * 把标签换掉——"刚要点的那个自己跑掉"，与 AiSuggestPanel 里那处要避免的是同一个毛病。
  * 重新生成只认"重新打开"这一个由头。
  */
 export function useAiPrompts(enabled: boolean) {

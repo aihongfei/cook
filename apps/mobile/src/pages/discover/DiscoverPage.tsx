@@ -5,49 +5,43 @@ import Page from '@/components/ui/Page'
 import { toast } from '@/components/ui/toast'
 import { apiErrorMessage } from '@/api/client'
 import { fetchRandomRecipe } from '@/api/recipes'
-import { useAiSuggestSession } from '@/stores/ai-suggest-session'
-import { useDecideSession } from '@/stores/decide-session'
+import { useTodaySession } from '@/stores/today-session'
 import FamilyPicks from './components/FamilyPicks'
 import WeekPlan from './components/WeekPlan'
-import AiSuggestSheet from './components/AiSuggestSheet'
 import AiChatSheet from './components/AiChatSheet'
-import DecideSheet from './components/DecideSheet'
+import TodaySheet from './components/TodaySheet'
 import '../shared.scss'
 import './discover.scss'
 
 /**
- * 发现：今天吃什么（随机 + AI 合一）+ 本周菜单（决策引擎见 FEATURES.md M5，菜单安排见
- * M4 / F4-02，AI 推荐与问答见 D-026）。
+ * 发现：今天吃什么 + 本周菜单（决策引擎见 FEATURES.md M5，菜单安排见 M4 / F4-02，
+ * AI 推荐与问答见 D-026）。
  *
- * **"今天吃什么"和 AI 合成一块**：这两件事本来就是同一个问题——用户站在灶台前的困惑是
- * "今天做点什么"，随机摇一道和让 AI 挑几道只是两种解法。原先拆成上下两块（一块橙卡 +
- * 一块双按钮）占了首页近 200px 的黄金位置，说的还是同一件事。现在收成**一张卡、
- * 一行标题、两条出路**：左边「摇一道」（自己拿主意，立刻给结果），右边「AI 帮你想」
- * （让 AI 挑，要等十几秒）。问答是另一种问题（"豆腐怎么存"），所以只给小字入口。
+ * **这一块 2026-10-13 又合了一次**（见 D-061）：原先卡上三个出口（摇一道 / 帮我决定 /
+ * AI 帮你想），用户提出「帮我决定和 ai 帮你想是不是有点重复了」。它们确实都在说
+ * "我替你决定"，于是收成**两条出路**：
+ *
+ * - 「摇一道」（F5-01）：**库里随机抽一道**，公平、立刻，但不知道你家有什么；
+ * - 「帮我决定」（F5-05 + M16 合并）：打开先给**一道照着冰箱与口味挑的**（纯规则、
+ *   毫秒级、**不依赖 AI 配置**），下面一行"都不合意？说说想吃什么"才展开 AI（要等十几秒）。
+ *
+ * 合并的收益不只是少一个按钮：**这条最常用的路不再会因为没配密钥而死掉**。
+ * 问答是另一种问题（"豆腐怎么存"），所以只给小字入口。
  */
 export default function DiscoverPage() {
   /*
-   * 两个抽屉各自用 key 在打开时重挂载：关掉再打开就是干净的一次（上次的推荐/对话不留着）。
+   * 两个抽屉各自用 key 在打开时重挂载：关掉再打开就是干净的一次（上一次的东西不留着）。
    *
-   * **「AI 帮你想」的开合在 store 里**（`stores/ai-suggest-session`），不在这里的 useState：
-   * 用户点推荐里的菜名去看详情时，本页会被卸载，useState 会连同"抽屉开着"这个事实一起丢，
+   * **「帮我决定」的开合在 store 里**（`stores/today-session`），不在这里的 useState：
+   * 用户点抽屉里的菜名去看详情时，本页会被卸载，useState 会连同"抽屉开着"这个事实一起丢，
    * 返回时就变成关着的了（用户 2026-10-13 明确要求"返回时还是打开的、保持原样"）。
    * 开一次走 `start()`（清掉上一场），关一次走 `close()`（同样清干净）。
    * 「问 AI」没有这个需求（对话里没有可点的菜名入口），仍是本地 state。
    */
-  const [sheet, setSheet] = useState<'suggest' | 'chat' | null>(null)
-  const suggestOpen = useAiSuggestSession((state) => state.open)
-  const startSuggest = useAiSuggestSession((state) => state.start)
-  const closeSuggest = useAiSuggestSession((state) => state.close)
-  /*
-   * 「帮我决定」的开合也放 store（`stores/decide-session`），理由与「AI 帮你想」一样：
-   * 这里的菜名能点进详情，而路由跳转会卸载本页——放 useState 的话用户看完做法返回，
-   * 抽屉是关着的、刚在评估的那道菜也没了（他只能重新点一次，而重新点给出的是**另一道**）。
-   * 「问 AI」没有可点的菜名入口，所以它仍是本地 state。
-   */
-  const decideOpen = useDecideSession((state) => state.open)
-  const startDecide = useDecideSession((state) => state.start)
-  const closeDecide = useDecideSession((state) => state.close)
+  const [sheet, setSheet] = useState<'chat' | null>(null)
+  const todayOpen = useTodaySession((state) => state.open)
+  const startToday = useTodaySession((state) => state.start)
+  const closeToday = useTodaySession((state) => state.close)
   const [shaking, setShaking] = useState(false)
   const navigate = useNavigate()
 
@@ -83,11 +77,11 @@ export default function DiscoverPage() {
           </div>
 
           {/*
-            三条出路按**承诺**分两行：
-            - 这一行两个都**立刻给一道**——「摇一道」是库里随机抽（不知道你家有什么），
-              「帮我决定」是照着冰箱、口味与平时爱吃的挑（F5-05，零选择成本）；
-            - 「AI 帮你想」给**几道**让你挑、要等十几秒，自己一行。三件挤一行的话每格只剩
-             103px，"AI 帮你想"会被截成省略号（见 shared.scss 的 .today__row）。
+            两条出路，**一行并列**：两个都立刻给结果，只是"懂不懂你家"不一样——
+            「摇一道」是库里随机抽（公平，但可能摇到一道缺六样料的），
+            「帮我决定」是照着冰箱、口味与平时爱吃的挑（F5-05）。
+            「AI 帮你想」不再单独占一行：它已经收进「帮我决定」那个抽屉的第二半
+            （见 D-061）——三个出口里两个都叫"我替你决定"，是用户提出的那个重复。
           */}
           <div className="today__row">
             <button type="button" className="today__shake" disabled={shaking} onClick={() => void shake()}>
@@ -96,19 +90,11 @@ export default function DiscoverPage() {
               </span>
               <span className="today__shake-text">{shaking ? '正在摇…' : '摇一道'}</span>
             </button>
-            <button type="button" className="today__decide" onClick={startDecide}>
+            <button type="button" className="today__decide" onClick={startToday}>
               <span className="today__decide-emoji" aria-hidden>
                 ✨
               </span>
               <span className="today__decide-text">帮我决定</span>
-            </button>
-          </div>
-          <div className="today__row today__row--ai">
-            <button type="button" className="today__ai" onClick={startSuggest}>
-              <span className="today__ai-emoji" aria-hidden>
-                🍳
-              </span>
-              <span className="today__ai-text">AI 帮你想</span>
             </button>
           </div>
 
@@ -129,14 +115,12 @@ export default function DiscoverPage() {
         <WeekPlan />
       </div>
 
-      {/* 「AI 帮你想」的开关来自 store：点菜名进详情再返回时它还得开着（见上方注释）。
-          key 只在"新开一次"时变（start 会清空 picks），所以续上时是同一个实例、内容原样 */}
-      {suggestOpen && <AiSuggestSheet key="suggest" visible onClose={closeSuggest} />}
+      {/* 「帮我决定 + AI」的开关来自 store：点菜名进详情再返回时它还得开着，
+          上面那道菜与下面那份 AI 推荐都要原样，而且**不许重新挑**——用户正要评估
+          刚才那道菜，换一道等于把答案抽走了（用户 2026-10-13 的原话："保持原样"）。
+          key 只在"新开一次"时变（start 会清空一切），所以续上时是同一个实例 */}
+      {todayOpen && <TodaySheet key="today" visible onClose={closeToday} />}
       {sheet === 'chat' && <AiChatSheet key="chat" visible onClose={() => setSheet(null)} />}
-      {/* 「帮我决定」的开关来自 store（见上面那段注释）：点菜名进详情再返回时它还得开着，
-          而且**不许重新挑**——用户正要评估刚才那道菜，换一道等于把答案抽走了。
-          key 只在"新开一次"时变（start 会清空 result），所以续上时是同一个实例、内容原样 */}
-      {decideOpen && <DecideSheet key="decide" visible onClose={closeDecide} />}
     </Page>
   )
 }
