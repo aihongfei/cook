@@ -17,17 +17,18 @@ import '../shared.scss'
 import '../checkins/checkins.scss'
 import './mine.scss'
 
-const preferenceRows = [
-  { icon: '🌶️', title: '口味、忌口与过敏', sub: '归属于这个账号（M8 接入）' },
-  { icon: '🔔', title: '家庭消息提醒', sub: '菜单安排与饭已做好通知' },
-]
-
-const aiRows = [
-  { icon: '🤖', title: 'AI 模型配置', sub: 'pi-agent · 自定义 provider 与模型' },
-  { icon: '💬', title: '提示词模板', sub: '冰箱识别 / 菜品识别 / 营养分析' },
-]
-
-/** 我的：账号与设置（F2-03 资料绑定；退出登录属 F2-02） */
+/**
+ * 我的：账号与设置（F2-03 资料绑定；退出登录属 F2-02）
+ *
+ * 「我的设置」这一段的口径（2026-10-13 用户提「口味与忌口和我的设置中的重复了」「下面又有一堆菜单，太乱了」之后定的）：
+ *
+ * - **一件事只有一个入口**：口味与忌口原来既在「我的菜」下面独立成节、又在「我的设置」里占一行（且那一行还点不动）。
+ *   现在只留「我的设置」里这一行，**且它真的能点**（带实时状态：几项忌口 / 几位家人还没写）；
+ * - **没做的东西不画成能点的样子**：原来「AI 设置」那一整节（AI 模型配置 / 提示词模板）两行都带箭头、点了毫无反应——
+ *   而 AI 本来就是**部署时用 `.env` 配的**（D-009），不是用户能在界面上改的东西。
+ *   已整节下线；消息提醒（M10）还没开工，保留一行但**没有箭头、标着「还没做」**，不装成入口。
+ *   规矩：设置行**要么能点，要么明说还没做**——画一个点不动的箭头，用户只会以为 App 坏了。
+ */
 export default function MinePage() {
   const navigate = useNavigate()
   const storedUser = useAuth((state) => state.user)
@@ -184,18 +185,10 @@ export default function MinePage() {
         </Link>
 
         {/*
-          口味与忌口（M8 / F8-01、F8-02）：放在"我的菜"之后、"我的打卡"之前。
-          它属于**设置**（写下来影响别处的行为），所以挨着下面那一段设置类入口。
+          口味与忌口（M8 / F8-01、F8-02）**只在「我的设置」里给一个入口**（见文件头那段）。
+          原来它在这里独立成节、又在下面「我的设置」里占一行虚位——同一件事两个入口，
+          而且那一个还点不动（用户当场问「怎么没法点击」）。
         */}
-        <SectionTitle title="口味" />
-        <Link className="me-entry" to="/taste" state={{ from: '/mine' }}>
-          <span className="me-entry__icon">🌶️</span>
-          <span className="me-entry__text">
-            口味与忌口
-            <small>{tasteText(taste.data)}</small>
-          </span>
-          <span className="me-entry__arrow">›</span>
-        </Link>
 
         <SectionTitle title="我的打卡" />
 
@@ -234,47 +227,38 @@ export default function MinePage() {
         <SectionTitle title="我的设置" />
 
         <div className="rows" style={{ marginTop: 0 }}>
-          <div
-            className="row"
-            role="button"
-            tabIndex={0}
-            onClick={() => navigate('/family', { state: { from: '/mine' } })}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') navigate('/family', { state: { from: '/mine' } })
-            }}
-          >
+          {/*
+            行一律用 `<Link>`（不是 div + onClick）：键盘、读屏、"在新标签打开"这些
+            都由浏览器原生语义兜住，不必自己复刻一份 role/tabIndex/keydown。
+          */}
+          <Link className="row" to="/family" state={{ from: '/mine' }}>
             <div className="row__icon">👨‍👩‍👧</div>
             <div className="row__main">
               家庭共享与成员
               <div className="row__sub">{familySub}</div>
             </div>
             <span className="row__arrow">›</span>
+          </Link>
+          <Link className="row" to="/taste" state={{ from: '/mine' }}>
+            <div className="row__icon">🌶️</div>
+            <div className="row__main">
+              口味、忌口与过敏
+              <div className="row__sub">{tasteText(taste.data)}</div>
+            </div>
+            <span className="row__arrow">›</span>
+          </Link>
+          {/*
+            消息提醒（M10）还没做：**不画箭头、不装成入口**，但要留一句话——
+            "以后会有这个设置"本身是有用的信息，而一个点不动的箭头只会让人以为坏了。
+          */}
+          <div className="row row--soon">
+            <div className="row__icon">🔔</div>
+            <div className="row__main">
+              家庭消息提醒
+              <div className="row__sub">菜单安排与饭已做好通知</div>
+            </div>
+            <span className="row__tag">还没做</span>
           </div>
-          {preferenceRows.map((row) => (
-            <div className="row" key={row.title}>
-              <div className="row__icon">{row.icon}</div>
-              <div className="row__main">
-                {row.title}
-                <div className="row__sub">{row.sub}</div>
-              </div>
-              <span className="row__arrow">›</span>
-            </div>
-          ))}
-        </div>
-
-        <SectionTitle title="AI 设置" />
-
-        <div className="rows" style={{ marginTop: 0 }}>
-          {aiRows.map((row) => (
-            <div className="row" key={row.title}>
-              <div className="row__icon">{row.icon}</div>
-              <div className="row__main">
-                {row.title}
-                <div className="row__sub">{row.sub}</div>
-              </div>
-              <span className="row__arrow">›</span>
-            </div>
-          ))}
         </div>
 
         <button

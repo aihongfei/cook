@@ -182,3 +182,39 @@ it('邮箱清空时传 null（解绑），不是空字符串', async () => {
     expect(patch).toHaveBeenCalledWith('/auth/me', expect.objectContaining({ email: null })),
   )
 })
+
+/*
+ * 「我的设置」这一段的口径（用户 2026-10-13：「口味与忌口和我的设置中的重复了，
+ * 保留我的设置中的」「下面又有一堆菜单，太乱了」）。
+ *
+ * 要盯住两件事：
+ * ① **口味与忌口只有一个入口**（原来「我的菜」下面还独立成一节，两个入口说同一件事）；
+ * ② **设置行要么能点、要么明说还没做**——改前「AI 设置」那两行带箭头却点了没反应，
+ *    而 AI 根本是部署时用 .env 配的（D-009），用户改不了。
+ */
+it('口味与忌口只有一个入口（在「我的设置」里），且它真的能点', async () => {
+  renderMine()
+
+  const links = await screen.findAllByRole('link', { name: /口味/ })
+  expect(links).toHaveLength(1)
+  expect(links[0].getAttribute('href')).toBe('/taste')
+  // 副标题说清现状（几项忌口 / 几位家人还没写），不是一个箭头了事
+  expect(links[0].className).toContain('row')
+})
+
+it('设置里不画点不动的箭头：没做的功能标「还没做」，AI 设置整节不再出现', async () => {
+  renderMine()
+  await screen.findByRole('link', { name: /口味/ })
+
+  // 消息提醒（M10）还没做：留一行说明，但**不是链接、没有箭头**，而是一颗「还没做」
+  const soon = screen.getByText('家庭消息提醒').closest('.row') as HTMLElement
+  expect(soon.className).toContain('row--soon')
+  expect(soon.querySelector('.row__arrow')).toBeNull()
+  expect(soon.querySelector('.row__tag')?.textContent).toBe('还没做')
+  expect(soon.closest('a')).toBeNull()
+
+  // AI 是部署时配的（.env / D-009），界面上没有可改的东西 —— 那两行连同整节都下线了
+  expect(screen.queryByText('AI 模型配置')).toBeNull()
+  expect(screen.queryByText('提示词模板')).toBeNull()
+  expect(screen.queryByText('AI 设置')).toBeNull()
+})

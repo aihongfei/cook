@@ -297,6 +297,15 @@
 }
 
 /*
+ * 抽屉里的小节标题**不再自带左右栏距**：内容区（上面面板的 padding）已经有了 16px，
+ * 两处都加就是 32px——比抽屉外同样的小节明显内缩一截，看着像没对齐。
+ * `.section-title` 自己的上下留白保留（那是它作为分隔的作用）。
+ */
+.sheet__body .section-title {
+  padding-inline: 0;
+}
+
+/*
  * 「拍照 / 从相册选」两个隐藏的原生 file 控件（见 components/ui/PhotoSource.tsx）。
  *
  * 隐藏但**不能用 `display:none`**：部分安卓 WebView 上那样点 label 不触发选择器

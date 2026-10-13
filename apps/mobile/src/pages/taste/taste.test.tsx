@@ -195,3 +195,57 @@ it('还没写过时明说"填了会怎样"，不是一片空白', async () => {
   renderPage()
   await waitFor(() => expect(screen.getByText(/还没写过。填了之后/)).toBeTruthy())
 })
+
+/*
+ * 「改一改」是**抽屉弹上来的**（2026-10-13 用户：「改一改不要在下面，使用弹窗」）。
+ *
+ * 改前它是挂在页尾的一段（`.taste-editor`）：点「改一改」时它在**首屏之外**
+ * （实测 top≈803，可视区 768）——屏幕上没有任何变化，用户以为"这块没法点击"。
+ * 所以这里钉住它现在确实是个弹层（`.adm-popup` = BottomSheet 的容器）。
+ *
+ * ⚠️ 断言用类名不用 `role="dialog"`：BottomSheet 包的是 antd-mobile 的 Popup，
+ * 它**不带**对话框语义（本项目所有抽屉都是这样，FridgeItemSheet 的测试同样按类名断言）。
+ * 完整弹层语义要改共享的 BottomSheet，不在这一刀的范围里。
+ */
+it('「改一改」弹出抽屉（不是页面下面铺开一段），标题说清在改什么', async () => {
+  mockApi()
+  renderPage()
+  fireEvent.click(await screen.findByRole('button', { name: '开始写' }))
+
+  await waitFor(() => expect(document.querySelector('.adm-popup')).toBeTruthy())
+  // 编辑内容在弹层里（不是页面流里另外挂一段）
+  const sheet = document.querySelector('.adm-popup') as HTMLElement
+  expect(sheet.querySelector('.sheet__title')?.textContent).toBe('写口味与忌口')
+  expect(sheet.querySelector('.taste-editor__chips')).toBeTruthy()
+  expect(sheet.querySelector('.taste-editor__save')?.textContent).toBe('存下来')
+  // 页面流里**没有**那段编辑内容了（否则就是"弹窗 + 下面还铺一段"）
+  expect(document.querySelector('.page .taste-editor')).toBeNull()
+})
+
+it('写过的人点进来时抽屉标题是「改一改」（与页面上那颗按钮同一件事）', async () => {
+  mockApi(familyFixture({
+    me: { ...EMPTY, allergies: ['花生'], filled: true },
+    missing: [],
+  }))
+  renderPage()
+  fireEvent.click(await screen.findByRole('button', { name: '改一改' }))
+
+  await waitFor(() => expect(document.querySelector('.adm-popup')).toBeTruthy())
+  const sheet = document.querySelector('.adm-popup') as HTMLElement
+  expect(sheet.querySelector('.sheet__title')?.textContent).toBe('改一改')
+  // 已选的词要带着选中态进来（不然用户以为没存上）
+  const peanut = Array.from(sheet.querySelectorAll('.taste-chip')).find((n) => n.textContent === '花生')
+  expect(peanut?.className).toContain('is-active')
+})
+
+it('「先不改」收起抽屉但不发请求（点选是探索，不是每次都在改全家的推荐）', async () => {
+  const { patch } = mockApi()
+  renderPage()
+  fireEvent.click(await screen.findByRole('button', { name: '开始写' }))
+  await waitFor(() => expect(document.querySelector('.adm-popup')).toBeTruthy())
+
+  fireEvent.click(screen.getByRole('button', { name: '先不改' }))
+
+  await waitFor(() => expect(document.querySelector('.adm-popup')).toBeNull())
+  expect(patch).not.toHaveBeenCalled()
+})
