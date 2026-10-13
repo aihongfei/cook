@@ -2007,6 +2007,16 @@ node services/api/scripts/ai-stub-upstream.cjs 18990 &
 AI_API_BASE=http://host.docker.internal:18990/v1 docker compose up -d --force-recreate api
 cd services/api && pnpm run test:http:ai-actions; echo "exit=$?"   # 30/30
 
+# ⚠️⚠️ 验收做完**必须复原**，并停掉 stub —— 这一步漏掉就是 2026-10-13 那次的真实故障：
+#   容器还指着 stub，用户点开「问 AI」拿到的永远是那两句写死的台词（"我看看菜谱库里有什么。"），
+#   看着像"AI 坏了/没接上"，其实是**验收环境没退干净**。
+docker compose up -d --force-recreate api                   # 用 .env 里的真实上游重建
+docker compose exec -T api printenv AI_API_BASE              # 必须等于 .env 里的 AI_API_BASE
+pkill -f "ai-stub-upstream.cjs"                              # stub 只该在验收期间存在
+# 再用真实请求确认一次（回答应当与问题相关、且带家庭上下文，而不是固定句子）
+#   cd services/api && node -e '…POST /ai/chat {messages:[{role:"user",content:"肉怎么去腥？一句话"}]}…'
+# **不要**在验收后"忘记复原"就交给用户：他手上那个界面是不会自己变回来的。
+
 # 前端
 pnpm --dir apps/mobile exec vitest run; echo "exit=$?"      # 347/347
 pnpm --dir apps/mobile exec tsc -b; echo "exit=$?"          # 仅 2 条既有错误（CombosPage.test / PrepPage.test，与本轮无关）
@@ -2041,6 +2051,7 @@ pnpm --dir apps/mobile run dev                              # http://127.0.0.1:5
 
 | 现象 | 根因 | 处置 |
 | --- | --- | --- |
+| **不管问什么都答同一句**（"我看看菜谱库里有什么。我看看菜谱库里有什么。今晚就这两道吧…"），没报错、配置也没动过 | **验收环境没退干净**：为了走 stub 验收，容器被临时覆盖了 `AI_API_BASE` 指向本地 stub，验收后没复原——真实模型一次都没被调用过 | 先 `docker compose exec -T api printenv AI_API_BASE` 核对；复原见上面"验收做完必须复原"那块（重建 + 核对 + 停 stub + 真请求复验）。**症状一眼可辨**：stub 是固定台词，真实回答一定与问题相关 |
 | 让它"把牛奶拿掉"，**删掉的却是苹果**，牛奶还在冰箱里 | stub 从工具结果里取 id 用了 `[^\n]*`——而工具结果是 `JSON.stringify` 过的，`\n` 是**两个字符**不是换行，正则一路跨过好几条记录 + 贪婪量词取到**最后一条** | 先 `JSON.parse` 解开那层 JSON，再按行找名字**完全相等**的；并加了反证证明旧写法确实取到苹果 |
 | "那条又回来了时撤销" → 用户看到「已经记了一条，直接改它就行」 | 撤「删除」时按 `targetId` 查现状，而那个 id 就是**被删掉那条**、必然查不到 → "用户又记回来了"的分支永远走不到，撤销照重建走、撞唯一约束 | 撤「删除」改按**同名同区**查（与唯一约束同一个键）；补 `removedItemKey` 纯函数与回归测试 |
 | 单测全绿但用户点「撤」是坏的 | 纯函数两边都用假数据（规则没错，**喂给它的现状错了**） | 所以有 `verify-ai-actions-http.cjs` 走真路；这正是不只写单测的理由 |
