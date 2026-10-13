@@ -100,6 +100,7 @@ cook/
 | 容器网络 | compose 网络 `cook_default`；容器内互访用服务名 `mysql` / `api` / `minio` | ✅ |
 | **安卓 App（F14-01）** | `apps/mobile/android/`（Capacitor 生成）· `appId com.yushan.cook` · 启动器名「御膳」· 网页资源在 `app/src/main/assets/public`（`cap sync` 拷进去） | ✅ 已验证：debug 20MB / 签名 release 19MB，装机跑通（2026-10-14，D-067） |
 | **APK 运行时从哪里拿数据** | WebView 挂在 **`http://localhost`**（`androidScheme:'http'`，见 `apps/mobile/capacitor.config.ts`）；接口与图片地址仍写 `127.0.0.1:3000` / `127.0.0.1:9000`，靠 `adb reverse tcp:3000` / `tcp:9000` 映射到宿主机 | ✅ 模拟器已验证；**换真机时 `adb reverse` 不适用**，要把 `VITE_API_BASE_URL` 与 `MEDIA_BASE_URL` 改成服务器地址（见下方「部署」） |
+| **服务器版 APK（装真机用）** | 构建：`pnpm --dir apps/mobile run build:apk`（读 `apps/mobile/.env.server`）→ `./gradlew assembleRelease`；接口地址**编译期写死**为 `http://120.48.142.161:3000/api`，图片地址由服务器下发（`MEDIA_BASE_URL` 指公网 9000） | ✅ 已验证：撤掉 `adb reverse` 后注册的账号写进了服务器库（R-058） |
 | APK 调试通道 | `adb forward tcp:9222 localabstract:webview_devtools_remote_<PID>` → CDP 连 WebView 读真实 DOM | ✅ 已用（**只有 debug 包开这个端口**，release 包不开是正确行为） |
 | 签名密钥 | keystore `apps/mobile/android/keystore/yushan-release.jks`（**已 gitignore**）· 四项参数在 `~/.gradle/gradle.properties`（仓库外） | ✅ 密钥未入库；证书 `SHA-256: 5cdba7b7…6dbd31` |
 

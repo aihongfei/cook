@@ -2935,3 +2935,76 @@ curl -s http://127.0.0.1:9222/json/list     # 列出页面目标
 8. **XML 注释里不能出现 `--`**（我写了 `--color-cream`），AAPT 报 `The string "--" is not permitted within comments`——注释里提到 CSS 变量时去掉前缀。
 9. **拖拽测试的触摸事件要带 `id`**，否则 `touchmove` 不触发（假绿）。
 10. **别拿 `handleBackPress` 当清栈用**：它只调用最上面那层的 `close`，**不负责出栈**（出栈是组件卸载时调注销函数）。写进 `while (count>0)` 循环里会死循环——本地真跑出过一次 heap OOM。
+
+## R-058 出「服务器版」APK（指向公网服务器，装真机用）（F14-01 续，✅ 已验证，2026-10-14）
+
+配套：`DECISIONS.md` D-067（打包整体口径）、`MAP.md`「部署」一节（服务器地址与端口）、R-057（出包与模拟器的通用步骤）。
+
+### 为什么要单独一个"服务器版"
+
+开发期的 APK 里接口写的是 `http://127.0.0.1:3000/api`，在模拟器上靠 `adb reverse tcp:3000 tcp:3000` 把宿主端口映射进去才通。**真机没有这条通道**（`adb reverse` 只在 adb 连接下有效），所以真机用的包必须把地址**换成公网地址重新打包**。
+
+**地址是编译期写死的**（Vite 在打包时把 `import.meta.env.VITE_API_BASE_URL` 替换成字面量），换了服务器/域名要**重新打包**——改 `apps/mobile/.env` 对已装机的 APK 没有任何影响。
+
+### 怎么做
+
+```bash
+cd /Users/aihf/Downloads/work/cook
+
+# ① 网页资源（读 .env.server，指向公网服务器）+ 同步进 android 工程
+pnpm --dir apps/mobile run build:apk        # = tsc -b && vite build --mode server && cap sync android
+
+# ② 出签名包
+export JAVA_HOME="$HOME/Library/Java/JavaVirtualMachines/temurin-21.0.12.1.jdk/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+cd apps/mobile/android && ./gradlew assembleRelease
+# 产物：app/build/outputs/apk/release/app-release.apk
+```
+
+地址写在 `apps/mobile/.env.server`（**入库**——公网地址不是密钥）。三个 mode 互不影响：dev 读 `.env`（回环）、`build:server` 读 `.env.server`、不加 `--mode` 的 `build` 读 `.env`/`.env.production`。
+
+### 发出去之前必须核对（三条，缺一个装上去就是废包）
+
+```bash
+# ① APK 里内嵌的确实是公网地址、且**没有**回环残留
+unzip -p app-release.apk assets/public/assets/index-*.js | grep -c "120.48.142.161:3000"   # 期望 ≥1
+unzip -p app-release.apk assets/public/assets/index-*.js | grep -c "127.0.0.1:3000"        # 期望 0
+
+# ② 服务器接口公网可达
+curl -s -o /dev/null -w '%{http_code}\n' http://120.48.142.161:3000/api/health             # 期望 200
+
+# ③ 服务器 CORS 放行 APK 的 Origin（**漏了就是"页面能开、数据全空"**）
+curl -s -i -X OPTIONS http://120.48.142.161:3000/api/health \
+  -H "Origin: http://localhost" -H "Access-Control-Request-Method: GET" \
+  | grep -i access-control-allow-origin                                                    # 期望: http://localhost
+```
+
+### 装机前在模拟器上先验一遍（**撤掉 adb reverse**，模拟真机的真实网络）
+
+```bash
+adb reverse --remove-all          # 关键：撤掉端口映射，否则验的还是本机后端
+adb uninstall com.yushan.cook     # 卸掉旧包顺带清登录态，等于"全新安装"
+adb install app-release.apk
+adb shell am start -n com.yushan.cook/.MainActivity
+```
+
+**判据**：能注册/登录、菜谱列表出得来、图片显示得出来。最强的证据是**登录/注册用的账号真的写进了服务器的库**：
+
+```bash
+ssh cook "cd /opt/cook && docker compose exec -T mysql mysql -uroot -p\"\$MYSQL_PWD\" cook \
+  -e \"SELECT account, nickname, createdAt FROM User ORDER BY createdAt DESC LIMIT 3;\""
+```
+
+### 这次实测的结果（2026-10-14）
+
+- 服务器侧前置三条全绿（health 200 / CORS 回 `http://localhost` / 图片 200 8.3KB 69ms）；
+- 撤掉 `adb reverse` 后：登录老账号 → **服务器返 401「账号或密码不对」**（是业务话术，不是"连不上厨房服务"——后者才是网络不通）；这条本身就证明链路通了；
+- 新注册 `srv10140106` / Papa → 直接进厨房页、6 张菜谱图正常显示；**服务器库里查到这条账号**（`createdAt 2026-10-13 17:09:47`），决定性证据；
+- APK 内嵌 `http://120.48.142.161:3000/api` ×2、回环地址 ×0。
+
+### 已知边界（发出去之前要知道）
+
+1. **明文 HTTP**：地址是 `http://`，`usesCleartextTraffic=true`（开发期就开了）。能用，但流量不加密；上域名 + HTTPS 要同时改 `.env.server`、服务器 `MEDIA_BASE_URL`、`CORS_ORIGIN` 与 `cap sync` 后重打包。
+2. **找回密码不可用**：服务器 `MAIL_TRANSPORT` 还没配真实 SMTP 凭据（`RISKS.md` R-16），注册时**不要填邮箱**，否则"忘了密码"也找不回来。
+3. **服务端是单机 2 核 / 1.9 GB**：够家里几个人用，不是生产级容量。
+4. **版本号仍是 `1.0`（versionCode 1）**：反复装不同版本的包，系统不会提示更新；正式发版要在 `app/build.gradle` 里递增（F14-05）。

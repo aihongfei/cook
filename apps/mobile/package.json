@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:server": "tsc -b && vite build --mode server",
+    "build:apk": "tsc -b && vite build --mode server && cap sync android",
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "lint": "oxlint",
