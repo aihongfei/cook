@@ -16,6 +16,7 @@ import { readPlanTarget } from './plan-target'
 const dish: RecipeSummary = {
   id: 'tomato', name: '番茄炒蛋', image: null, category: '素菜', cuisine: '家常',
   tags: ['快手'], calories: null, caloriesEstimated: false,
+  origin: 'howtocook', sourceLabel: 'HowToCook', mine: false,
 }
 const clients: QueryClient[] = []
 

@@ -204,3 +204,280 @@
 
 /* 菜谱小书的角落插画：位置统一由 ui.scss 的 `.corner-art` 决定（锚在 .recipes-page 上），
    这里不再单独覆盖 top —— 之前那条 `top: 20px` 会把它又拽回标题带里 */
+
+/*
+ * 来源徽标（F1-12）。**克制**是这一条的全部要求：导入的菜是绝大多数，
+ * 每张卡都挂一个抢眼的红章，等于整页没有重点。所以导入的用最小字号 + 最弱的墨色，
+ * 自建的才用实色（那道菜是用户自己的、能改）。
+ * 尺寸按 10px 定，是因为它要和 `.dish-card__meta` 的品类/菜系并排（那里是 10.5px）。
+ */
+.origin-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: nowrap;
+  color: var(--color-ink-3);
+  background: var(--color-cream-2);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.origin-badge--mine {
+  color: var(--color-paper);
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+/* 详情页标题下的那一行：徽标 + "谁传的" */
+.recipe-detail__origin {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+/*
+ * 详情页的三个动作（想吃这道 / 编辑 / 删除）排一行，**换行不横滚**：
+ * 窄屏上三个胶囊正好挤满一行，多一个就换到第二行——横滚会把删除藏到屏幕外，
+ * 而用户来这儿找它时并不知道要往右划。
+ *
+ * `margin-top: 14px` 是从原来那个单独的「想吃这道」继承的（见 order.scss 里那条规则）：
+ * 现在间距由行本身带，里面的按钮不用再各自顶一次（行内的 `margin-top` 会让三个按钮错开）。
+ */
+.recipe-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+
+  .recipe-button { margin-top: 0; }
+}
+
+/* 「删除」是减法且不可逆：只把字染成砖红，**不做实心红按钮**——
+   这一页最高频的动作是"想吃这道"，把删除画得和它一样重，是在鼓励误触 */
+.recipe-detail__delete {
+  color: var(--color-brick);
+  border-color: var(--color-focus-line);
+}
+
+/* 「编辑」是链接而不是按钮（它只负责跳转），得自己去掉下划线才与旁边两个胶囊同一个样子 */
+.recipe-detail__edit {
+  display: inline-block;
+  text-decoration: none;
+}
+
+/*
+ * 我的菜谱（F1-12）。顶部一行只放两样东西：**新建**（左）与总数（右）。
+ * 新建不是普通的入口而是这一页的主行动，所以它做成实心胶囊、贴在与标题同一条竖线上
+ * （`.pscreen` 的标题自带 `padding-inline`，这里用 margin 对齐，见 favorites.scss 里那段说明）。
+ */
+.my-recipes__top {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px var(--spacing-page) 0;
+}
+
+.my-recipes__new {
+  padding: 9px 18px;
+  font-size: 13px;
+  color: var(--color-paper);
+  text-decoration: none;
+  background: var(--color-brand);
+  border-radius: 999px;
+}
+
+.my-recipes__new:active {
+  opacity: 0.85;
+}
+
+.my-recipes__count {
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+.my-recipes__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  margin: 0 var(--spacing-page);
+}
+
+.my-recipes__empty-go {
+  width: auto;
+  padding: 9px 20px;
+  margin-top: 0;
+  text-decoration: none;
+}
+
+/*
+ * 写菜谱 / 改菜谱（F1-12）。整张表单是一叠字段块，输入框样式沿用 `mine-edit` 那套
+ * （同一支笔画的框），横向边距由卡片自己带（见 favorites.scss 里那段说明）。
+ */
+.recipe-form {
+  padding: 15px;
+  margin: 12px var(--spacing-page) 0;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.recipe-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+
+  > span { font-size: 12px; color: var(--color-ink-2); }
+}
+
+/*
+ * 输入框一律**最少 16px 字号**：iOS 上小于 16px 的输入框获得焦点时会触发自动缩放，
+ * 用户一打字整页就跳一下。视觉上这点差别看不出来，但那次缩放非常明显。
+ */
+.recipe-form input,
+.recipe-form textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 16px;
+  color: var(--color-ink);
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 12px;
+  outline: none;
+}
+
+.recipe-form textarea {
+  font-size: 14px;
+  line-height: 1.7;
+  resize: vertical;
+}
+
+.recipe-form input:focus,
+.recipe-form textarea:focus {
+  border-color: var(--color-focus-line);
+  box-shadow: var(--shadow-focus);
+}
+
+/* 品类/菜系并排：它们都是两三个字的短词，各占一行会白白拉长表单 */
+.recipe-form__row {
+  display: flex;
+  gap: 10px;
+}
+
+.recipe-form__row .recipe-form__field {
+  flex: 1;
+  min-width: 0;
+  margin-top: 14px;
+}
+
+/* 配料行：名字（宽）+ 用量（窄）+ 删除键，可以换行不横滚——横滚会让删除键藏到屏幕外 */
+.recipe-form__ingredient {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+
+  input:first-child { flex: 1 1 120px; }
+  input:nth-child(2) { flex: 1 1 90px; }
+}
+
+.recipe-form__step {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+
+  textarea { flex: 1; min-width: 0; }
+}
+
+/* 删除键是方形的次要按钮：它紧挨着输入框，画成胶囊会和输入框抢眼 */
+.recipe-form__remove {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 17px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+  background: var(--color-cream-2);
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+}
+
+.recipe-form__remove:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.recipe-form__add {
+  align-self: flex-start;
+  padding: 6px 13px;
+  font-size: 12px;
+  /* 与同页的 `.recipe-button` 用同一组描边色（那是本页"次要动作"的颜色） */
+  color: #ab5527;
+  cursor: pointer;
+  background: none;
+  border: 1.5px dashed #de9057;
+  border-radius: 999px;
+}
+
+/* 校验与后端报错都落在这儿：`min-height` 让它**常驻**一行，
+   否则出错那一刻整张表单往下跳一格，用户正指着的那一行就跑掉了 */
+.recipe-form__error {
+  min-height: 18px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--color-brick);
+}
+
+.recipe-form__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.recipe-form__submit {
+  flex: 1;
+  padding: 12px;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--color-paper);
+  cursor: pointer;
+  background: var(--color-brand);
+  border: 0;
+  border-radius: 13px;
+}
+
+.recipe-form__submit:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+/* 「删掉这道」按危险动作画（砖红描边、不实心）：它旁边就是保存键，两者不能等重 */
+.recipe-form__delete {
+  flex: 0 0 auto;
+  padding: 12px 16px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--color-brick);
+  cursor: pointer;
+  background: none;
+  border: 1.5px solid var(--color-focus-line);
+  border-radius: 13px;
+}
+
+.recipe-form__delete:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/toast'
 import { nextMealDefaults } from '@/pages/order/next-meal'
 import { readPlanTarget } from '@/pages/order/plan-target'
 import RecipeImage from '@/pages/recipes/components/RecipeImage'
+import RecipeOriginBadge from '@/pages/recipes/components/RecipeOriginBadge'
 import '../kitchen.scss'
 
 /**
@@ -106,6 +107,9 @@ export default function DishCard({
           <div className="dish-card__meta">
             <span>{dish.category || '品类暂无'}</span>
             <span>{dish.cuisine || '菜系暂无'}</span>
+            {/* 来源徽标（F1-12）放在这一行、不放在菜名旁边：这行本来就小一号，
+                徽标跟着弱下去，不会把整张卡的注意力从菜名上抢走 */}
+            <RecipeOriginBadge origin={dish.origin} sourceLabel={dish.sourceLabel} />
           </div>
           <div className="dish-card__calories">{caloriesLabel(dish)}</div>
           <span className="dish-card__browse">看做法 →</span>

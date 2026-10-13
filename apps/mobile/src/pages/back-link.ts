@@ -16,6 +16,9 @@ import { tabs } from '@/config/tabs'
  */
 const EXTRA_ENTRIES: Record<string, string> = {
   '/recipes': '返回菜谱小书',
+  // 「我的菜谱」是个独立子页（F1-12）：卡片点进详情时带的就是这个来源，
+  // 不列在这儿就会静默退到菜谱小书——用户从自己的菜谱点进去，返回却到了公共库里
+  '/recipes/mine': '返回我的菜谱',
   // 备菜计划与常用组合都是独立子页（不在底部 Tab 里），从它们进了菜谱小书之后返回要能回到原处
   '/prep': '返回备菜计划',
   '/shopping': '返回采购清单',

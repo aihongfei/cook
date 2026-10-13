@@ -18,7 +18,7 @@ vi.mock('@/components/ui/FilterTabs', () => ({
     <div>{items.map((item) => <button key={item.key} aria-pressed={activeKey === item.key} onClick={() => onChange(item.key)}>{item.title}</button>)}</div>,
 }))
 
-const dish: RecipeSummary = { id: 'tomato', name: '番茄炒蛋', image: null, category: '素菜', cuisine: '家常', tags: ['快手'], calories: null, caloriesEstimated: false }
+const dish: RecipeSummary = { id: 'tomato', name: '番茄炒蛋', image: null, category: '素菜', cuisine: '家常', tags: ['快手'], calories: null, caloriesEstimated: false, origin: 'howtocook', sourceLabel: 'HowToCook', mine: false }
 const filters = { categories: ['素菜', '荤菜'], cuisines: ['家常', '川菜'] }
 const clients: QueryClient[] = []
 
@@ -179,7 +179,13 @@ describe('recipe browsing states', () => {
     } })
     mount('/recipes/tomato')
     await screen.findByRole('heading', { name: '番茄炒蛋' })
-    for (const text of ['鸡蛋', '两个', '先打散鸡蛋。', '小火收汁。', 'HowToCook', 'Unlicense', 'abc123', '暂无视频，先跟着文字步骤做吧']) expect(screen.getByText(text)).toBeTruthy()
+    for (const text of ['鸡蛋', '两个', '先打散鸡蛋。', '小火收汁。', 'Unlicense', 'abc123', '暂无视频，先跟着文字步骤做吧']) expect(screen.getByText(text)).toBeTruthy()
+    /*
+     * 来源名在详情页是**两处**：标题下的来源徽标（F1-12）与页尾的「这份菜谱从哪里来」。
+     * 所以这里按"两处都在"断言——原来的单数断言在加了徽标之后必然变成"找到多个"。
+     */
+    expect(screen.getAllByText('HowToCook')).toHaveLength(2)
+    expect(document.querySelector('.recipe-detail__origin .origin-badge')!.textContent).toBe('HowToCook')
     expect(screen.getByRole('link', { name: '查看原始菜谱 ↗' }).getAttribute('href')).toBe('https://example.com/recipe')
     expect(document.querySelector('video')).toBeNull()
   })

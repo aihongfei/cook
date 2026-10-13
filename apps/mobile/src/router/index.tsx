@@ -14,6 +14,8 @@ import MinePage from '@/pages/mine/MinePage'
 import PrepPage from '@/pages/prep/PrepPage'
 import ShoppingPage from '@/pages/shopping/ShoppingPage'
 import FavoritesPage from '@/pages/recipes/favorites/FavoritesPage'
+import MyRecipesPage from '@/pages/recipes/MyRecipesPage'
+import RecipeFormPage from '@/pages/recipes/RecipeFormPage'
 import RecipeListPage from '@/pages/recipes/RecipeListPage'
 import RecipeDetailPage from '@/pages/recipes/RecipeDetailPage'
 import OrderPage from '@/pages/order/OrderPage'
@@ -38,7 +40,14 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/kitchen" replace /> },
       { path: 'kitchen', element: <KitchenPage /> },
       { path: 'recipes', element: <RecipeListPage /> },
+      /*
+       * 静态路径写在 `:id` 之前：react-router v6 本来就按具体度匹配（`/recipes/mine`
+       * 不会被 `:id` 抢走），但把它排在前面，读路由表的人不必先知道这条规则才敢确认。
+       */
+      { path: 'recipes/mine', element: <MyRecipesPage /> },
+      { path: 'recipes/new', element: <RecipeFormPage /> },
       { path: 'recipes/:id', element: <RecipeDetailPage /> },
+      { path: 'recipes/:id/edit', element: <RecipeFormPage /> },
       { path: 'favorites', element: <FavoritesPage /> },
       { path: 'order', element: <OrderPage /> },
       { path: 'order/history', element: <HistoryPage /> },

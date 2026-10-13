@@ -1,19 +1,26 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useLocation, useParams } from 'react-router-dom'
-import { caloriesLabel, fetchRecipe, recipeErrorMessage } from '@/api/recipes'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { apiErrorMessage } from '@/api/client'
+import { caloriesLabel, fetchRecipe, recipeErrorMessage, useDeleteRecipe } from '@/api/recipes'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Page from '@/components/ui/Page'
+import { toast } from '@/components/ui/toast'
 import OrderDishSheet from '@/pages/order/components/OrderDishSheet'
 import { readBackLink } from '@/pages/back-link'
 import { readPlanTarget } from '@/pages/order/plan-target'
 import RecipeImage from './components/RecipeImage'
+import RecipeOriginBadge from './components/RecipeOriginBadge'
 import RecipeStatus from './components/RecipeStatus'
 import './recipes.scss'
 
 export default function RecipeDetailPage() {
   const { id = '' } = useParams()
   const location = useLocation()
+  const navigate = useNavigate()
   const [ordering, setOrdering] = useState(false)
+  // 删除要走二次确认（不可逆），所以先记"弹窗开着没"再发请求
+  const [deleting, setDeleting] = useState(false)
   // 每次点「想吃这道」都 +1，用来给抽屉换 key（见下方 OrderDishSheet）
   const [orderSheetSeq, setOrderSheetSeq] = useState(0)
   const openOrderSheet = () => {
@@ -34,6 +41,26 @@ export default function RecipeDetailPage() {
     retry: 1,
   })
   const recipe = query.data
+  const remove = useDeleteRecipe()
+
+  /*
+   * 删完回「我的菜谱」而不是回上一页：那道菜已经不存在了，浏览器后退会撞上详情页的 404，
+   * 而用户此刻多半正是从「我的菜谱」过来的。
+   */
+  const confirmDelete = () => {
+    if (!recipe) return
+    remove.mutate(recipe.id, {
+      onSuccess: (result) => {
+        setDeleting(false)
+        toast.success(`已删掉「${result.name}」`)
+        navigate('/recipes/mine')
+      },
+      onError: (error) => {
+        setDeleting(false)
+        toast.error(apiErrorMessage(error))
+      },
+    })
+  }
   return (
     <Page>
       <div className="recipes-page recipe-detail">
@@ -68,6 +95,16 @@ export default function RecipeDetailPage() {
             </div>
             <header className="recipe-detail__heading">
               <h1>{recipe.name}</h1>
+              {/*
+               * 来源（F1-12）：自建的标出来，"谁传的"跟在后面——一道家传菜署上名字才完整。
+               * `mine === false` 的菜没有编辑/删除按钮，这里把原因说出来：不解释的话，
+               * 用户只会觉得"为什么这道能改、那道不能"（后端拒绝时的原话也是这个意思）。
+               */}
+              <p className="recipe-detail__origin">
+                <RecipeOriginBadge origin={recipe.origin} sourceLabel={recipe.sourceLabel} />
+                {recipe.createdBy && <span>{recipe.createdBy} 上传</span>}
+                {recipe.mine === false && <span>公共菜谱不能改，想调整就自己新建一道</span>}
+              </p>
               {recipe.aliases.length > 0 && <p>也叫：{recipe.aliases.join('、')}</p>}
               <div className="recipe-detail__tags">
                 {/* 源站标签里常带着品类词（如"汤""包子"），与前面的品类/菜系重复，展示时去重 */}
@@ -81,13 +118,34 @@ export default function RecipeDetailPage() {
                 {caloriesLabel(recipe)} · 辣度 {recipe.spiciness}
               </p>
               {/* 点菜入口（F3-01）：看完就知道怎么做的菜，最想做的事是"让家里做给我吃" */}
-              <button
-                type="button"
-                className="recipe-button recipe-detail__order"
-                onClick={openOrderSheet}
-              >
-                想吃这道
-              </button>
+              <div className="recipe-detail__actions">
+                <button
+                  type="button"
+                  className="recipe-button recipe-detail__order"
+                  onClick={openOrderSheet}
+                >
+                  想吃这道
+                </button>
+                {/* 编辑/删除只在**能改**的时候画（mine 由后端算好）：公共菜谱是只读的，
+                    给个按钮再拿 403 拒绝，比不给按钮更糟 */}
+                {recipe.mine && (
+                  <>
+                    <Link
+                      className="recipe-button recipe-detail__edit"
+                      to={`/recipes/${encodeURIComponent(recipe.id)}/edit`}
+                    >
+                      编辑
+                    </Link>
+                    <button
+                      type="button"
+                      className="recipe-button recipe-detail__delete"
+                      onClick={() => setDeleting(true)}
+                    >
+                      删除
+                    </button>
+                  </>
+                )}
+              </div>
             </header>
             <section className="recipe-paper" aria-labelledby="ingredients-heading">
               <h2 id="ingredients-heading">准备这些食材</h2>
@@ -186,6 +244,19 @@ export default function RecipeDetailPage() {
             recipeName={recipe.name}
             preset={planTarget}
             onClose={() => setOrdering(false)}
+          />
+        )}
+        {recipe && (
+          <ConfirmDialog
+            open={deleting}
+            title="删掉这道菜谱"
+            // 说清后果：删掉之后收藏与组合里的引用也跟着没了，别只问一句"确定吗"
+            message={`「${recipe.name}」会从你们家的菜谱里删掉，收藏与常用组合里的这道也会一起消失，删了不能恢复。`}
+            confirmText="删除"
+            tone="danger"
+            pending={remove.isPending}
+            onConfirm={confirmDelete}
+            onCancel={() => setDeleting(false)}
           />
         )}
       </div>

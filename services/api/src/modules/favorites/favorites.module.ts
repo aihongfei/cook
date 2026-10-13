@@ -21,5 +21,7 @@ import { FavoritesService } from './favorites.service'
   ],
   controllers: [FavoritesController],
   providers: [PrismaService, FavoritesService, JwtAuthGuard],
+  // 导出给 AiModule 用：AI 的收藏工具走这同一份（不允许另写一套写入逻辑）
+  exports: [FavoritesService],
 })
 export class FavoritesModule {}

@@ -133,8 +133,21 @@ it('保存把昵称、头像与邮箱发给后端，成功后收起表单并提�
   expect(await screen.findByText('资料已更新')).toBeTruthy()
 })
 
-it('打卡块的张数只出现一处，且打卡墙入口在"连续打卡"同一行的右侧', async () => {
-  const FAMILY = {
+/*
+ * 「我的菜谱」入口（F1-12）：与「我收藏的菜」同一个形状（`.me-entry`），
+ * 顺序上紧跟它放在「我的菜」这一节里——两行都是"翻我自己的菜"。
+ */
+it('「我的菜谱」入口在「我的菜」里，指向 /recipes/mine 并带上来源', async () => {
+  renderMine()
+
+  const link = await screen.findByRole('link', { name: /我的菜谱/ })
+  expect(link.getAttribute('href')).toBe('/recipes/mine')
+  expect(link.classList.contains('me-entry')).toBe(true)
+  // 数量拿不到时给说明文字（与收藏那一行同一条口径：有数报数，没有就说它是干什么的）
+  expect(link.textContent).toContain('自己上传的菜，随时能改')
+})
+
+it('打卡块的张数只出现一处，且打卡墙入口在"连续打卡"同一行的右侧', async () => {  const FAMILY = {
     id: 'f1', name: '小满一家', shared: true, inviteCode: 'H65WAJ',
     createdAt: new Date().toISOString(), memberCount: 2, memberLimit: 10,
     myRole: 'OWNER', myCapabilities: [], members: [],

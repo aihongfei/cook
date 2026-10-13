@@ -5,6 +5,7 @@ import { logout, useAuthOptions, useMe, useUpdateProfile } from '@/api/auth'
 import { useCheckInStats } from '@/api/checkins'
 import { useFamily } from '@/api/family'
 import { useFavorites } from '@/api/favorites'
+import { useRecipes } from '@/api/recipes'
 import Heatmap from '@/components/ui/Heatmap'
 import PageHeader from '@/components/ui/PageHeader'
 import Page from '@/components/ui/Page'
@@ -37,6 +38,12 @@ export default function MinePage() {
   const checkins = useCheckInStats({ enabled: Boolean(family.data) })
   // 收藏数只用于入口那一行的副标题（F1-09）；没登录时后端 401，hook 自己不发请求
   const favorites = useFavorites()
+  /*
+   * 「我的菜谱」那一行的数量（F1-12）：借列表接口的第一页要 `total`，**不另开统计接口**——
+   * 一行副标题不值得一个新端点与一套新的失效逻辑。没登录/没家庭时它自然为空。
+   * 单独给 `useRecipes` 一份只读第一页的查询：入口只需要一个数，不需要翻页。
+   */
+  const own = useRecipes({ mine: true })
 
   // 先用本地缓存的账号信息渲染，接口回来后自动替换（避免进页面就闪一下"读取中"）
   const user = me.data ?? storedUser
@@ -160,6 +167,16 @@ export default function MinePage() {
           <span className="me-entry__text">
             我收藏的菜
             <small>{favorites.data ? `${favorites.data.total} 道` : '想做的时候来这儿找'}</small>
+          </span>
+          <span className="me-entry__arrow">›</span>
+        </Link>
+        {/* 我的菜谱（F1-12）：与收藏并列放在"我的菜"下——两行都是"翻我自己的菜"，
+            数量口径也一样（有数就报数，没有就说这项是干什么的） */}
+        <Link className="me-entry" to="/recipes/mine" state={{ from: '/mine' }}>
+          <span className="me-entry__icon">📝</span>
+          <span className="me-entry__text">
+            我的菜谱
+            <small>{own.data ? `${own.data.pages[0]?.total ?? 0} 道 · 自己上传的` : '自己上传的菜，随时能改'}</small>
           </span>
           <span className="me-entry__arrow">›</span>
         </Link>

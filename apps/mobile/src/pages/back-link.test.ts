@@ -28,6 +28,12 @@ it('菜谱小书（不在 Tab 里）也认得，带查询串的原样保留', ()
   expect(searched.label).toBe('返回菜谱小书')
 })
 
+it('「我的菜谱」也认得（卡片的来源就是它，不列在这儿会静默退到菜谱小书）', () => {
+  const back = readBackLink({ from: '/recipes/mine' }, '/recipes')
+  expect(back.to).toBe('/recipes/mine')
+  expect(back.label).toBe('返回我的菜谱')
+})
+
 it('发现页来的返回发现（这条是回归钉：曾因白名单漏了 /discover 而退到菜谱小书）', () => {
   const back = readBackLink({ from: '/discover' }, '/recipes')
   expect(back.to).toBe('/discover')
