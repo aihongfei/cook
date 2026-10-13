@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>信息架构改版预览 · 采购清单放哪儿 + 发现页怎么收</title>
+<style>
+:root{
+  --brand:#e07b39; --brick:#b94a2c; --ink:#5a3520; --ink2:#8e6b52; --ink3:#a8785a;
+  --cream:#fcf1da; --cream2:#f8ead4; --paper:#fffbf2; --line:#eadcc4;
+  --peach:#f6c9a8; --sage:#bccba6; --butter:#f5d98b; --rose:#e8b4a6; --teal:#a8bfb4;
+  --radius-card:20px; --shadow-card:0 8px 18px rgb(150 100 60 / 10%);
+  --sp:16px;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; padding:0 0 40px; background:#f2e7d6; color:var(--ink);
+  font:14px/1.6 'PingFang SC','Hiragino Sans GB','Microsoft YaHei',system-ui,sans-serif;
+}
+a{color:var(--brand)}
+
+/* ---------- 页头与方案切换 ---------- */
+.hero{max-width:1180px;margin:0 auto;padding:22px 18px 6px}
+.hero h1{margin:0 0 6px;font-size:21px;letter-spacing:.5px}
+.hero p{margin:0;font-size:13px;color:var(--ink2);max-width:900px}
+.hero .rule{margin-top:10px;padding:10px 12px;font-size:12.5px;background:var(--cream);
+  border:1px solid var(--line);border-radius:12px;color:var(--ink2)}
+.hero .rule b{color:var(--brick)}
+.tabs{position:sticky;top:0;z-index:20;display:flex;gap:8px;flex-wrap:wrap;max-width:1180px;
+  margin:14px auto 0;padding:10px 18px;background:rgb(242 231 214 / 94%);backdrop-filter:blur(6px)}
+.tabs button{
+  font:inherit;font-size:13px;padding:7px 13px;border-radius:999px;cursor:pointer;
+  color:var(--ink2);background:var(--paper);border:1px solid var(--line);
+}
+.tabs button.active{color:#fff;background:var(--brand);border-color:var(--brand);font-weight:600}
+
+/* ---------- 面板 ---------- */
+.panel{display:none;max-width:1180px;margin:0 auto;padding:8px 18px 0}
+.panel.active{display:block}
+.common{max-width:1180px;margin:0 auto;padding:4px 18px 0}
+.panel-note{margin:6px 0 14px;padding:12px 14px;font-size:12.5px;line-height:1.75;
+  background:var(--paper);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:12px}
+.panel-note h3{margin:0 0 6px;font-size:14px}
+.panel-note ul{margin:0;padding-left:18px}
+.panel-note li{margin:2px 0}
+.panel-note .tag{display:inline-block;margin-left:6px;padding:1px 7px;font-size:11px;border-radius:999px;
+  color:var(--brick);background:rgb(185 74 44 / 10%)}
+.panel-note .tag.ok{color:#3f6b4e;background:rgb(63 107 78 / 12%)}
+
+/* ---------- 手机框 ---------- */
+.row{display:flex;gap:20px;align-items:flex-start;overflow-x:auto;padding:4px 2px 18px}
+figure{flex:0 0 auto;margin:0;width:346px}
+.phone{width:346px;background:var(--paper);border:1px solid #d9c8ab;border-radius:26px;
+  box-shadow:0 14px 30px rgb(120 80 45 / 16%);overflow:hidden}
+.screen{position:relative;height:596px;overflow-y:auto;background:linear-gradient(180deg,#fdf7ec, #fbf1e0)}
+.screen::-webkit-scrollbar{width:0}
+figcaption{margin-top:9px;font-size:12px;color:var(--ink2)}
+figcaption b{color:var(--ink)}
+
+/* 屏内组件（尽量贴 App 的真实观感） */
+.phead{padding:16px 16px 8px}
+.ptitle{font-size:20px;font-weight:700;color:#6e3a1c}
+.psub{font-size:11.5px;color:var(--ink3)}
+.card{margin:12px var(--sp) 0;padding:14px;background:var(--paper);
+  border:1px solid var(--line);border-radius:var(--radius-card);box-shadow:var(--shadow-card)}
+.card.hl{border-color:#e2a06c;box-shadow:0 0 0 3px rgb(224 123 57 / 12%),var(--shadow-card)}
+.card.dim{background:#efe7d8;border-style:dashed;box-shadow:none}
+.chead{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.ctitle{font-size:15px;color:#6e3a1c}
+.pills{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.pill{padding:3px 8px;font-size:11px;line-height:1.5;color:#c4652a;background:rgb(224 123 57 / 9%);
+  border:1px solid #e2a06c;border-radius:999px;white-space:nowrap}
+.bigbtn{display:flex;gap:8px;margin-top:10px}
+.bigbtn span{flex:1;text-align:center;padding:11px 0;font-size:13.5px;border-radius:14px}
+.bigbtn .b1{color:#fff;background:var(--brand)}
+.bigbtn .b2{color:var(--brick);background:var(--cream2);border:1px solid var(--line)}
+.smalllink{margin-top:8px;font-size:11.5px;color:var(--ink3)}
+.smalllink b{color:var(--brand)}
+.stats{display:flex;margin:12px var(--sp) 0;padding:10px 0;background:var(--cream);
+  border:1px dashed #d9b98f;border-radius:14px}
+.stats div{flex:1;text-align:center}
+.stats b{display:block;font-size:17px;color:#6e3a1c}
+.stats span{font-size:11px;color:var(--ink3)}
+.pickrow{display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid #f2e6d2}
+.pickrow:last-child{border-bottom:0}
+.rank{width:18px;font-size:11px;font-weight:700;color:var(--brand);text-align:center}
+.pic{width:36px;height:36px;border-radius:10px;background:var(--peach);flex:0 0 auto}
+.pic.g{background:var(--sage)} .pic.t{background:var(--teal)} .pic.r{background:var(--rose)}
+.pname{font-size:13.5px}
+.preason{font-size:11px;color:var(--ink3)}
+.dayrow{display:flex;align-items:center;gap:8px;padding:8px 2px;border-bottom:1px solid #f2e6d2}
+.dayrow:last-child{border-bottom:0}
+.daybadge{width:22px;height:22px;border-radius:8px;background:var(--cream2);font-size:11px;
+  display:flex;align-items:center;justify-content:center;color:var(--brick)}
+.dmain{flex:1;min-width:0}
+.dfood{font-size:13px}
+.dmeta{font-size:11px;color:var(--ink3)}
+.stamp{font-size:10.5px;padding:2px 7px;border-radius:999px;background:rgb(224 123 57 / 12%);color:var(--brick)}
+.stamp.gray{background:#efe7d8;color:var(--ink3)}
+.shopline{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:7px 2px;border-bottom:1px solid #f2e6d2;font-size:13px}
+.shopline:last-of-type{border-bottom:0}
+.shopline .amt{color:var(--brick);font-size:12.5px}
+.shopline .amt.mute{color:var(--ink3)}
+.cta{margin-top:10px;padding:9px 0;text-align:center;font-size:13px;color:#fff;
+  background:var(--brand);border-radius:12px}
+.ctarow{display:flex;align-items:center;gap:8px;margin:12px var(--sp) 0;padding:11px 13px;
+  background:var(--cream2);border:1px solid #e2c9a2;border-radius:14px;font-size:13px}
+.ctarow b{margin-left:auto;color:var(--brand);white-space:nowrap}
+.quickrow{display:flex;gap:6px;margin:12px var(--sp) 0}
+.quickrow span{flex:1;text-align:center;font-size:12px;padding:9px 0;border-radius:12px;
+  background:var(--cream2);color:var(--ink2)}
+.quickrow span.hi{color:#fff;background:var(--brand)}
+.tabbar{display:flex;border-top:1px solid var(--line);background:var(--paper);height:62px}
+.tabbar i{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  font-style:normal;font-size:10.5px;color:var(--ink3)}
+.tabbar i svg{width:19px;height:19px;color:#c8a888}
+.tabbar i.on{color:var(--brick);font-weight:700}
+.tabbar i.on svg{color:var(--brick)}
+.badge{position:absolute;width:19px;height:19px;border-radius:50%;background:var(--brick);color:#fff;
+  font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 0 3px rgb(255 251 242 / 90%)}
+.legend{margin:0 0 4px;padding:0;list-style:none;font-size:12px;color:var(--ink2)}
+.legend li{margin:3px 0}
+.legend b{display:inline-flex;width:17px;height:17px;border-radius:50%;background:var(--brick);color:#fff;
+  font-size:10.5px;align-items:center;justify-content:center;margin-right:6px;vertical-align:1px}
+
+/* 状态小卡（方案 A 的采购卡在三种状态下的样子） */
+.states{display:flex;gap:14px;overflow-x:auto;padding:2px 2px 14px}
+.statecard{flex:0 0 auto;width:300px;padding:13px;background:var(--paper);border:1px solid var(--line);
+  border-radius:18px;box-shadow:var(--shadow-card)}
+.statecard h4{margin:0 0 4px;font-size:13px;color:#6e3a1c}
+.statecard p{margin:6px 0 0;font-size:12px;color:var(--ink3)}
+.statecard .cta{margin-top:9px}
+.hint{font-size:12px;color:var(--ink3);margin:0 0 10px}
+@media (min-width:900px){ .row{flex-wrap:wrap;overflow:visible} }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>采购清单放哪儿 · 发现页怎么收</h1>
+  <p>三个方案的差别只有一条：<b>采购清单的新家</b>。共同动作都一样——发现页只留内容、入口回到用它的地方、撤掉写死的假数字。底部 5 个 Tab 的结构不动。</p>
+  <div class="rule">
+    <b>为什么现在要动：</b>发现页上挂了 5 个入口胶囊（收藏 / 点菜 / 常用组合 / 备菜计划 / 去点菜单）和 3 个写死的假数字；而真正每天要用的采购清单，藏在「备菜计划」里一行小字里——三步才够得着。
+  </div>
+</div>
+
+<nav class="tabs">
+  <button data-opt="now" class="active">现状（问题在哪）</button>
+  <button data-opt="a">方案 A · 进「冰箱」Tab（推荐）</button>
+  <button data-opt="b">方案 B · 厨房首页</button>
+  <button data-opt="c">方案 C · 订单 Tab</button>
+</nav>
+
+<!-- ==================== 现状 ==================== -->
+<section id="now" class="panel active">
+  <p class="hint">左右滑动看三屏：发现页 / 冰箱页 / 备菜计划（采购清单现在藏在这里）。</p>
+  <div class="row">
+    <figure>
+      <div class="phone"><div class="screen">
+        <div class="phead">
+          <div class="ptitle">发现</div>
+          <div class="psub">今天不知道吃什么，交给它</div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">今天吃什么？</span></div>
+          <div class="bigbtn"><span class="b1">🎲 摇一道</span><span class="b2">🍳 AI 帮你想</span></div>
+          <div class="smalllink">下厨上的问题想问问人？ <b>点这里问 AI →</b></div>
+        </div>
+        <div class="stats">
+          <div><b>85</b><span>私房菜</span></div>
+          <div><b>12</b><span>冰箱食材</span></div>
+          <div><b>3</b><span>临期</span></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">家人最爱</span>
+            <span class="pills"><span class="pill">我收藏的菜 →</span><span class="pill">去点菜 →</span></span>
+          </div>
+          <div class="pickrow"><span class="rank">1</span><span class="pic t"></span>
+            <span><span class="pname">【桂圆银耳羹】</span><br><span class="preason">做过 2 次 · 2 人收着</span></span></div>
+          <div class="pickrow"><span class="rank">2</span><span class="pic r"></span>
+            <span><span class="pname">【红烧排骨】万用的炒糖上色法</span><br><span class="preason">做过 1 次</span></span></div>
+          <div class="pickrow"><span class="rank">3</span><span class="pic g"></span>
+            <span><span class="pname">三丝杏鲍菇</span><br><span class="preason">1 人收着</span></span></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">本周菜单</span>
+            <span class="pills"><span class="pill">常用组合 →</span><span class="pill">备菜计划 →</span><span class="pill">去点菜单 →</span></span>
+          </div>
+          <div class="dayrow"><span class="daybadge">今</span><span class="dmain"><span class="dfood">番茄炒蛋 · 清炒菜心</span><br><span class="dmeta">午餐 · 3 人吃</span></span><span class="stamp">已安排</span></div>
+          <div class="dayrow"><span class="daybadge">明</span><span class="dmain"><span class="dfood">还没安排</span></span><span class="pill">去安排</span></div>
+          <div class="dayrow"><span class="daybadge">后</span><span class="dmain"><span class="dfood">红烧排骨 · 上汤菠菜</span><br><span class="dmeta">晚餐 · 人数还没定</span></span><span class="stamp">待确认</span></div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <i><svg viewBox="0 0 24 24"><path d="M4 12h16a8 8 0 0 1-16 0Z" fill="currentColor"/></svg>厨房</i>
+        <i><svg viewBox="0 0 24 24"><path d="M6 4h12v2H6zM6 9h12v2H6zM6 14h8v2H6z" fill="currentColor"/></svg>订单</i>
+        <i class="on"><svg viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 9.5l-4 4 .9 5.7L12 16.6 7.1 19.2 8 13.5l-4-4 5.6-.9Z" fill="currentColor"/></svg>发现</i>
+        <i><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14" stroke="currentColor" stroke-width="2"/></svg>冰箱</i>
+        <i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="currentColor"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6Z" fill="currentColor"/></svg>我的</i>
+      </nav></div>
+      <figcaption><b>发现页</b>：一屏里 5 个入口胶囊 + 3 个假数字</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone"><div class="screen">
+        <div class="phead"><div class="ptitle">我的冰箱</div><div class="psub">食材管理助手，让每一餐更新鲜</div></div>
+        <div class="card dim">
+          <div class="chead"><span class="ctitle">📷 拍照识别 · 一键入库</span></div>
+          <p style="margin:6px 0 0;font-size:11.5px;color:var(--ink3)">拍一张冰箱，自动列出食材，你确认即可（点了没反应）</p>
+        </div>
+        <div class="stats">
+          <div><b>12</b><span>在库</span></div>
+          <div><b style="color:var(--brand)">3</b><span>临期</span></div>
+          <div><b>8</b><span>品类</span></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">今日先吃</span><span class="pill">全部</span></div>
+          <div class="pickrow"><span class="pic g"></span><span><span class="pname">小油菜</span><br><span class="preason">保鲜 · 还剩 1 天</span></span><span class="stamp" style="margin-left:auto">优先吃</span></div>
+          <div class="pickrow"><span class="pic t"></span><span><span class="pname">鸡蛋</span><br><span class="preason">冷藏 · 还剩 2 天</span></span><span class="stamp" style="margin-left:auto">优先吃</span></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">存放位置</span><span class="pill">4 区</span></div>
+          <div class="pickrow"><span class="pic t"></span><span class="pname">常温 · 2 件</span><span class="pic g" style="margin-left:auto"></span><span class="pname">保鲜 · 5 件</span></div>
+          <div class="pickrow"><span class="pic r"></span><span class="pname">冷藏 · 4 件</span><span class="pic" style="margin-left:auto"></span><span class="pname">冷冻 · 1 件</span></div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <i><svg viewBox="0 0 24 24"><path d="M4 12h16a8 8 0 0 1-16 0Z" fill="currentColor"/></svg>厨房</i>
+        <i><svg viewBox="0 0 24 24"><path d="M6 4h12v2H6zM6 9h12v2H6zM6 14h8v2H6z" fill="currentColor"/></svg>订单</i>
+        <i><svg viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 9.5l-4 4 .9 5.7L12 16.6 7.1 19.2 8 13.5l-4-4 5.6-.9Z" fill="currentColor"/></svg>发现</i>
+        <i class="on"><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14" stroke="currentColor" stroke-width="2"/></svg>冰箱</i>
+        <i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="currentColor"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6Z" fill="currentColor"/></svg>我的</i>
+      </nav></div>
+      <figcaption><b>冰箱页</b>：整页都是写死的示例（原样保留至今）</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone"><div class="screen">
+        <div class="phead"><div class="psub" style="color:var(--brand)">← 返回发现</div><div class="ptitle">备菜计划</div><div class="psub">接下来一周的安排，缺哪天就直接加菜</div></div>
+        <div class="card"><p style="margin:0;font-size:12.5px;color:var(--ink2)">7 天共 14 餐，还有 12 餐空着。<b style="color:var(--brand)">看要买什么 →</b></p></div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">今天</span><span class="pill">10-13</span></div>
+          <div class="dayrow"><span class="dmain"><span class="dfood">【桂圆银耳羹】</span><br><span class="dmeta">晚餐 · 2 人吃 · 成品照 1 张</span></span><span class="stamp">已安排</span></div>
+          <div class="dayrow"><span class="dmain"><span class="dfood" style="color:var(--ink3)">还没安排</span></span><span class="pill">加菜</span></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">明天</span><span class="pill">10-14</span></div>
+          <div class="dayrow"><span class="dmain"><span class="dfood">妈妈牌糖醋排骨</span><br><span class="dmeta">午餐 · 人数还没定</span></span><span class="stamp">已安排</span></div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <i><svg viewBox="0 0 24 24"><path d="M4 12h16a8 8 0 0 1-16 0Z" fill="currentColor"/></svg>厨房</i>
+        <i><svg viewBox="0 0 24 24"><path d="M6 4h12v2H6zM6 9h12v2H6zM6 14h8v2H6z" fill="currentColor"/></svg>订单</i>
+        <i class="on"><svg viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 9.5l-4 4 .9 5.7L12 16.6 7.1 19.2 8 13.5l-4-4 5.6-.9Z" fill="currentColor"/></svg>发现</i>
+        <i><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14" stroke="currentColor" stroke-width="2"/></svg>冰箱</i>
+        <i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="currentColor"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6Z" fill="currentColor"/></svg>我的</i>
+      </nav></div>
+      <figcaption><b>备菜计划</b>：采购清单唯一的入口，是这句话里的一小段链接</figcaption>
+    </figure>
+  </div>
+  <div class="panel-note">
+    <h3>现状的四处毛病（你指出的「乱」）</h3>
+    <ul>
+      <li><b>发现页挂满了入口</b>：收藏、点菜、常用组合、备菜计划、去点菜单——5 个胶囊挤在两张卡的标题行上。入口不是内容，却占着最显眼的位置。</li>
+      <li><b>「收藏」从「家人最爱」进去读不通</b>：收藏是私人的，家人最爱是全家榜单；两者没有关系，只是刚好放在一起。</li>
+      <li><b>假数字</b>：发现页「85 私房菜 / 12 冰箱食材 / 3 临期」与冰箱页整页示例数据（12 在库 / 3 临期 / 今日先吃）都是 M0 写死的，用户会当真（库内实际 600 道；冰箱功能还没做）。</li>
+      <li><b>采购清单埋在三层里</b>：发现 → 备菜计划 → 一行小字，而且它每天买菜都要用一次。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ==================== 方案 A ==================== -->
+<section id="a" class="panel">
+  <div class="panel-note">
+    <h3>方案 A：采购清单进「冰箱」Tab 第一屏 <span class="tag ok">推荐</span></h3>
+    <p style="margin:4px 0 8px;font-size:12.5px">买与存是一件事的两半：要买什么 ↔ 家里有什么。做成"只买缺的"（F7-02）、"买完一键入库"（F7-05）都建立在这个配对之上。冰箱 Tab 现在本来就没有真内容，正好把这块真实的放进去，顺手把整页假数据撤掉。</p>
+    <ul>
+      <li>代价：改动面最大（要重做冰箱页这一屏）。</li>
+      <li>好处：离手最近（底部 Tab 一层，点开就是）；冰箱页从"假的空页"变成"每天都会用的一页"。</li>
+    </ul>
+  </div>
+  <p class="hint">左右滑动看三屏：冰箱页（新）/ 发现页（收干净）/ 采购清单卡在四种状态下的样子。</p>
+  <div class="row">
+    <figure>
+      <div class="phone"><div class="screen">
+        <div class="phead"><div class="ptitle">我的冰箱</div><div class="psub">要买的、家里有的，都在这儿</div></div>
+        <div class="card hl">
+          <div class="chead"><span class="ctitle">🛒 要去买什么</span><span class="pill">共 15 样 →</span></div>
+          <div class="psub" style="margin-top:2px">按「已安排 / 正在做」的菜单算 · 3 天 2 餐 3 道菜</div>
+          <div style="margin-top:8px">
+            <div class="shopline"><span>花椒 <span class="amt">3-4颗</span></span><span class="preason">【红烧排骨】</span></div>
+            <div class="shopline"><span>白砂糖 <span class="amt mute">用量没写</span></span><span class="preason">【红烧排骨】</span></div>
+            <div class="shopline"><span>桂圆肉 <span class="amt">6个</span></span><span class="preason">【桂圆银耳羹】</span></div>
+          </div>
+          <div class="cta">看一眼完整清单 →</div>
+          <div class="psub" style="margin-top:6px">勾选、按名字排序、还能看到"为哪几道菜买"</div>
+        </div>
+        <div class="card dim">
+          <div class="chead"><span class="ctitle">冰箱库存 · 还没做</span><span class="pill">M6</span></div>
+          <p style="margin:6px 0 0;font-size:11.5px;color:var(--ink3)">
+            做出来之后这里显示：在库食材 · 临期提醒 · 存放位置（常温/保鲜/冷藏/冷冻）。拍照识别入库是 M16 的事。
+          </p>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <i><svg viewBox="0 0 24 24"><path d="M4 12h16a8 8 0 0 1-16 0Z" fill="currentColor"/></svg>厨房</i>
+        <i><svg viewBox="0 0 24 24"><path d="M6 4h12v2H6zM6 9h12v2H6zM6 14h8v2H6z" fill="currentColor"/></svg>订单</i>
+        <i><svg viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 9.5l-4 4 .9 5.7L12 16.6 7.1 19.2 8 13.5l-4-4 5.6-.9Z" fill="currentColor"/></svg>发现</i>
+        <i class="on"><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14" stroke="currentColor" stroke-width="2"/></svg>冰箱</i>
+        <i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="currentColor"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6Z" fill="currentColor"/></svg>我的</i>
+      </nav></div>
+      <figcaption><b>冰箱页（新）</b>：第一块就是今天要买什么，点一下进完整清单</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone"><div class="screen">
+        <div class="phead"><div class="ptitle">发现</div><div class="psub">今天不知道吃什么，交给它</div></div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">今天吃什么？</span></div>
+          <div class="bigbtn"><span class="b1">🎲 摇一道</span><span class="b2">🍳 AI 帮你想</span></div>
+          <div class="smalllink">下厨上的问题想问问人？ <b>点这里问 AI →</b></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">家人最爱</span></div>
+          <div class="pickrow"><span class="rank">1</span><span class="pic t"></span>
+            <span><span class="pname">【桂圆银耳羹】</span><br><span class="preason">做过 2 次 · 2 人收着</span></span></div>
+          <div class="pickrow"><span class="rank">2</span><span class="pic r"></span>
+            <span><span class="pname">【红烧排骨】万用的炒糖上色法</span><br><span class="preason">做过 1 次</span></span></div>
+          <div class="pickrow"><span class="rank">3</span><span class="pic g"></span>
+            <span><span class="pname">三丝杏鲍菇</span><br><span class="preason">1 人收着</span></span></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">本周菜单</span>
+            <span class="pills"><span class="pill">常用组合 →</span><span class="pill">备菜计划 →</span></span>
+          </div>
+          <div class="dayrow"><span class="daybadge">今</span><span class="dmain"><span class="dfood">番茄炒蛋 · 清炒菜心</span><br><span class="dmeta">午餐 · 3 人吃</span></span><span class="stamp">已安排</span></div>
+          <div class="dayrow"><span class="daybadge">明</span><span class="dmain"><span class="dfood">还没安排</span></span><span class="pill">去安排</span></div>
+          <div class="dayrow"><span class="daybadge">后</span><span class="dmain"><span class="dfood">红烧排骨 · 上汤菠菜</span><br><span class="dmeta">晚餐 · 人数还没定</span></span><span class="stamp">待确认</span></div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <i><svg viewBox="0 0 24 24"><path d="M4 12h16a8 8 0 0 1-16 0Z" fill="currentColor"/></svg>厨房</i>
+        <i><svg viewBox="0 0 24 24"><path d="M6 4h12v2H6zM6 9h12v2H6zM6 14h8v2H6z" fill="currentColor"/></svg>订单</i>
+        <i class="on"><svg viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 9.5l-4 4 .9 5.7L12 16.6 7.1 19.2 8 13.5l-4-4 5.6-.9Z" fill="currentColor"/></svg>发现</i>
+        <i><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14" stroke="currentColor" stroke-width="2"/></svg>冰箱</i>
+        <i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="currentColor"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6Z" fill="currentColor"/></svg>我的</i>
+      </nav></div>
+      <figcaption><b>发现页（收干净）</b>：入口胶囊 5 → 2，假数字行撤掉</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone"><div class="screen">
+        <div class="phead"><div class="psub" style="color:var(--brand)">← 返回冰箱</div><div class="ptitle">采购清单</div><div class="psub">按菜单算的，买菜不用再想一遍</div></div>
+        <div class="card"><p style="margin:0;font-size:12.5px;color:var(--ink2)">10-13 起 3 天：2 餐定了菜单，共 3 道菜。</p></div>
+        <div class="card">
+          <div class="psub" style="margin:0 0 4px">买到 1/15 <span style="color:var(--ink3)">（勾掉的只记在这一屏）</span></div>
+          <div class="shopline"><span>☑ <span style="text-decoration:line-through;color:var(--ink3)">花椒</span> <span class="amt mute" style="text-decoration:line-through">3-4颗</span></span><span class="preason">【红烧排骨】</span></div>
+          <div class="shopline"><span>☐ 白砂糖 <span class="amt mute">用量没写</span></span><span class="preason">【红烧排骨】</span></div>
+          <div class="shopline"><span>☐ 桂圆肉 <span class="amt">6个</span></span><span class="preason">【桂圆银耳羹】</span></div>
+          <div class="shopline"><span>☐ 银耳 <span class="amt">4朵、适量</span></span><span class="preason">两道菜</span></div>
+        </div>
+        <div class="card dim"><p style="margin:0;font-size:11.5px;color:var(--ink3)">这几道菜没有配料表，要自己记一下：妈妈牌糖醋排骨</p></div>
+      </div>
+      <nav class="tabbar">
+        <i><svg viewBox="0 0 24 24"><path d="M4 12h16a8 8 0 0 1-16 0Z" fill="currentColor"/></svg>厨房</i>
+        <i><svg viewBox="0 0 24 24"><path d="M6 4h12v2H6zM6 9h12v2H6zM6 14h8v2H6z" fill="currentColor"/></svg>订单</i>
+        <i><svg viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 9.5l-4 4 .9 5.7L12 16.6 7.1 19.2 8 13.5l-4-4 5.6-.9Z" fill="currentColor"/></svg>发现</i>
+        <i class="on"><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14" stroke="currentColor" stroke-width="2"/></svg>冰箱</i>
+        <i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="currentColor"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6Z" fill="currentColor"/></svg>我的</i>
+      </nav></div>
+      <figcaption><b>采购清单页</b>（已有，不改）：这回从冰箱一层就能进</figcaption>
+    </figure>
+  </div>
+
+  <h3 style="font-size:14px;margin:6px 0 6px">采购卡在四种状态下的样子（实现时要照做）</h3>
+  <div class="states">
+    <div class="statecard">
+      <h4>空态（这几天还没定菜单）</h4>
+      <p>这几天还没定下来的菜单，所以没什么要买的。去备菜计划把菜排上，菜一「选好了」就会出现在这里。</p>
+      <div class="cta" style="background:var(--cream2);color:var(--brick)">去备菜计划 →</div>
+    </div>
+    <div class="statecard">
+      <h4>加载中</h4>
+      <p>正在算要买什么…</p>
+    </div>
+    <div class="statecard">
+      <h4>出错</h4>
+      <p>采购清单暂时打不开</p>
+      <div class="cta" style="background:var(--cream2);color:var(--brick)">重试</div>
+    </div>
+    <div class="statecard">
+      <h4>很多样（默认最多显示 3 样）</h4>
+      <p>共 15 样 · 只显示前 3 样，点卡片看全部<br>「花椒 / 白砂糖 / 桂圆肉 …」</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 方案 B ==================== -->
+<section id="b" class="panel">
+  <div class="panel-note">
+    <h3>方案 B：采购清单放「厨房」首页</h3>
+    <p style="margin:4px 0 8px;font-size:12.5px">厨房是打开 App 的第一屏，放一条窄入口，最显眼、改动最小（只加一行）。</p>
+    <ul>
+      <li>代价：厨房已经是最挤的一屏（搜索、分类、快捷行、今日安排、推荐 6 张卡）——再加一块，这一屏就更长了。</li>
+      <li>代价：冰箱页不动，整页假数据继续留着（要另开一刀去清）。</li>
+    </ul>
+  </div>
+  <p class="hint">左右滑动看两屏：厨房页（加窄条）/ 发现页（同样收干净）。</p>
+  <div class="row">
+    <figure>
+      <div class="phone"><div class="screen">
+        <div class="phead"><div class="ptitle">御膳小厨房</div><div class="psub">一家人一起，把日子煮得暖暖的</div></div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">🔍 搜菜名、食材、口味</span></div>
+        </div>
+        <div class="quickrow"><span class="hi">翻翻菜谱</span><span>邀请家人</span><span>拍照识菜</span></div>
+        <div class="ctarow"><span>🛒 要去买什么</span><b>15 样 →</b></div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">今日安排</span><span class="pill">去点菜单 →</span></div>
+          <div class="dayrow"><span class="daybadge">午</span><span class="dmain"><span class="dfood">【桂圆银耳羹】</span><br><span class="dmeta">2 人吃</span></span><span class="stamp">已安排</span></div>
+          <div class="dayrow"><span class="daybadge">晚</span><span class="dmain"><span class="dfood" style="color:var(--ink3)">还没安排</span></span><span class="pill">去安排</span></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">菜谱推荐</span><span class="pill">全部</span></div>
+          <div class="pickrow"><span class="pic t"></span><span class="pname">三丝杏鲍菇</span></div>
+          <div class="pickrow"><span class="pic g"></span><span class="pname">上汤菠菜蛤蜊</span></div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <i class="on"><svg viewBox="0 0 24 24"><path d="M4 12h16a8 8 0 0 1-16 0Z" fill="currentColor"/></svg>厨房</i>
+        <i><svg viewBox="0 0 24 24"><path d="M6 4h12v2H6zM6 9h12v2H6zM6 14h8v2H6z" fill="currentColor"/></svg>订单</i>
+        <i><svg viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 9.5l-4 4 .9 5.7L12 16.6 7.1 19.2 8 13.5l-4-4 5.6-.9Z" fill="currentColor"/></svg>发现</i>
+        <i><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14" stroke="currentColor" stroke-width="2"/></svg>冰箱</i>
+        <i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="currentColor"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6Z" fill="currentColor"/></svg>我的</i>
+      </nav></div>
+      <figcaption><b>厨房页（新）</b>：快捷行下面一条「要去买什么 · 15 样」</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone"><div class="screen">
+        <div class="phead"><div class="ptitle">发现</div><div class="psub">今天不知道吃什么，交给它</div></div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">今天吃什么？</span></div>
+          <div class="bigbtn"><span class="b1">🎲 摇一道</span><span class="b2">🍳 AI 帮你想</span></div>
+          <div class="smalllink">下厨上的问题想问问人？ <b>点这里问 AI →</b></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">家人最爱</span></div>
+          <div class="pickrow"><span class="rank">1</span><span class="pic t"></span>
+            <span><span class="pname">【桂圆银耳羹】</span><br><span class="preason">做过 2 次 · 2 人收着</span></span></div>
+          <div class="pickrow"><span class="rank">2</span><span class="pic r"></span>
+            <span><span class="pname">【红烧排骨】万用的炒糖上色法</span><br><span class="preason">做过 1 次</span></span></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">本周菜单</span>
+            <span class="pills"><span class="pill">常用组合 →</span><span class="pill">备菜计划 →</span></span>
+          </div>
+          <div class="dayrow"><span class="daybadge">今</span><span class="dmain"><span class="dfood">番茄炒蛋 · 清炒菜心</span></span><span class="stamp">已安排</span></div>
+          <div class="dayrow"><span class="daybadge">明</span><span class="dmain"><span class="dfood" style="color:var(--ink3)">还没安排</span></span><span class="pill">去安排</span></div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <i><svg viewBox="0 0 24 24"><path d="M4 12h16a8 8 0 0 1-16 0Z" fill="currentColor"/></svg>厨房</i>
+        <i><svg viewBox="0 0 24 24"><path d="M6 4h12v2H6zM6 9h12v2H6zM6 14h8v2H6z" fill="currentColor"/></svg>订单</i>
+        <i class="on"><svg viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 9.5l-4 4 .9 5.7L12 16.6 7.1 19.2 8 13.5l-4-4 5.6-.9Z" fill="currentColor"/></svg>发现</i>
+        <i><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14" stroke="currentColor" stroke-width="2"/></svg>冰箱</i>
+        <i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="currentColor"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6Z" fill="currentColor"/></svg>我的</i>
+      </nav></div>
+      <figcaption><b>发现页（收干净）</b>：与方案 A 相同</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ==================== 方案 C ==================== -->
+<section id="c" class="panel">
+  <div class="panel-note">
+    <h3>方案 C：采购清单放「订单」Tab 顶部</h3>
+    <p style="margin:4px 0 8px;font-size:12.5px">清单是从点单推出来的，放在订单页顶部，与"这些餐现在到哪一步"同屏。</p>
+    <ul>
+      <li>代价：订单页已经有三段控件、状态筛选、卡片流；顶部再插一行，注意力会被分掉。</li>
+      <li>代价：清单主要按「接下来几天排的菜」算，与备菜计划的动线更近（订单页更偏"现在这一顿的状态流转"）。</li>
+      <li>冰箱页同样不动，假数据继续留着。</li>
+    </ul>
+  </div>
+  <p class="hint">左右滑动看两屏：订单页（加一行）/ 发现页（同样收干净）。</p>
+  <div class="row">
+    <figure>
+      <div class="phone"><div class="screen">
+        <div class="phead"><div class="ptitle">家宴点菜单</div><div class="psub">记录大家想吃什么，也记录每顿饭的回应</div></div>
+        <div class="card"><div class="chead"><span class="ctitle">⌗ 全家点菜单 / 我的点菜</span></div></div>
+        <div class="ctarow"><span>🛒 采购清单</span><b>15 样 →</b></div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">今天 · 晚餐</span><span class="stamp">已安排</span></div>
+          <div class="pickrow"><span class="pic t"></span><span><span class="pname">【桂圆银耳羹】</span><br><span class="preason">妈妈 · 2 人吃</span></span></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">明天 · 午餐</span><span class="stamp">待确认</span></div>
+          <div class="pickrow"><span class="pic r"></span><span><span class="pname">妈妈牌糖醋排骨</span><br><span class="preason">自己写的菜</span></span></div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <i><svg viewBox="0 0 24 24"><path d="M4 12h16a8 8 0 0 1-16 0Z" fill="currentColor"/></svg>厨房</i>
+        <i class="on"><svg viewBox="0 0 24 24"><path d="M6 4h12v2H6zM6 9h12v2H6zM6 14h8v2H6z" fill="currentColor"/></svg>订单</i>
+        <i><svg viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 9.5l-4 4 .9 5.7L12 16.6 7.1 19.2 8 13.5l-4-4 5.6-.9Z" fill="currentColor"/></svg>发现</i>
+        <i><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14" stroke="currentColor" stroke-width="2"/></svg>冰箱</i>
+        <i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="currentColor"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6Z" fill="currentColor"/></svg>我的</i>
+      </nav></div>
+      <figcaption><b>订单页（新）</b>：分段控件下面一行「采购清单 · 15 样」</figcaption>
+    </figure>
+
+    <figure>
+      <div class="phone"><div class="screen">
+        <div class="phead"><div class="ptitle">发现</div><div class="psub">今天不知道吃什么，交给它</div></div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">今天吃什么？</span></div>
+          <div class="bigbtn"><span class="b1">🎲 摇一道</span><span class="b2">🍳 AI 帮你想</span></div>
+          <div class="smalllink">下厨上的问题想问问人？ <b>点这里问 AI →</b></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">家人最爱</span></div>
+          <div class="pickrow"><span class="rank">1</span><span class="pic t"></span>
+            <span><span class="pname">【桂圆银耳羹】</span><br><span class="preason">做过 2 次 · 2 人收着</span></span></div>
+          <div class="pickrow"><span class="rank">2</span><span class="pic r"></span>
+            <span><span class="pname">【红烧排骨】万用的炒糖上色法</span><br><span class="preason">做过 1 次</span></span></div>
+        </div>
+        <div class="card">
+          <div class="chead"><span class="ctitle">本周菜单</span>
+            <span class="pills"><span class="pill">常用组合 →</span><span class="pill">备菜计划 →</span></span>
+          </div>
+          <div class="dayrow"><span class="daybadge">今</span><span class="dmain"><span class="dfood">番茄炒蛋 · 清炒菜心</span></span><span class="stamp">已安排</span></div>
+          <div class="dayrow"><span class="daybadge">明</span><span class="dmain"><span class="dfood" style="color:var(--ink3)">还没安排</span></span><span class="pill">去安排</span></div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <i><svg viewBox="0 0 24 24"><path d="M4 12h16a8 8 0 0 1-16 0Z" fill="currentColor"/></svg>厨房</i>
+        <i><svg viewBox="0 0 24 24"><path d="M6 4h12v2H6zM6 9h12v2H6zM6 14h8v2H6z" fill="currentColor"/></svg>订单</i>
+        <i class="on"><svg viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 9.5l-4 4 .9 5.7L12 16.6 7.1 19.2 8 13.5l-4-4 5.6-.9Z" fill="currentColor"/></svg>发现</i>
+        <i><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14" stroke="currentColor" stroke-width="2"/></svg>冰箱</i>
+        <i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="currentColor"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6Z" fill="currentColor"/></svg>我的</i>
+      </nav></div>
+      <figcaption><b>发现页（收干净）</b>：与方案 A 相同</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ==================== 共同动作 ==================== -->
+<section class="common" id="common">
+  <div class="panel-note" style="border-left-color:#8e6b52">
+    <h3>三个方案都要做的共同动作</h3>
+    <ul>
+      <li><b>撤掉假数字</b>：发现页那三格（85 / 12 / 3）直接删——它不是内容，是拼版面用的。冰箱页的假数据只有方案 A 会一并清掉，B / C 要另开一刀。</li>
+      <li><b>「收藏」入口只留「我的」</b>（我的页那条已经在），外加每张菜卡右上角那颗心本身。收藏是私人功能，不放在"家人最爱"旁边。</li>
+      <li><b>点菜入口不再从发现页重复给</b>：订单 Tab、菜谱小书、每张卡的「点这道」、详情页「想吃这道」已经够了。</li>
+      <li><b>「常用组合」与「备菜计划」留在「本周菜单」卡上</b>：它们是排菜工具，跟着这张卡走读得通。（如果你觉得也该挪走，说一声，我把「常用组合」挪到备菜计划页。）</li>
+      <li><b>备菜计划里那行「看要买什么 →」保留</b>：排完菜顺路买菜，是同一件事的两半。</li>
+      <li><b>底部 5 个 Tab 不动</b>，也不改名。</li>
+    </ul>
+  </div>
+</section>
+
+<script>
+var buttons = document.querySelectorAll('.tabs button');
+function show(id){
+  document.querySelectorAll('section.panel').forEach(function(p){ p.classList.toggle('active', p.id === id); });
+  buttons.forEach(function(b){ b.classList.toggle('active', b.dataset.opt === id); });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+buttons.forEach(function(b){ b.addEventListener('click', function(){ show(b.dataset.opt); }); });
+</script>
+</body>
+</html>
