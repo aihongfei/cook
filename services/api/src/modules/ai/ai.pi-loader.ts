@@ -1,5 +1,5 @@
 /**
- * pi-ai 的 ESM 加载桥（D-042/D-043）。
+ * pi-ai 的 ESM 加载桥（D-042/D-044）。
  *
  * 为什么需要它：`@earendil-works/pi-ai` 是 **ESM-only**（package.json 的 exports 里只有
  * `import` 条件），而本项目后端以 CommonJS 产出（`module: "commonjs"`）。两条直路都堵：

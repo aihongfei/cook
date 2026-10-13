@@ -1667,7 +1667,7 @@ pnpm --dir apps/mobile run lint                  # 6 warnings（不变）
 | 第一轮验收"看着还行" | 只量了容器高度与 `x` 坐标（都正确），差点收工 | 补量 `scrollWidth` 才发现溢出（`217 > 172`）；**截图看起来"挤"容易被当成窄屏正常表现，溢出必须量** |
 | 新增用例第一次红（`expected null to be truthy`） | 断言写在数据到达之前——`findByRole` 等的是元素，我先用 `document.querySelector` 直接找容器 | 先 `await findByRole` 拿到入口元素，再断言其 `parentElement` 是那个容器 |
 
-## R-035 AI 调用层迁移到 pi-ai（D-043）（✅ 已验证，2026-10-13）
+## R-036 AI 调用层迁移到 pi-ai（D-044）（✅ 已验证，2026-10-13）
 
 **改了哪些地方**：新增 `services/api/src/modules/ai/ai.pi.loader.ts`（ESM 桥）、`ai.pi.runtime.ts`（配置 → pi-ai provider/model，含 `GATEWAY_COMPAT`）、`ai.pi.rules.ts`（消息/工具形状转换与失败分类）；`ai.client.ts` 内部重写（对外签名与话术一字未改）；`services/api/package.json` 加 `@earendil-works/pi-ai@1.2.0`；`pnpm-workspace.yaml` 的 `allowBuilds` 补 protobufjs / @google/genai（拒绝）+ pi-ai 相关；stub 上游加 `STUB_REJECT_SCHEMA_ONCE=1`；验收脚本加"摘掉 schema 补发一次"断言与相应的 schema 断言放宽。
 
@@ -1731,4 +1731,4 @@ pnpm --dir apps/mobile exec tsc -b                     # ⚠️ 必须带 -b，�
 
 **反证（1 组）**：去掉补发 → 推荐与提示词双双 502，且那条断言变红。恢复后 29/29。
 
-**注**：`pi-agent-core` **没有**引入（理由见 D-043 第 1 条：它是状态化 Agent + 自动工具循环，会把 `runToolLoop` 现有三道闸门搬进框架语义——那是行为改变）。所以本项目的"工具循环"仍是我们自己的代码，pi-ai 只负责"发消息、收正文与工具调用、重放历史（含思维链）"。
+**注**：`pi-agent-core` **没有**引入（理由见 D-044 第 1 条：它是状态化 Agent + 自动工具循环，会把 `runToolLoop` 现有三道闸门搬进框架语义——那是行为改变）。所以本项目的"工具循环"仍是我们自己的代码，pi-ai 只负责"发消息、收正文与工具调用、重放历史（含思维链）"。

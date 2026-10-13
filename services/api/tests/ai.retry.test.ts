@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { isResponseFormatRejection } from '../src/modules/ai/ai.client'
 
-// "这个 400 是不是不接受 response_format 引起的"——决定要不要摘掉 schema 重试一次（D-043）。
+// "这个 400 是不是不接受 response_format 引起的"——决定要不要摘掉 schema 重试一次（D-044）。
 //
 // 为什么值得单独测：这个判定写宽了会"什么都重试一遍"（白花用户额度、还掩盖真正的问题），
 // 写窄了会让推荐/提示词两条路在网关抽风时直接 502（真网关实测踩过：迁移后第一版就是

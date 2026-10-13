@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fromPiToolCall, readPiFailure, toPiMessages, toPiTools, type WireLike } from '../src/modules/ai/ai.pi.rules'
 
-// 迁移到 pi-ai 之后的**转换规则**（D-043）。不碰网络、不碰数据库。
+// 迁移到 pi-ai 之后的**转换规则**（D-044）。不碰网络、不碰数据库。
 //
 // 这里盯的是"形状对不上"这一类 bug——它们的表现是"第一轮正常、第二轮就断"
 // （历史上的那次事故就是这样：内部工具对象直接当协议对象发出去，被上游 400 拒）。

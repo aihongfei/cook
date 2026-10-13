@@ -6,13 +6,13 @@ import { fromPiToolCall, readPiFailure, toPiMessages, toPiTools, type WireLike }
 import { createRuntime } from './ai.pi.runtime'
 
 /**
- * AI 调用层（D-026 起是极薄客户端，**D-043 起底层换成 pi-ai**）。
+ * AI 调用层（D-026 起是极薄客户端，**D-044 起底层换成 pi-ai**）。
  *
  * 为什么换（用户 2026-10-13：「我说的是让你用 pi-agent 或者其他现成的」）：原先自己写的
  * 原因是这台网关太窄（会话头、结构化输出偶发 400、思维链要回传），而实测 pi-ai
  * **内置了这台网关的目录**（`providers/opencode-go`：`thinkingFormat: deepseek`、
  * `requiresReasoningContentOnAssistantMessages` 正是 R-23 的成因）——官方已把这类怪癖
- * 编进适配器，再自己维护一份不划算（验证见 D-042，决定见 D-043）。
+ * 编进适配器，再自己维护一份不划算（验证见 D-042，决定见 D-044）。
  *
  * **对外契约一字未改**：`chatJson` / `chatStreamEvents` 的签名、`StreamEvent` 的形状、
  * `AiUpstreamError` 的话术与状态码（401/403/429/5xx/其他）都照旧——
@@ -114,7 +114,7 @@ export async function chatJson(config: AiConfig, request: ChatRequest): Promise<
      * 所以这个 400 只可能是它引起的。只重试一次、且只在"发过结构化参数"时重试，不会循环。
      *
      * 这一层不随迁移去掉：pi-ai 不认这个参数（它没为 response_format 建模），
-     * 也就不知道"这个 400 该摘掉谁"——**重试的责任在注入方**（见 D-043）。
+     * 也就不知道"这个 400 该摘掉谁"——**重试的责任在注入方**（见 D-044）。
      */
     if (failure?.kind === 'http' && failure.status === 400 && structured && isResponseFormatRejection(failure.detail)) {
       logger.warn(`上游不支持结构化输出（400）：${failure.detail.slice(0, 100)}，去掉 response_format 重试一次`)

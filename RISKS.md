@@ -177,7 +177,7 @@
 - **将来要改时**：① 做删除时先做引用计数（同 `imageKey` 被几条记录引用）或改成"删记录不删对象"；② 若要在意重复，加"同一用户同一天同一图只记一条"的唯一约束（`@@unique([userId, checkDate, imageHash])`），前端提示"这张今天传过了"。
 - **相关**：D-023 的遗留项「本次不做删除」。
 
-## R-23 AI 网关要求回传"思维链"，偶发把多轮对话 400 拒掉 ✅ 已解决（2026-10-13，D-043 迁移到 pi-ai）
+## R-23 AI 网关要求回传"思维链"，偶发把多轮对话 400 拒掉 ✅ 已解决（2026-10-13，D-044 迁移到 pi-ai）
 
 - **现状**：`deepseek-v4.1-flash` 走的是**思维模式**。上游在某些轮次要求把助手消息里的 `reasoning_content` **原样回传**，而本项目的 `ai.client.ts` 只回传 `role/content/tool_calls`（`WireMessage` 没有这个字段），于是那一轮被上游 400 拒：
   `The reasoning_content in the thinking mode must be passed back to the API`。
@@ -194,7 +194,7 @@
   1. **官方早就处理了这件事**：pi-ai 内置了 `providers/opencode-go` 目录，`deepseek-v4.1-flash` 的条目里显式写着 `requiresReasoningContentOnAssistantMessages: true` 与 `thinkingFormat: "deepseek"`——这正是本条描述的那个怪癖。
   2. **pi-ai 重放 assistant 消息时自动带 `reasoning_content`**：抓上游报文对照，只重放正文是 `{"role","content"}`，pi-ai 的方式是 `{"role","content","reasoning_content"}`。
   3. **但本次两个变体都被网关接受**（都 `stop=stop`）——所以本条的 400 确实是**偶发**（不是"缺它就必然失败"，与上面"推测的触发条件"一致）；pi-ai 的价值是让重放的字段**一个不少**，把偶发面收窄，而不是"换上去就不再发生"。
-- **处置（已完成）**：D-043 已把调用层迁到 pi-ai，`GATEWAY_COMPAT.requiresReasoningContentOnAssistantMessages: true` 显式声明该网关的这条要求，pi-ai 会对**没有思维的助手消息补空串**、对有思维的照实重放。迁移后的真网关验证（流式问答 4 次工具调用 / 2 条建议 / 95 段，推荐 5 道，提示词 18+12 条）均正常。**本条结案。**
+- **处置（已完成）**：D-044 已把调用层迁到 pi-ai，`GATEWAY_COMPAT.requiresReasoningContentOnAssistantMessages: true` 显式声明该网关的这条要求，pi-ai 会对**没有思维的助手消息补空串**、对有思维的照实重放。迁移后的真网关验证（流式问答 4 次工具调用 / 2 条建议 / 95 段，推荐 5 道，提示词 18+12 条）均正常。**本条结案。**
 - **相关**：`DECISIONS.md` D-026（AI 落地与工具循环）、`RUNBOOK.md` R-018/R-020；F16-09、F18-02 的"多轮"部分**偶发受影响**。
 
 ## R-24 AI 网关偶发连不上（fetch failed → 502），会被误当成代码回归（🟡 2026-10-13 发现，待定处理）
@@ -288,9 +288,9 @@
   2. **编译失败当反证**：注入反证写的是 `if (false && failure?.kind === 'http' && …)`，这让 TypeScript **无法收窄** `failure` → 6 个 `TS18047/TS2339` → `nest build` 失败。**"测试红了"要看红的是断言还是编译**（本项目第三次踩：R-031、R-033 各一次）。改成"保留判断、只删补发动作"（类型合法、行为等价于不重试）才得到真反证。
   3. **断言通过、说明文字相反**：一条断言判的是 `retry.schemaName === null`（补发成功）、detail 里却写着"（没有补发）"——因为用了 `retry?.schemaName ?? '（没有补发）'`，而补发成功时 `schemaName` 正好是 `null`，`??` 把它当成"没有值"。绿断言 + 反向说明，下一个看日志的人会被带偏。
 - **为什么算风险**：这三条都不会报错、不会让测试变红，**只会让人相信一个假的结论**——比"功能坏了"更危险（坏了看得见，假证据看不见）。它们的共同点是"证据的**传递链**断了"：代码 → 构建 → 镜像 → 容器 → 断言，任何一环没核实，后面全是在验一个别的东西。
-- **规矩（本轮起，写进 RUNBOOK R-035 的"怎么验"）**：
+- **规矩（本轮起，写进 RUNBOOK R-036 的"怎么验"）**：
   1. **构建/测试命令一律看退出码**（`cmd; echo "exit=$?"`），不要只看输出——管道会吞掉状态码；
   2. **验收前核实"跑的就是刚建的"**：容器镜像 ID == latest 镜像 ID，且**镜像里有本轮代码的特征串**（`grep -c` 一个只有新代码才有的字符串）；
   3. **反证注入后先确认构建 exit 0**，再看断言红不红；红的必须是断言（输出里有 `not ok` / `expected … actual …`），不是 `error TS`；
   4. **断言通过之后，读一遍它打印的 detail**：说明文字与结论矛盾时，先怀疑说明文字的写法（`??`、`||`、三元里把 `null` 当"没有"这类）。
-- **相关**：`RUNBOOK.md` R-035 的"踩过的坑"；R-25（静态检查的假证据——同类问题的另一个面）；`DECISIONS.md` D-043。
+- **相关**：`RUNBOOK.md` R-036 的"踩过的坑"；R-25（静态检查的假证据——同类问题的另一个面）；`DECISIONS.md` D-044。
