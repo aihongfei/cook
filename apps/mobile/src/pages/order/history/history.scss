@@ -25,7 +25,11 @@
 /* 共享关闭时吃货看到的是收窄后的空行——说清原因，别让人以为家里没张罗 */
 .history__scope {
   padding: 9px 12px;
-  margin: 0 0 10px;
+  /* 两侧与卡片同一条竖线（用户 2026-10-13：「这个和上面对齐」）。
+     这页的卡片走 `.card` 自带的 `margin: 14px var(--spacing-page) 0`，
+     所以裸文本块要给同一个横向外边距——**不能改成给容器加 padding**，
+     那会让卡片在自带的 margin 之外再缩进一次。 */
+  margin: 0 var(--spacing-page) 10px;
   font-size: 12px;
   line-height: 1.7;
   color: #8a7259;
@@ -35,7 +39,7 @@
 }
 
 .history__summary {
-  margin: 0 0 10px;
+  margin: 0 var(--spacing-page) 10px;
   font-size: 12.5px;
   color: var(--color-ink-3);
 }
@@ -123,7 +127,9 @@
 }
 
 .history__more-wrap {
-  margin-top: 14px;
+  /* 两侧同样对齐（见 .history__summary 的说明）：这行是个占满宽度的按钮，
+     留边之前它的左右边缘也顶在屏幕边上 */
+  margin: 14px var(--spacing-page) 0;
   text-align: center;
 }
 
@@ -131,7 +137,9 @@
   width: 100%;
 }
 
-/* 到头了要说清：这是"没记录了"，不是"按钮没加载出来" */
+/* 到头了要说清：这是"没记录了"，不是"按钮没加载出来"。
+ * **不要再给横向外边距**：它嵌在 `.history__more-wrap` 里（两者二选一渲染），
+ * 父级已经留过 `var(--spacing-page)`，再给一次就缩进成 32px（实测踩过）。 */
 .history__end {
   margin: 6px 0 0;
   font-size: 12.5px;

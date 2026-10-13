@@ -306,3 +306,11 @@
 - **处置**：抽了一个带说明的 `freezeClock()` 助手，统一改成 `vi.useFakeTimers({ toFake: ['Date'] })` + `setSystemTime(...)`——**只假 `Date`，把定时器与动画帧留给真实实现**。改完 21/21 全绿，整文件反而更快（1727ms → 865ms）。
 - **规矩（本轮起）**：① 装假定时器前先问"我到底要假什么"——只要锁时间就写 `toFake: ['Date']`，**不要用默认全假**；② 凡"某个 DOM 元素在某条件下才出现"的断言，先分清它背后是**状态驱动**还是**动画驱动**（动画驱动的元素在 jsdom 里依赖真实帧循环，假定时器会让它永不出现）；③ **"单跑绿、连跑红"优先怀疑跨用例污染**（本项目的第四次：R-028 的随机、R-021 的 jsdom 图像能力、本轮，以及各 store 泄漏那次），而不是先怀疑自己刚写的那段。
 - **相关**：`apps/mobile/src/pages/discover/components/ai-sheets.test.tsx`（`freezeClock()`）；`src/components/ui/bottom-sheet.test.tsx`（动画契约的原始用例，它没装假定时器，所以从没踩到这个坑）；`RISKS.md` R-030（另一类"假证据"——绿断言配反向说明）；`DECISIONS.md` D-045。
+
+## R-32 样式断言里的两个坑：注释被当成代码（假绿）、`?raw` 读 scss 得到空串（🟡 2026-10-13 各踩一次，已处置并立规矩）
+
+- **坑一：注释被断言读成代码 → 假绿**。给点单历史写"裸文本块要与卡片对齐"的断言时，规则的正则 `/\.history__scope\s*\{[^}]*\}/` 取到的是**含注释的整块**，而我在注释里正好写了 `.card` 的写法 `margin: 14px var(--spacing-page) 0`——把真 margin 改回贴边（`margin: 0 0 10px`）之后断言**照样绿**，是反证时才发现。这与 R-029/R-030 同属"证据链断了"，但更阴：**断言本身看上去是在检查代码**。
+  - **规矩**：读样式/配置做断言时，**先剥注释再匹配**（`text.replace(/\/\*[\s\S]*?\*\//g, '')`），并且注释里**不要照抄**被断言的写法（那是最容易自证的写法）。
+- **坑二：`?raw` 对 `.scss` 返回空串**。为了让断言读样式文件而不引入 `node:fs`（它会让 `tsc -b` 报 `Cannot find name 'node:fs'`，把既有错误从 7 条推到 19 条），改用 Vite 的 `import css from './x.scss?raw'`——实测**拿到的是空字符串**（scss 走 Sass 插件编译，`?raw` 在该管线里不返回源文），三条断言全红在"没读到规则"上。探测脚本（`typeof scss → 'string'`、`length → 0`）才看清。
+  - **处置**：回到 `node:fs` 读文件，并在每个用到的测试文件顶部加 **`/// <reference types="node" />`**（`tsconfig.app.json` 的 `types` 只有 `vite/client`，文件级引用即可补上 node 类型）。**顺带把 `tsc -b` 的既有错误从 7 条降到 2 条**——原来 `corner-art.test.tsx` 那 5 条 `Cannot find name 'node:fs'/'process'` 正是同一原因（它一直没加这个引用）。
+- **相关**：`RUNBOOK.md` R-039 的"踩过的坑"；R-029（静默降级）、R-030（三类假证据）——本条是"断言层面的假证据"。

@@ -214,7 +214,14 @@
   padding: 10px 12px;
   font: inherit;
   font-size: 13px;
-  border: 0;
+  /*
+   * 边框宽度两边**必须一致**（用户 2026-10-13：「为什么有时候会歪」）。
+   * 这两个按钮是 `flex: 1`（flex-basis: 0%）平分一行，而 0% 基准下**边框不参与**
+   * 那份平分：只有「AI 帮你想」带 1px 描边时它就多占 2px（左右各 1px），
+   * 实测 159 / 161 —— 两个按钮不等宽、中间那道缝也偏左 1px。
+   * 所以两边都给 1px 透明边框占位，「AI 帮你想」只改颜色（见下）。
+   */
+  border: 1px solid transparent;
   border-radius: 14px;
   transition: transform 0.12s ease;
 
@@ -238,7 +245,7 @@
 .today__ai {
   color: #7a3b1e;
   background: rgb(255 251 242 / 52%);
-  border: 1px solid rgb(255 251 242 / 70%);
+  border-color: rgb(255 251 242 / 70%);
 }
 
 .today__shake-emoji,

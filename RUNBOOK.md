@@ -1827,3 +1827,46 @@ pnpm --dir apps/mobile exec tsc -b; echo "exit=$?"             # exit 2，7 条�
 **新增 2 条**（`FamilyPicks.test.tsx`）：① 5 行数据下逐行读 `.picks__rank`，断言 `['1','2','3','4','5']`；② 断言 `.picks__name` 与 `.picks__reason` 的父节点都是 `a.picks__link`、`.picks__body` 不存在、且名字的下一个兄弟就是理由。
 
 **反证（2 组，各自独立）**：见上表——两组都只让**对应的那一条**红，互不干扰。
+
+## R-039 界面细节统一（D-047）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：`pages/shared.scss`（`.today__shake, .today__ai` 公共规则加 `border: 1px solid transparent`，`.today__ai` 只改 `border-color`）；`pages/shopping/shopping.scss`（`.shop__check` 自绘 + `:focus-visible`，`.shop__from` 缩进 24→28px）；`pages/recipes/favorites/favorites.scss`（`.favorites__summary`/`.favorites__grid` 各带 `margin-inline`）；`pages/order/history/history.scss`（`__summary`/`__scope`/`__more-wrap` 各带 `margin-inline`）；四个测试文件加断言（含三斜线 node 类型引用）。**后端一行未改，纵向间距与配色未改。**
+
+### 怎么验
+
+```bash
+pnpm --dir apps/mobile test; echo "exit=$?"           # 298/298
+pnpm --dir apps/mobile exec tsc -b; echo "exit=$?"     # exit 2（既有错误从 7 降到 2）
+```
+
+浏览器（391×844）：发现页两个按钮 `width` 相等、缝的中点在卡片中线上；采购清单勾选框 `appearance: none`、20×20、圆角 5px，勾上是品牌色 + 白对勾；收藏页网格左右各 16px；**全站 12 页**的「标题文字起点 vs 首个内容块左边缘」delta 全为 0。
+
+### 实测结果（2026-10-13）
+
+| 项 | 结果 |
+| --- | --- |
+| 新增断言 | **8 条**：发现页 1（边框宽度一致 + 只准改颜色）、采购清单 2（自绘四要素；真 checkbox 仍在且勾选加 `is-packed`）、收藏页 1（摘要/网格各带边距、容器不得加横向 padding）、点单历史 1（三个裸块带边距、容器不得加 padding），加上配套的导入与三斜线引用 |
+| 全量前端 | **298/298** |
+| 前端类型 | `tsc -b` **exit 2、2 条**既有错误（`CombosPage.test` / `PrepPage.test`，与本轮无关）——**从 7 条降到 2 条**：新增的三斜线引用顺带修掉 `corner-art.test` 那 5 条 `node:fs`/`node:path`/`process` 错误 |
+| 反证 | **四条各自精确变红**：① 公共规则去掉透明边框 → 发现页那条红；② 去掉 `appearance: none` → 勾选框那条红；③ 去掉 `.favorites-page` 的块边距…… 实测因**注释里照抄了写法而假绿**（见"踩过的坑"），剥注释后才真红；④ 历史页 `__scope` 改回 `margin: 0 0 10px` → 对齐那条红 |
+| 按钮几何（391） | 修前 159 / 161（差 2px、缝偏左 1px）；修后四档宽度（320/360/391/414）**全部 `diff=0`、`gutterOffset=0`、`sameHeight=0`** |
+| 全站对齐（391） | 12 个页面 delta 全 0：发现 16/16、订单 16/16、冰箱 16/16、我的 16/16、收藏 16/16、点单历史 16/16、采购清单 16/16、备菜计划 16/16、常用组合 16/16、打卡墙 16/16、家庭 16/16、菜谱 16/16 |
+| 勾选框（采购清单） | `appearance: none`、20×20、`border-radius: 5px`、`border-width: 1.5px`、未勾 `rgb(255,251,242)`；第二行注释文字起点 59 == 菜名文字起点 59（缩进对齐） |
+| 收藏页 | 网格 x=16、right=375（左右各 16），三张卡 x=16/201.5/16 |
+| 点单历史 | `__summary`/`__day`/`__more-wrap`/`__end` 全部 x=16、宽 359（**`__end` 嵌在 `__more-wrap` 里，不能再给边距——给了就是 32，实测踩过**） |
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| 样式断言**假绿** | 正则取到的块**含注释**，而注释里照抄了 `.card` 的写法 `margin: … var(--spacing-page) …` → 真 margin 改回贴边也照样匹配 | 断言前先剥注释；注释里不照抄被断言的写法 |
+| `import css from './x.scss?raw'` 得到**空串** | scss 走 Sass 插件编译，`?raw` 在这条管线里不返回源文（探测：`typeof → 'string'`、`length → 0`） | 回到 `node:fs` 读文件；文件顶部加 `/// <reference types="node" />` |
+| 给容器加 `padding-inline` 后**标题比正文多缩一格** | `.pscreen` 里的 `.ptitle`/`.psub` **自带** `padding-inline: var(--spacing-page)` —— 容器再加一层就是 32px | 改回本项目的既有约定：**横向边距由块自己带**（`.card` 就是这么写的）；并把"容器不得加横向 padding"写成断言 |
+| 历史页 `__end` 缩进成 32px | 它嵌在 `.history__more-wrap` 内（两者二选一渲染），父子都给了边距 | 只给父级；断言名单里**去掉** `end` 并写明原因 |
+| 给 `__scope` 之类的裸块加边距时先量到"没生效" | 量的是**元素盒子** x，而缩进写在 `padding-left` 上——文字起点才对得上 | 量文字用 `Range.selectNodeContents(firstChild).getBoundingClientRect()`，不看元素盒 |
+
+### 回归测试
+
+**新增 8 条**：`DiscoverPage.test.tsx` 1 条（两按钮边框宽度一致，且「AI 帮你想」只准改颜色、「摇一道」不得自带边框）；`ShoppingPage.test.tsx` 2 条（自绘四要素：`appearance: none` + 圆角 + SVG 对勾 + `:focus-visible`；真 `<input type="checkbox">` 仍在且勾选后父级带 `is-packed`）；`FavoritesPage.test.tsx` 1 条（摘要/网格各带 `margin-inline`、容器**不得**加横向 padding）；`HistoryPage.test.tsx` 1 条（三个裸块带 `margin-inline`、容器不得加 padding）+ 三个文件的导入与三斜线引用。
+
+**反证（4 组）**：见上表——每组只让对应那一条红。

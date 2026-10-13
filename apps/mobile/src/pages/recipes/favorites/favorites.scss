@@ -6,7 +6,7 @@
 }
 
 .favorites__status {
-  padding: 14px;
+  padding: 14px 0;
 }
 
 .favorites__empty {
@@ -22,8 +22,17 @@
   text-decoration: none;
 }
 
+/*
+ * 裸文本块与网格的横向边距写在**各自**身上，不给容器加内边距
+ * （用户 2026-10-13：「和下面的文案没对齐啊，所有页面要统一的」）。
+ *
+ * 原因：`.pscreen` 里的标题块 `.ptitle` / `.psub` 自带 `padding-inline: var(--spacing-page)`。
+ * 如果给容器再加一层，标题就成了 32px、而内容 16px——标题比正文多缩一格。
+ * 给块加 `margin` 则两边都落在同一条竖线上，也与 `.card`（`margin: … var(--spacing-page) …`）
+ * 和点单历史的做法一致：**这个项目的横向边距统一由块自己带**。
+ */
 .favorites__summary {
-  margin: 0 0 12px;
+  margin: 0 var(--spacing-page) 12px;
   font-size: 12.5px;
   color: var(--color-ink-3);
 }
@@ -32,6 +41,7 @@
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
+  margin: 0 var(--spacing-page);
 }
 
 .fav-card {

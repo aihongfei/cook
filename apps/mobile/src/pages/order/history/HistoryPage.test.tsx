@@ -1,7 +1,10 @@
+/// <reference types="node" />
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import type { OrderHistory } from '@/api/orders'
@@ -190,3 +193,41 @@ it('没有家庭时给引导，不去撞后端 404', async () => {
 
   expect(await screen.findByText(/先创建家庭或用邀请码加入/)).toBeTruthy()
 })
+
+/*
+ * 裸文本块要与卡片对齐（用户 2026-10-13：「这个和上面对齐」——指着 `09-13 ～ 10-13（…）` 那行）。
+ *
+ * 实测过改前：卡片 x=16（`.card` 自带 `margin: 14px var(--spacing-page) 0`），
+ * 而这行 x=0、占满 391。修法是给这几个裸块**同样的横向外边距**——
+ * 不是给容器加 padding（那会让卡片在自带 margin 之外再缩进一次）。
+ * 所以这条同时守住"有边距"与"没改成容器 padding"。
+ */
+it('裸文本块（摘要 / 收窄说明 / 翻页 / 到头了）都与卡片同一条竖线', () => {
+  const css = readFileSync(join(__dirname, './history.scss'), 'utf8')
+  /*
+   * ⚠️ 断言前必须**剥掉注释**：这几条规则的注释里正好引用了 `.card` 的写法
+   * `margin: 14px var(--spacing-page) 0`，不剥的话注释本身就能让断言通过——
+   * 把真正的 margin 改回贴边它照样绿（第一版就是这么埋的假绿，反证时才抓到）。
+   */
+  const strip = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, '')
+  const rule = (name: string) => {
+    const block = css.match(new RegExp(`\\.history__${name}\\s*\\{[\\s\\S]*?\\n\\}`))?.[0] ?? ''
+    return { raw: block, code: strip(block) }
+  }
+  // `end` **不**在这个名单里：它嵌在 `.history__more-wrap` 内部（两者二选一渲染），
+  // 父级已留边距，再给一次会缩进成 32px（实测 32 vs 卡片 16，看着就是没对齐）
+  for (const cls of ['summary', 'scope', 'more-wrap']) {
+    const { raw, code } = rule(cls)
+    expect(raw, `没读到 .history__${cls} 规则`).toBeTruthy()
+    expect(code, `.history__${cls} 要给 var(--spacing-page) 的横向外边距，才能和卡片对齐`)
+      .toMatch(/margin\s*:[^;]*var\(--spacing-page\)/)
+    // 光有变量还不够：必须是**横向**那一段（写在 margin 里而不是 padding 里）
+    expect(code, `.history__${cls} 的边距要写在 margin 上`).toMatch(/margin\s*:\s*[^;]*var\(--spacing-page\)[^;]*;/)
+  }
+  // 容器**不能**加横向 padding：卡片自带 margin，再加一层就双倍缩进
+  const page = css.match(/\.history-page\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+  expect(page, '没读到 .history-page 规则').toBeTruthy()
+  expect(page, '.history-page 不该加横向 padding（卡片自带 margin，会双倍缩进）')
+    .not.toMatch(/padding(-inline)?\s*:[^;]*spacing-page/)
+})
+

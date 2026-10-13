@@ -88,12 +88,54 @@
   border-bottom: 0;
 }
 
+/*
+ * 勾选框：**自绘**，不用系统原生那个方框（用户 2026-10-13：「这个复选框不好看」）。
+ *
+ * 为什么留着真 `<input type="checkbox">` 而不是换成 div 重画：
+ * 它自带键盘操作（空格勾选）、读屏语义与表单语义，这些不该为了好看丢掉。
+ * 所以只把原生外观关掉（`appearance: none`），用圆角方框 + 自画的对勾替上来。
+ *
+ * 三个刻意的选择：
+ * - **圆角 5px**：这版界面全是手绘圆角（卡片 22、按钮 14、缩略图 10），直角方框在里头最扎眼；
+ * - **未勾是奶白底 + 描边**：与输入框同一套"这里可以动"的语汇，而不是系统那层灰；
+ * - **对勾用 SVG 背景而不是 `content: '✓'` 字符**：字符要跟手写字体的基线、字号纠缠，
+ *   换个字体就歪；画出来的线是几何的，多大都正。
+ */
 .shop__check {
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  accent-color: var(--color-brand);
-  transform: translateY(2px);
+  align-self: center;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  appearance: none;
+  cursor: pointer;
+  background-color: var(--color-paper);
+  border: 1.5px solid #d9b48c;
+  border-radius: 5px;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+/* 勾上：品牌色实底 + 白对勾（45° 折线，见上面的说明） */
+.shop__check:checked {
+  background-color: var(--color-brand);
+  border-color: var(--color-brand);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 12.5 10 17.5 19 7' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 15px 15px;
+}
+
+/* 键盘走到它上面时要看得见：原生外观关掉后，焦点圈得自己给 */
+.shop__check:focus-visible {
+  outline: 2px solid var(--color-focus-line, #d98a4a);
+  outline-offset: 2px;
+}
+
+/* 动效偏好的用户不要这层颜色过渡 */
+@media (prefers-reduced-motion: reduce) {
+  .shop__check {
+    transition: none;
+  }
 }
 
 .shop__name {
@@ -108,8 +150,9 @@
 
 .shop__from {
   flex: 1 1 100%;
-  /* 换到第二行的菜名注释：缩进对齐到名字（16 + 8），一眼看出它属于上一行 */
-  padding-left: 24px;
+  /* 换到第二行的菜名注释：缩进对齐到名字（勾选框 20 + 行内 gap 8 = 28），
+     一眼看出它属于上一行。勾选框从 16 改成 20 时这里要跟着改（16+8 曾是对的）。 */
+  padding-left: 28px;
   font-size: 11px;
   color: var(--color-ink-3);
 }

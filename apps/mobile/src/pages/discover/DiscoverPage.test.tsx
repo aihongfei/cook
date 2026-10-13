@@ -1,7 +1,10 @@
+/// <reference types="node" />
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import { Toaster, useToasts } from '@/components/ui/toast'
@@ -12,6 +15,9 @@ import DiscoverPage from './DiscoverPage'
 // ① 「摇一道」真会跳走，而且**跳到随机那一道**（不是永远第一道——那就不叫摇）；
 // ② 空库时说人话（"还没有菜"）而不是静默失败；
 // ③ 两个 AI 入口都开得出来（合并之后它们的入口位置变了，容易改坏）。
+
+/** 样式文件所在目录（读 scss 做断言用，见 corpus-art.test 的同一手法） */
+const srcDir = join(__dirname, '..', '..')
 
 const clients: QueryClient[] = []
 
@@ -152,4 +158,35 @@ it('问 AI 那行只有后半句可点：前半句是说明，不该看着像按
   // 点它确实打开问答抽屉（不是只有样式像链接）
   fireEvent.click(screen.getByRole('button', { name: '点这里问 AI →' }))
   expect(await screen.findByText(/拿不准的都能问/)).toBeTruthy()
+})
+
+it('「摇一道」与「AI 帮你想」的边框宽度一致（否则 flex:1 下两个按钮不等宽，看着就是歪的）', () => {
+  /*
+   * 用户 2026-10-13：「为什么有时候会歪」。实测根因不是随机的：这两个按钮是
+   * `flex: 1`（flex-basis: 0%）平分一行，而 0% 基准下**边框不参与**那份平分——
+   * 只有「AI 帮你想」带 1px 描边时它多占 2px（左右各 1），实测宽度 159 / 161，
+   * 中间那道缝也随之偏左 1px。去掉边框两边都是 160；给「摇一道」也加 1px 又都是 160。
+   *
+   * jsdom 算不了布局，所以守**决定这件事的那条规则**（与 corner-art.test 同一手法）：
+   * 谁哪天只给其中一个加/去边框，这条就会红。
+   */
+  const css = readFileSync(join(srcDir, 'pages/shared.scss'), 'utf8')
+  const common = css.match(/\.today__shake,\s*\.today__ai\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+  expect(common, '没读到 .today__shake, .today__ai 的公共规则').toBeTruthy()
+  expect(common, '两个按钮的边框宽度必须在公共规则里定死（1px 透明占位）').toContain('border: 1px solid transparent')
+
+  /*
+   * 找「AI 帮你想」那条独立规则时**必须先跳过公共块**：公共块的第二行正好是
+   * `.today__ai {`，直接在整个文件里匹配会先抓到它（第一版就是这么红的——
+   * 断言读到的其实是公共块，看着像"AI 那句没写边框颜色"）。
+   */
+  const after = css.slice(css.indexOf(common) + common.length)
+  const ai = after.match(/\.today__ai\s*\{[^}]*\}/)?.[0] ?? ''
+  expect(ai, '没读到 .today__ai 的独立规则').toBeTruthy()
+  expect(ai, '「AI 帮你想」只该改边框颜色').toMatch(/border-color\s*:/)
+  expect(ai, '「AI 帮你想」不该再写边框宽度（写了就破坏等宽）').not.toMatch(/border\s*:/)
+
+  const shake = after.match(/\.today__shake\s*\{[^}]*\}/)?.[0] ?? ''
+  expect(shake, '没读到 .today__shake 的独立规则').toBeTruthy()
+  expect(shake, '「摇一道」不该自带边框宽度（会与公共规则打架）').not.toMatch(/border\s*:/)
 })

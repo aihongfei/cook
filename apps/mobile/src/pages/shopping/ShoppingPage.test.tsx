@@ -1,12 +1,20 @@
+// 读样式文件做断言需要 node 类型：tsconfig.app 的 `types` 只放了 vite/client，
+// 所以在文件里显式引入（与 corner-art.test 的写法一致，但不靠 tsconfig 全局包含）。
+/// <reference types="node" />
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import type { ShoppingList } from '@/api/shopping'
 import { useAuth } from '@/stores/auth'
 import ShoppingPage from './ShoppingPage'
+
+/** 源码根目录（拼 scss 路径用） */
+const srcDir = join(__dirname, '..', '..')
 
 // 采购清单（M7 / F7-01）。要盯住的四件事：
 // ① 每样食材都要说清**买多少**与**为哪几道菜买**（买菜的人要能回答"我为什么要买这个"）；
@@ -161,4 +169,42 @@ it('清单取不回来时报错并可重试，不显示假内容', async () => {
 
   expect(await screen.findByText('采购清单暂时打不开')).toBeTruthy()
   expect(screen.queryByRole('checkbox')).toBeNull()
+})
+
+/*
+ * 勾选框是**自绘**的（用户 2026-10-13：「这个复选框不好看」）。
+ *
+ * 实测过：原生方框在 jsdom 里量不到外观（`appearance: auto`、16×16），所以这一条守的是
+ * **决定外观的那几条规则**——谁哪天把 `appearance: none` 或对勾的 SVG 删了，它就红。
+ * 与 corner-art.test 的"守插画锚点"同一手法：jsdom 算不了视觉，就守住产生视觉的写法。
+ */
+it('勾选框是自绘的：关掉原生外观、有对勾、保留键盘焦点圈（原生方框与这版界面不搭）', () => {
+  const css = readFileSync(join(srcDir, 'pages/shopping/shopping.scss'), 'utf8')
+  const base = css.match(/\.shop__check\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+  expect(base, '没读到 .shop__check 规则').toBeTruthy()
+  expect(base, '必须关掉原生外观，否则系统方框会盖掉自绘样式').toContain('appearance: none')
+  // 尺寸与圆角：直角方框在这套手绘圆角里最扎眼（卡片 22 / 按钮 14 / 缩略图 10）
+  expect(base, '自绘勾选框要有圆角').toMatch(/border-radius\s*:\s*5px/)
+
+  const checked = css.match(/\.shop__check:checked\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+  expect(checked, '没读到 .shop__check:checked 规则').toBeTruthy()
+  expect(checked, '勾上时要画出对勾（SVG 背景），不能只换底色').toContain('svg+xml')
+  expect(checked, '对勾要是白线，压在品牌色底上才看得见').toContain("stroke='white'")
+
+  // 原生外观关掉后，键盘用户就只剩这一条线索了
+  const focus = css.match(/\.shop__check:focus-visible\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+  expect(focus, '没读到 .shop__check:focus-visible 规则——关掉原生外观必须自己给焦点圈').toBeTruthy()
+  expect(focus, '焦点圈要有可见的 outline').toMatch(/outline\s*:\s*2px/)
+})
+
+it('真 `<input type="checkbox">` 还在（键盘空格勾选、读屏语义都靠它，不为好看换成 div）', async () => {
+  mockGet()
+  renderList()
+
+  const box = await screen.findByRole('checkbox', { name: /鸡蛋/ })
+  expect(box).toBeTruthy()
+  expect((box as HTMLInputElement).type).toBe('checkbox')
+  // 勾上后整行要标记为已买（`.is-packed`）——自绘样式靠这个类做划线
+  fireEvent.click(box)
+  expect(box.closest('.shop__label')?.className).toContain('is-packed')
 })
