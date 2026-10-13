@@ -150,3 +150,18 @@ it('错误文案：限流与断网都给可读提示', () => {
   expect(apiErrorMessage({ isAxiosError: true, response: { status: 401, data: { message: '账号或密码不对' } } })).toBe('账号或密码不对')
   expect(apiErrorMessage(new Error('boom'))).toBe('操作失败，请稍后再试')
 })
+
+it('413 要换成中文话术：不能把 body-parser 的英文原文丢给用户', () => {
+  /*
+   * 用户 2026-10-14 在打卡墙看到的就是这一行英文（「打卡墙会报 toolarge」）。
+   *
+   * 它为什么会漏出去：这句正文是 `request entity too large`，**不带 `Exception`/`Error`
+   * 前缀**，于是绕过了上面那条 `RAW_EXCEPTION_MESSAGE` 过滤、被当成"后端的业务原话"透传了。
+   * 与 429 是同一类病：那句话是给开发者看的，不是给用户看的。
+   */
+  expect(
+    apiErrorMessage({ isAxiosError: true, response: { status: 413, data: { message: 'request entity too large' } } }),
+  ).toBe('这张图太大了，换张小一点的再传')
+  // 就算后端没带 message，也不能退化成"操作失败"——413 的含义是确定的
+  expect(apiErrorMessage({ isAxiosError: true, response: { status: 413, data: {} } })).toBe('这张图太大了，换张小一点的再传')
+})

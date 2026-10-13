@@ -273,9 +273,15 @@ it('图被清理掉了就说一句人话（附件有留存上限，很旧的对�
 
 it('上传失败如实说，且**不进待发区**（别让用户等到模型回答完才发现它没看图）', async () => {
   mockStatus()
+  /*
+   * 用**后端真实的 413 正文**（body-parser 的英文原文）而不是一句中文：
+   * 原来这里 mock 的是 `这张图太大了，换一张小点的`，于是"英文会漏给用户"这个 bug
+   * 在这条测试里永远看不见——2026-10-14 用户在打卡墙上真的看到了那行英文。
+   * 改用它之后，这条测试同时守住了两件事：失败要说、且说的是中文（见 api/client.ts 的 413 分支）。
+   */
   vi.spyOn(apiClient, 'post').mockRejectedValue({
     isAxiosError: true,
-    response: { status: 413, data: { message: '这张图太大了，换一张小点的' } },
+    response: { status: 413, data: { message: 'request entity too large' } },
   })
   mockFetch()
   renderSheet()
@@ -283,7 +289,7 @@ it('上传失败如实说，且**不进待发区**（别让用户等到模型回
   fireEvent.click(screen.getByLabelText('加一张图'))
   pickPhoto()
 
-  await waitFor(() => expect(screen.getByText('这张图太大了，换一张小点的')).toBeTruthy())
+  await waitFor(() => expect(screen.getByText('这张图太大了，换张小一点的再传')).toBeTruthy())
   expect(document.querySelector('.ai__pending-photo')).toBeNull()
 })
 

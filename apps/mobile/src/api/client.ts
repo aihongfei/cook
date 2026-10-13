@@ -99,6 +99,16 @@ export function apiErrorMessage(error: unknown): string {
   if (!error.response) return '连不上厨房服务，请检查网络'
   // 限流必须先判：后端总会带 message，若先透传 message，这条友好文案永远走不到
   if (error.response.status === 429) return '尝试太频繁了，请稍后再试'
+  /*
+   * 413 单独判：这句正文是 **body-parser 的英文原文**（`request entity too large`），
+   * 不带 `Exception`/`Error` 前缀，会从下面那条"透传 message"溜出去——用户在打卡墙上
+   * 看到的就是一行英文（2026-10-14 真机截图）。
+   *
+   * 两个来源要分开说：**图片本身太大**（客户端压完还是超了）与**请求体超限**
+   * （服务端上限配小了）。用户能做的动作不同——前者要换张图，后者只能等修（这里已修）。
+   * 后端正常时走不到这条：请求能进业务层，会拿到「单张照片不能超过 8MB」那句中文。
+   */
+  if (error.response.status === 413) return '这张图太大了，换张小一点的再传'
   const message = (error.response.data as { message?: string | string[] } | undefined)?.message
   const text = Array.isArray(message) ? String(message[0] ?? '') : typeof message === 'string' ? message : ''
   if (text && !RAW_EXCEPTION_MESSAGE.test(text)) return text

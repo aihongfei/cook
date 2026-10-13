@@ -334,3 +334,20 @@ it('输入框里按下并拖动是在选文字，不是要关抽屉', async () =
   expect(frames).toEqual([])
   expect(onClose).not.toHaveBeenCalled()
 })
+
+it('提示层要盖在弹层之上：toast 的 z-index 必须大于 antd-mobile 的（1000/1010）', () => {
+  /*
+   * 用户 2026-10-14：「提示是在弹出窗底层的，没有显示最顶层」——在抽屉里操作失败时，
+   * 纸条被弹层盖住，用户只看到抽屉、以为没反应。
+   *
+   * jsdom 不跑层叠，所以这里量的是**样式表里写的那个数**（与上面 `.sheet__shell`
+   * 那条"量决定布局的规则"同一个思路）：提示是操作的结果，必须高于触发它的弹层。
+   * 全站顺序：页面 < 悬浮球/弹窗(1000/1010) < **提示(1050)** < 看大图(1100)。
+   */
+  const scss = readFileSync(join(process.cwd(), 'src/components/ui/ui.scss'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const toasterZ = Number(/\.toaster\s*\{[^}]*?z-index:\s*(\d+)/.exec(scss)?.[1] ?? 0)
+  const viewerZ = Number(/\.photo-viewer\s*\{[^}]*?z-index:\s*(\d+)/.exec(scss)?.[1] ?? 0)
+
+  expect(toasterZ).toBeGreaterThan(1010) // antd-mobile：遮罩 1000 / 面板 1010
+  expect(toasterZ).toBeLessThan(viewerZ) // 全屏看大图时不该冒纸条出来
+})

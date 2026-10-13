@@ -3012,3 +3012,130 @@ ssh cook "cd /opt/cook && docker compose exec -T mysql mysql -uroot -p\"\$MYSQL_
 2. **找回密码不可用**：服务器 `MAIL_TRANSPORT` 还没配真实 SMTP 凭据（`RISKS.md` R-16），注册时**不要填邮箱**，否则"忘了密码"也找不回来。
 3. **服务端是单机 2 核 / 1.9 GB**：够家里几个人用，不是生产级容量。
 4. **版本号仍是 `1.0`（versionCode 1）**：反复装不同版本的包，系统不会提示更新；正式发版要在 `app/build.gradle` 里递增（F14-05）。
+
+---
+
+## R-059 真照片传不上去（413 / "toolarge"）与提示被弹层盖住（✅ 已验证，2026-10-14）
+
+配套：`DECISIONS.md` **D-068**（为什么这么修）、`RISKS.md` **R-58**（"限定 14MB"本身就是临时方案）、`services/api/scripts/verify-upload-size-http.cjs`（验收脚本）、R-058（服务器版 APK 与部署）。
+
+用户 2026-10-14 报三件事（附截图，冰箱页上有 `Request failed with status code 413`）：
+
+1. 「上传图片会报这个」（打卡/冰箱拍照，413）
+2. 「打卡墙会报 toolarge」
+3. 「提示是在弹出窗底层的，没有显示最顶层」
+
+三条是**两个独立的 bug**：前两条同一个根因（请求体上限），第三条是层叠顺序。
+
+### 一、怎么定位"连 1MB 都传不上去"
+
+**先把"谁在拒绝"问清楚**——服务器根本没收到这个请求，是 **Express 自己的 body-parser 先拦的**：
+
+```bash
+# 本地起服务后，用真照片量级打一次（脚本已入库）
+node services/api/scripts/verify-upload-size-http.cjs
+# 修前：400KB 的图 → HTTP 413 {"statusCode":413,"message":"request entity too large"}
+# 修后：400KB / 1MB → HTTP 201；超 8MB → HTTP 400「单张照片不能超过 8MB」
+```
+
+根因链条：
+
+- 图片是 **base64 内联在 JSON 里**发的（不是 multipart），Express 默认 JSON body 上限 **100kb**；
+- 业务层限额是 **8MB**（`单张照片不能超过 8MB`，中文话术），但它**永远走不到**——请求在进入 Nest 之前就被拒了；
+- 所以用户看到的是 body-parser 的英文原文 `request entity too large`（前端那句 `apiErrorMessage` 的 `RAW_EXCEPTION_MESSAGE` 防护**漏掉了它**：那句话里既没有 `Exception` 也没有 `Error` 前缀）。
+
+### 二、后端修法（`services/api/src/main.ts`）
+
+```ts
+import type { NestExpressApplication } from '@nestjs/platform-express'
+
+// 泛型必须是 NestExpressApplication（不是默认的 INestApplication）：
+// useBodyParser 只有 Express 适配器才有——不写这个泛型，tsc 直接报
+// Property 'useBodyParser' does not exist on type 'INestApplication'
+const app = await NestFactory.create<NestExpressApplication>(AppModule)
+
+// 必须放在路由之前
+app.useBodyParser('json', { limit: '14mb' })
+app.useBodyParser('urlencoded', { extended: true, limit: '14mb' })
+```
+
+**14MB 这个数怎么来的**：业务上限 8MB × base64 的 **4/3 膨胀** ≈ 10.7MB，再留余量 → 14MB。**必须大过业务上限**，否则用户看到的还是英文 413 而不是中文话术。
+
+⚠️ **不要把它当调参旋钮**：每多 1MB，都被"每分钟 60 次请求"的限流放大成内存压力。真要大图，正确做法是换 multipart / 流式上传，不是继续加数字。
+
+### 三、前端两处（`apps/mobile/src/api/client.ts`、`components/ui/ui.scss`）
+
+- **413 给中文话术**：`if (error.response.status === 413) return '这张图太大了，换张小一点的再传'`——不把英文原文丢给用户；
+- **toast 层级 60 → 1050**：全站顺序定为 **页面 < 悬浮球/弹窗(1000/1010) < 提示(1050) < 看大图(1100)**。提示是操作的结果，必须高于触发它的弹层。回归测试直接从 `ui.scss` 里读数值并断言 `toasterZ > 1010 && < viewerZ`（见 `bottom-sheet.test.tsx`）——jsdom 不跑层叠，只能量"样式表里写的那个数"，与 `.sheet__shell` 那条"量决定布局的规则"同一个思路。
+
+### 四、服务器也要重建（**本地修完不等于线上修完**）
+
+```bash
+# 同步后端源码（compose 与 services/ 一起传）
+tar czf - --exclude='node_modules' --exclude='dist' --exclude='.env' --exclude='.git' \
+  docker-compose.yml services/ | ssh cook 'tar xzf - -C /opt/cook'
+ssh cook 'find /opt/cook/services -name "._*" -delete'      # 清 macOS 元数据
+
+# 重建 api 并重启（mysql / minio 不动）
+ssh cook 'cd /opt/cook && docker compose build api && docker compose up -d api && sleep 8 && docker compose ps api'
+```
+
+**验证走公网**，不要只在容器里 curl：
+
+```bash
+BASE_URL=http://120.48.142.161:3000/api node services/api/scripts/verify-upload-size-http.cjs
+```
+
+本次结果（四条全过）：注册 201、建家庭 201、**400KB 图 201**、**1MB 图 201**、超 8MB → **400「单张照片不能超过 8MB」**、AI 附件 400KB → 201。
+
+### 五、重出服务器版 APK（旧包仍有 bug）
+
+```bash
+cd /Users/aihf/Downloads/work/cook
+pnpm --dir apps/mobile run build:apk
+export JAVA_HOME="$HOME/Library/Java/JavaVirtualMachines/temurin-21.0.12.1.jdk/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+cd apps/mobile/android && ./gradlew assembleRelease
+```
+
+**发出前核对**（沿用 R-058 三条 + 两条本次新增）：
+
+```bash
+ASSET=$(unzip -l app-release.apk | grep -o 'assets/public/assets/index-[^ ]*\.js' | head -1)
+unzip -p app-release.apk "$ASSET" | grep -c "120.48.142.161:3000"      # ≥1
+unzip -p app-release.apk "$ASSET" | grep -c "127.0.0.1:3000"           # 0
+unzip -p app-release.apk "$ASSET" | grep -c "这张图太大了，换张小一点的再传"   # ≥1（本次新增）
+unzip -p app-release.apk assets/public/assets/index-*.css | grep -o '\.toaster{[^}]*z-index:[0-9]*'  # 1050（本次新增）
+```
+
+### 六、装机复验（模拟器，撤掉 `adb reverse`）
+
+1. 装包 → 登录（服务器账号，确认链路走公网）；
+2. **打卡墙上传一张 9MB 的真照片**（`sips -s format jpeg -Z 4032` 造的 4032×4032）：选图 → 停在「正在处理照片…」→ 预览出现（已缩到 1600px）→ 传上去 → **卡片出现在墙上**；
+3. **决定性证据**——服务器库里查到这一条：
+
+```bash
+ssh cook 'cd /opt/cook && docker compose exec -T mysql sh -c \
+  "exec mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" cook -e \
+  \"SELECT id, createdAt FROM CheckIn ORDER BY createdAt DESC LIMIT 3;\""'
+# 2026-10-14 实测：cmv6zgkl8000kp3017vbbg4ng  2026-10-13 17:56:59  ← 就是刚才那张
+```
+
+4. **提示层级**：浏览器里用 `getComputedStyle` 量（抽屉开着时 `.toaster` = 1050、`.adm-popup-body` = 1010），并在抽屉里触发一次业务错误 —— 提示**看得见、盖在面板之上**。
+
+### 注意（本次踩到的坑）
+
+1. **`useBodyParser` 要泛型**：`NestFactory.create<NestExpressApplication>(AppModule)`。不写泛型 `tsc` 直接红（`Property 'useBodyParser' does not exist on type 'INestApplication'`）——**Docker 构建会因为 TS 报错失败**，但"构建成功"的假象容易骗人（缓存命中时容器里跑的还是旧代码，见 R-056 的同源教训）。
+2. **验收脚本里的"假图片"必须是真魔数**：后端靠文件头前几字节判类型（`sniffImageType`），拿 `0xff` 随便填的字节会被判成「这个文件不是图片」。正确写法：
+
+```js
+const kb = (n) => {
+  const bytes = Buffer.alloc(n * 1024, 0x41)
+  bytes[0] = 0xff; bytes[1] = 0xd8; bytes[2] = 0xff      // 真 JPEG 魔数
+  return 'data:image/jpeg;base64,' + bytes.toString('base64')
+}
+```
+
+3. **既有测试曾经掩盖了这个 bug**：`ai-attachment.test.tsx` 原先断言的是**透传的 413 中文文案**，而线上真实返回的是**英文原文**——mock 得太"好"，等于替 bug 挡了一枪。已改成模拟真实的 `request entity too large` 并按新话术断言。**规矩**：mock 的行为要与线上真实实现对齐，不能顺手"修好"。
+4. **体量与业务上限的关系**：解析器上限必须**大于**业务上限（并考虑 base64 膨胀），否则用户永远看不到业务层的中文话术。
+5. **服务器与本地是两份**：本地改完要同步源码 + `docker compose build api`（见 §四）。前端 517 个测试全过也不能证明线上好了——**用公网地址跑一遍脚本**才算。
