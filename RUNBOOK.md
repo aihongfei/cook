@@ -3146,6 +3146,7 @@ const kb = (n) => {
 
 **要解决的问题**：装上去的 App 图标一直是 **Capacitor 默认的蓝白 X**（`FEATURES.md` F14-04 此前标"图标与启动图仍是默认素材，待做"）。这一刀把图标、自适应图标、启动图、Web 图标全部换掉。
 
+**图标风格 = 贴纸式（sticker，用户 2026-10-14 选定）**：用户要的是「**透明不规则的，只保留中间主体那块**」——图标外面不要圆/方底盘，轮廓跟着画面本身走。做法是**不要自适应图标**（删掉 `mipmap-anydpi-v26/ic_launcher.xml`），改让启动器用 `mipmap-*/ic_launcher.png`（透明底、只有画面本身）。脚本里由 `ICON_STYLE=sticker|adaptive` 切换，默认 sticker。**实测**：App info 里已是无底盘的贴纸。**限制见下面 §六 的第 1 条**——是否真显示成不规则取决于启动器，Pixel Launcher 会自己垫一个圆。
 **母图换过一版（同日）**：第一版是"手绘水粉房子"（与 `logo-t.png` 里那个「家」的符号同造型），用户看过装机效果后说「不好看」，要求出**动画风格、多元素**的版本。出了四版动画风候选（3D 电影感 / 日式赛璐璐 / 卡通角色 / 手绘场景），用户**选定 D**——卡通厨房场景：戴厨师帽的陶锅 + 挂着的平底锅 + 一摞三只碗 + 番茄/胡萝卜/大葱 + 木托盘。第一版母图归档在 `history/brand/2026-10-14-icon-master-house-1024.png`（**没删**，要回退直接换回去，但 `FG_ART_DP` 那组尺寸是按当前图标重量的，得按注释重算）。
 
 ### 一、一条命令产出全族
@@ -3182,11 +3183,22 @@ cd apps/mobile/android && ./gradlew assembleRelease
 | --- | --- | --- |
 | 图标产出 | `bash apps/mobile/scripts/build-brand-assets.sh` | ✅ 48 个资源；`icon-foreground` 场景 493/1024px、`icon-only` 542/1024px |
 | 传统 vs 自适应大小 | 抠底后量场景高度占比 | ✅ 传统 49.0% vs 自适应 48.1%（差 0.9%，肉眼不可分） |
-| 装机实测（模拟器 Android 16 / 1080×2400 / 420dpi） | App info 截图 | ✅ **默认蓝白 X → 卡通厨房场景**；圆盘直径 120px、场景高 56px = **46.7%**，与设计的 48.1% 一致 |
+| 装机实测（模拟器 Android 16 / 1080×2400 / 420dpi） | App info 截图 | ✅ **默认蓝白 X → 卡通厨房场景**；且已是**无底盘的透明贴纸**（用户要的形态）。Pixel Launcher 桌面仍会自垫圆底，属启动器行为 |
+| 去碎屑 | `clean-icon-blobs.py` | ✅ 301 个连通域 → 保留 3 个真元素、丢掉 298 个碎片（615px）；暗底复看无灰点 |
 | 自适应图标 XML | `mipmap-anydpi-v26/ic_launcher.xml` | ✅ 由 `@capacitor/assets` 写入，两层各 `inset 16.7%` |
 | 包内解析 | `aapt2 dump resources app-release.apk` | ✅ `windowSplashScreenAnimatedIcon=@mipmap/ic_launcher`、`windowSplashScreenBackground=@color/splashBackground(#fffcf1da)`、`mipmap/ic_launcher` 六个密度 + `anydpi-v26` XML 都在 |
 | 前端回归 | `pnpm --dir apps/mobile run test` | ✅ **519/519** |
 | APK 出包 | `./gradlew assembleRelease` | ✅ 21.3MB 签名包，装机成功 |
+
+### 六、贴纸式图标（ICON_STYLE=sticker）的实测结论与边界
+
+1. **"不规则轮廓"取决于启动器，APK 控制不了**。删掉自适应图标后，启动器改用透明 PNG。实测两种表现：
+   - **App info 界面**：原样显示透明贴纸（无底盘）——这是用户想要的效果，已确认；
+   - **Pixel Launcher 桌面/抽屉**：会给 legacy 图标**自动垫一个浅色圆底盘**（颜色由启动器按图标取色，实测垫的是它算出来的橙色调），于是看起来仍是个圆形图标。
+   部分第三方/国产 OEM 启动器会原样显示透明 PNG。**这属于启动器行为**，只能装到目标机型上实测。
+2. **不要把自适应图标的背景层改成透明**去追求同一效果：实测（Android 16）会被渲染成**黑圈**，比米色底盘更难看（生成的 PNG 本身 alpha=0 是对的，问题在系统侧合成）。
+3. **抠底会漏掉被"围住"的元素**——本图是**蒸汽**：它的浅色描边构成封闭曲线，`floodfill` 只删与边缘连通的背景，于是蒸汽的**轮廓碎片 + 内部米色**全留下了。叠在深色启动器上像一片灰点划痕（截图确认）。修法是**连通域过滤**（`scripts/clean-icon-blobs.py`）：本图真元素只有三个（主体 440589px / 平底锅 63665px / 爱心 2313px），其余 298 个碎片合计 615px 全丢，阈值 `BLOB_MIN_PX=1000`。图标尺寸下蒸汽本来也看不清，删掉比修好更划算。
+4. **`@capacitor/assets` 每次都会重建自适应 XML**。想删它**必须放在该工具之后**——我第一次"手工移开 XML"的实验就是被它重新生成盖掉的，白测一轮（表现在脚本 §6 步）。
 
 ### 五、注意（本次踩到的坑）
 
