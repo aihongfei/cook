@@ -402,13 +402,25 @@
   /* 与「点这道」平分这一行；两个都长一颗胶囊，谁也不比谁显眼 */
   flex: 1;
   min-width: 0;
-  padding: 6px;
+  padding: 6px 6px;
   font-size: 12px;
   color: #c4652a;
   text-align: center;
   text-decoration: none;
   border: 1px solid #de9057;
   border-radius: 999px;
+  /*
+   * **不许折行**（用户 2026-10-14：「这块怎么换行了」）。
+   *
+   * 卡片固定 150px 宽（`.dish-card` 的 `flex: 0 0 150px`），两个胶囊各分到 60px，
+   * 减掉内外边距只剩 46px；而「看做法 →」在 12px 下要 ~47px —— 它在胶囊里
+   * 折成了两行（"看做法" / "→"），两个胶囊又被 `align-items: stretch` 一起撑高。
+   *
+   * 解法是**从这一行的两侧与中间借宽度**：字号与文案都是定好的（用户看过），
+   * 缺的只是几个像素。借到之后文字两侧各有 ~8px 净空，一行也放得下
+   * （第一版只压了内边距、借得不够，用户当场说「左侧的空白有点小」）。
+   */
+  white-space: nowrap;
 }
 
 /*
@@ -417,12 +429,16 @@
  * 这一行在链接**之外**：两个都是独立可点元素，套在一起点谁都会冒泡进详情页。
  * 它在卡里是最后一块，`padding-bottom` 自己带（不能靠卡片兜底，
  * 否则按钮会贴着圆角被裁）。
+ *
+ * 间隔 6px、两侧 9px 而不是 8px/11px：卡片只有 150px 宽，两个胶囊要装下
+ * 「看做法 →」与「点这道」（见 `.dish-card__browse` 那段）。这几像素全部借给胶囊，
+ * 文字两侧才有 8px 净空——第一版只借了一点（文字两侧 2px），用户当场说挤。
  */
 .dish-card__actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: stretch;
-  padding: 0 11px 12px;
+  padding: 0 9px 12px;
 }
 
 .dish-card__order-btn {
