@@ -2123,3 +2123,22 @@ pnpm --dir apps/mobile run typecheck; echo "exit=$?"        # 仅 2 条既有错
 **回归测试**：后端由 218 → **268**（新增 `ai.menu.actions.test.ts` 42 条：菜单/餐次/组合的撤销判定、`menuUndoTarget`、`menuText`/`comboText`、五个解析器；`ai.actions.test.ts` 补 10 条：**用 service 真写的形状**验菜谱三件与收藏）。
 **前端由 347 → 385**（子代理交付 37 条 + 我补的缓存回归 1 条）。
 **反证**：后端本轮做了三组——四处撤销门槛（状态/归属/人数/定局）逐个失效 → 恰好 5 条红且不误伤；`recipeTouched` 改回旧写法 → 恰好 2 条红；前端缓存清单换回"只有冰箱" → 恰好 1 条红（新加那条）。
+
+### 验收在开发库里留下了什么（清点命令）
+
+验收脚本与浏览器实证会**真的建账号、建家庭、写库**——这些行不会自动消失。清点（根密码在仓库根 `.env`，**不要打进文档或对话**）：
+
+```bash
+cd /Users/aihf/Downloads/work/cook && PW="$(grep '^MYSQL_ROOT_PASSWORD=' .env | sed 's/^MYSQL_ROOT_PASSWORD=//' | tr -d '"')"
+docker exec cook-mysql-1 mysql -uroot -p"$PW" --default-character-set=utf8mb4 -t -e "
+SELECT '家庭' 项, COUNT(*) 数 FROM cook.Family UNION ALL SELECT '账号', COUNT(*) FROM cook.User
+UNION ALL SELECT '点单', COUNT(*) FROM cook.OrderItem UNION ALL SELECT '餐次', COUNT(*) FROM cook.MealOrder
+UNION ALL SELECT '冰箱', COUNT(*) FROM cook.FridgeItem UNION ALL SELECT 'AI操作', COUNT(*) FROM cook.AiAction
+UNION ALL SELECT '打卡', COUNT(*) FROM cook.CheckIn UNION ALL SELECT '组合', COUNT(*) FROM cook.Combo
+UNION ALL SELECT '收藏', COUNT(*) FROM cook.Favorite UNION ALL SELECT '自建菜谱', COUNT(*) FROM cook.Recipe WHERE origin='user';"
+# 落在哪些家庭（看冰箱最直观）：
+docker exec cook-mysql-1 mysql -uroot -p"$PW" --default-character-set=utf8mb4 -t -e "
+SELECT f.name 家, COUNT(*) 条 FROM cook.FridgeItem i JOIN cook.Family f ON f.id=i.familyId GROUP BY f.id;"
+```
+
+**结论（2026-10-13 清点）**：213 家庭 / 487 账号 / 496 点单 / 350 餐次 / 83 冰箱 / 168 条 AI 操作 / 62 打卡 / 10 组合 / 17 收藏 / 1 道自建菜谱。**全部落在脚本与浏览器实证自建的家庭里**（脚本：`AI 验收家` / `点单验收家` / `冰箱验收之家` / `组合验收家` / `最爱验收家`；浏览器：`小满一家`、账号 `uimama87722824`/`uibaba87722824`、`uimama87756154`/`uibaba87756154`——后者的 6 条冰箱与那道「外婆的红烧肉」就是浏览器实证留下的），**唯一非测试账号 `mama_20261012`（小艾的家）名下一条没有**。所有查询都按 `familyId` 隔离，正常登录看不到这些，放着不影响使用，只影响开发库体积。清理属**不可逆操作**，须用户明确授权后再动。
