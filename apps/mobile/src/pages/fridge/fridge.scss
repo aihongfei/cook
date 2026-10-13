@@ -93,9 +93,9 @@
 /* ---- 冰箱主体（还没做，所以是"将来的样子"：虚线弱化 + 明说还没做） ---- */
 
 .stock {
-  background: #f7efe1;
-  border-style: dashed;
-  box-shadow: none;
+  /* 真数据之后它不再是"骨架"：实底实线 + 阴影，与其它卡片同一套语汇
+     （改前是虚线 + 无阴影，那是 D-040 用来表达"还没做"的写法） */
+  background: var(--color-paper);
 }
 
 .stock__head {
@@ -110,17 +110,54 @@
   color: #6e3a1c;
 }
 
-.stock__tag {
-  padding: 2px 8px;
-  font-size: 10.5px;
-  color: var(--color-ink-3);
-  background: rgb(120 100 80 / 10%);
-  border: 1px solid #cbb69c;
+/* 录入入口：这一块的唯一写操作，就放在它的标题上 */
+.stock__add {
+  padding: 4px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: #fff;
+  cursor: pointer;
+  background: var(--color-brand);
+  border: 0;
   border-radius: 999px;
 }
 
-/* 四个存放区（F6-04）。空槽里写的是"食材会列在这里"——说明这块是骨架，
- * 不是"这里没有食材"（那会让人以为冰箱是空的）。 */
+.stock__add:active {
+  opacity: 0.85;
+}
+
+.stock__status-line {
+  padding: 6px 0;
+}
+
+.stock__scope {
+  margin: 8px 0 0;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-2);
+  background: rgb(224 123 57 / 7%);
+  border-radius: 10px;
+}
+
+/* 有临期时的那一句总结（F6-02）：回答"有没有要先吃的" */
+.stock__soon-summary {
+  margin: 9px 0 0;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: #a8542a;
+  background: rgb(224 123 57 / 10%);
+  border-radius: 10px;
+}
+
+.stock__empty {
+  margin: 9px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+/* 四个存放区（F6-04）：两列格子，每格列出该区的食材 */
 .stock__zones {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -131,16 +168,27 @@
 .stock__zone {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 11px 12px;
+  gap: 4px;
+  padding: 10px 11px;
   background: rgb(255 255 255 / 55%);
-  border: 1px dashed #cbb69c;
+  border: 1px solid var(--color-line);
   border-radius: var(--radius-tile);
 }
 
 .stock__zone-name {
+  display: flex;
+  gap: 5px;
+  align-items: center;
   font-size: 13px;
   color: var(--color-ink-2);
+}
+
+.stock__zone-count {
+  padding: 0 5px;
+  font-size: 10px;
+  color: #fff;
+  background: var(--color-brand);
+  border-radius: 999px;
 }
 
 .stock__zone-slot {
@@ -148,14 +196,315 @@
   color: var(--color-ink-3);
 }
 
-.stock__text {
-  margin: 11px 0 0;
-  font-size: 11.5px;
-  line-height: 1.75;
+.stock__hint {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+/* 一样食材（F6-01）：图 + 名字 + 数量 + 保质期。整行可点（进编辑） */
+.fitem-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fitem__main {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 5px 4px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: 10px;
+}
+
+.fitem__main:active {
+  background: rgb(224 123 57 / 8%);
+}
+
+.fitem__pic {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+
+.fitem__pic img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* 没有对应图的食材（用户自己打的字）：中性占位，不假装知道那是什么 */
+.fitem__pic-none {
+  font-size: 18px;
+  opacity: 0.45;
+}
+
+.fitem__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.fitem__name {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 13px;
+  color: var(--color-ink);
+}
+
+.fitem__amount {
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.fitem__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--color-ink-3);
+}
+
+/* 临期那句要显眼（这是这一行最该看见的），其它照旧 */
+.fitem__expiry.is-attention {
+  color: #c4552a;
+}
+
+.fitem__note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 记一样食材 / 改一样（F6-03 手动录入） ---------- */
+
+.fridge-sheet__search {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.fridge-sheet__input {
+  width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--color-ink);
+  background: var(--color-cream-2);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+}
+
+.fridge-sheet__input:focus-visible {
+  outline: none;
+  border-color: var(--color-focus-line);
+  box-shadow: var(--shadow-focus);
+}
+
+/*
+ * 常用食材（48 样，带图）。**这里必须是可滚的**：见下面规则里的说明。
+ */
+.fridge-sheet__presets {
+  /*
+   * 常用食材（48 样，带图）。**这里必须是可滚的**：
+   * 48 样铺开会把下面的"名字/数量/保质期"顶到屏幕外，而"点一下就进"的便利
+   * 只在看得到目标时才成立——所以给它上限、让它自己滚。
+   *
+   * ⚠️ 但**不能定死高度**（2026-10-13 用户报"上面直接超出屏幕了"后改的）：
+   * 抽屉现在会按 88vh 封顶，定死 232px 的话小屏上"滚完预设区 + 下面几个输入框"
+   * 就超过可用高度，输入框又被顶出去。改成可收缩：最少留一行半（108px），
+   * 最多 232px，让位给下面的表单。
+   */
+  flex: 1 1 auto;
+  min-height: 108px;
+  max-height: 232px;
+  padding-right: 2px;
+  margin-bottom: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.fridge-sheet__group + .fridge-sheet__group {
+  margin-top: 10px;
+}
+
+.fridge-sheet__group-name {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.fridge-sheet__grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 7px;
+}
+
+.fridge-sheet__preset {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  padding: 7px 4px 6px;
+  font: inherit;
+  cursor: pointer;
+  background: rgb(255 255 255 / 70%);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-tile);
+}
+
+.fridge-sheet__preset.is-active {
+  background: rgb(224 123 57 / 12%);
+  border-color: var(--color-brand);
+}
+
+.fridge-sheet__preset:active {
+  transform: scale(0.97);
+}
+
+.fridge-sheet__preset-pic {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+}
+
+.fridge-sheet__preset-name {
+  font-size: 11px;
+  color: var(--color-ink);
+}
+
+.fridge-sheet__no-match {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.fridge-sheet__group {
+  display: block;
+  margin-bottom: 11px;
+}
+
+.fridge-sheet__label {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 6px;
+  font-size: 12px;
   color: var(--color-ink-2);
 }
 
-.stock__text--dim {
-  margin-top: 6px;
+.fridge-sheet__label-hint {
+  font-size: 10.5px;
   color: var(--color-ink-3);
+}
+
+.fridge-sheet__name-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 名字旁边的小图：认出来就出图，用户一眼确认"记的是我以为的那个东西" */
+.fridge-sheet__name-pic {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+.fridge-sheet__name-pic--none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  opacity: 0.45;
+}
+
+.fridge-sheet__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.fridge-sheet__choice {
+  padding: 6px 13px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  background: var(--color-cream-2);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.fridge-sheet__choice.is-active {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+.fridge-sheet__expiry-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.fridge-sheet__input--date {
+  flex: 1 1 auto;
+}
+
+.fridge-sheet__clear {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+  background: none;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.fridge-sheet__actions {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+/* 「拿出来了」是删一条：放左边、样式弱一点（它不是这条流程的主动作） */
+.fridge-sheet__drop {
+  flex: 0 0 auto;
+  padding: 9px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  color: #a8542a;
+  cursor: pointer;
+  background: none;
+  border: 1px solid #e2b48c;
+  border-radius: 999px;
+}
+
+.fridge-sheet__drop:disabled {
+  opacity: 0.55;
+}
+
+.fridge-sheet__submit {
+  flex: 1 1 auto;
 }

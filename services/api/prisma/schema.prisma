@@ -45,6 +45,8 @@ model User {
   confirmedMeals MealOrder[]
   /// 这个账号收藏的菜（M1 / F1-09）
   favorites      Favorite[]
+  /// 这个账号放进冰箱的食材（M6 / F6-01）
+  fridgeItems    FridgeItem[]
 
   @@index([createdAt])
 }
@@ -65,21 +67,23 @@ model PasswordReset {
 
 /// 家庭：一人创建，其他人凭六位邀请码加入（D-021）。
 model Family {
-  id         String         @id @default(cuid())
-  name       String         @db.VarChar(32)
+  id          String         @id @default(cuid())
+  name        String         @db.VarChar(32)
   /// 六位邀请码，字符集去掉了易混的 I/O/0/1；长期有效，掌勺人可重置（重置即旧码失效）
-  inviteCode String         @unique @db.VarChar(8)
+  inviteCode  String         @unique @db.VarChar(8)
   /// 家庭级共享开关（F2-07）：关掉后家庭成员之间不互相可见（M3 起由各功能读取）
-  shared     Boolean        @default(true)
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
-  members    FamilyMember[]
+  shared      Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  members     FamilyMember[]
   /// 这一家的点单（M3）
-  mealOrders MealOrder[]
+  mealOrders  MealOrder[]
   /// 这一家的打卡照片（M9 / F9-03）
-  checkIns   CheckIn[]
+  checkIns    CheckIn[]
   /// 这一家的常用组合（M4 / F4-04）
-  combos     Combo[]
+  combos      Combo[]
+  /// 这一家的冰箱食材（M6 / F6-01）
+  fridgeItems FridgeItem[]
 
   @@index([createdAt])
 }
@@ -189,26 +193,26 @@ model Favorite {
 /// 一餐（F3-01/02/04）：**按「家庭 + 日期 + 餐次」聚合**，家人各自往里点菜，状态是整餐的（D-022）。
 /// 一张卡 = 一个 MealOrder；mealKey 是它的稳定标识（家庭内唯一），前端用它做路由与流转。
 model MealOrder {
-  id        String      @id @default(cuid())
-  familyId  String
-  family    Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  id            String      @id @default(cuid())
+  familyId      String
+  family        Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
   /// 就餐日期（只取日期部分，本地时区由写入方归一）
-  mealDate  DateTime    @db.Date
-  meal      MealSlot
-  status    OrderStatus @default(PENDING)
+  mealDate      DateTime    @db.Date
+  meal          MealSlot
+  status        OrderStatus @default(PENDING)
   /// 就餐人数（M4 / F4-05）：含没点菜只吃饭的家人，由掌勺人/帮厨设定；null = 还没定
-  dinerCount Int?
+  dinerCount    Int?
   /// 谁把这一版菜单定下来的（M4 / F4-05 的"确认留痕"）+ 什么时候；null = 还在收集中。
   /// 取消、或取消后重新加菜（整餐拉回 PENDING）时清空：上一版菜单不算数了，"谁定的"也没意义。
   /// User 侧用 SetNull：人退出家庭/注销不该让这一餐查不出来。
   confirmedById String?
-  confirmedBy   User?     @relation(fields: [confirmedById], references: [id], onDelete: SetNull)
+  confirmedBy   User?       @relation(fields: [confirmedById], references: [id], onDelete: SetNull)
   confirmedAt   DateTime?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  items     OrderItem[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  items         OrderItem[]
   /// 这一餐的成品照（M9 / F9-08）
-  checkIns  CheckIn[]
+  checkIns      CheckIn[]
 
   /// 同一餐只有一条：并发的两次点菜不会各建一餐
   @@unique([familyId, mealDate, meal])
@@ -295,19 +299,19 @@ model CheckIn {
 /// 归属是**家庭**而不是个人：组合是家里人共用的（妈妈组的"周末硬菜"爸爸也能用），
 /// 与冰箱、菜单同一层可见性；创建者记录下来，用于"谁加的"与后续按人清理。
 model Combo {
-  id        String        @id @default(cuid())
-  familyId  String
-  family    Family        @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  id          String      @id @default(cuid())
+  familyId    String
+  family      Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
   /// 组这个组合的人（记录，不限制别人使用）
   createdById String
-  createdBy User          @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdBy   User        @relation(fields: [createdById], references: [id], onDelete: Cascade)
   /// 组合名，如「快手三菜一汤」
-  name      String        @db.VarChar(24)
+  name        String      @db.VarChar(24)
   /// 一句话说明（可空），如「工作日的晚上」
-  note      String?       @db.VarChar(60)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  items     ComboItem[]
+  note        String?     @db.VarChar(60)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  items       ComboItem[]
 
   /// 同一家不重名：重名会让"一键加入"变成一道选择题，而组合本身就该是记得住的那几个
   @@unique([familyId, name])
@@ -331,3 +335,43 @@ model ComboItem {
   @@unique([comboId, recipeId])
   @@index([comboId, position])
 }
+
+/// 冰箱里的一件食材（M6 / F6-01）。形态见 D-049：录入 = 手动 + 拍照（拍照那半待多模态模型）。
+///
+/// 为什么不与"采购清单"共用一张表：两者是**不同时刻的同一件事**——采购清单是"要去买什么"
+/// （从菜单推出来的建议，会随菜单变），冰箱是"家里确实有什么"（人放进去的事实，只由人改）。
+/// 混在一张表里，菜单一变就会把用户确认过的库存改掉，那是数据损坏而不是同步。
+///
+/// 归属是**家庭**（家里人共用一台冰箱），记 `addedById` 用于"谁放的"与后续按人清理。
+/// 四区（F6-04）与保质期（F6-05）就是 F17-02「3D 冰箱预览」要的数据底座（见 D-049）。
+model FridgeItem {
+  id        String @id @default(cuid())
+  familyId  String
+  family    Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  /// 放进去的人（拍照识别批量入库时也是它）
+  addedById String
+  addedBy   User   @relation(fields: [addedById], references: [id], onDelete: Cascade)
+
+  /// 食材名（如"鸡蛋"）。同一家里同名同区只留一条——见下面的唯一约束
+  name      String    @db.VarChar(40)
+  /// 数量与单位。可空：很多食材就是"有一点"，逼人填数字会让人干脆不录
+  amount    String?   @db.VarChar(24)
+  /// 存放位置（F6-04）。用四档固定值而不是自由文本：3D 预览要按它摆位（F17-02）
+  zone      String    @default("冷藏") @db.VarChar(12)
+  /// 保质期（F6-05）。**只到日**，且可空——不是每样食材都有明确保质期
+  expiresOn DateTime? @db.Date
+  /// 一句备注（"给奶奶买的"、"开口了要先吃"）
+  note      String?   @db.VarChar(60)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  /// 同一家庭、同一存放区里**同名只留一条**：冰箱里"两盒鸡蛋"应该是改数量（或写备注），
+  /// 而不是两条同名记录——否则概览的件数会虚高、按名匹配做菜（F5-04）也要去重
+  @@unique([familyId, zone, name])
+  /// 列表按分区取、按保质期排（今日先吃要能走索引）
+  @@index([familyId, zone])
+  @@index([familyId, expiresOn])
+}
+
+/// 冰箱的"存放区"是固定四档（F6-04），不建表：它是由 3D 预览的摆位与人的直觉共同定死的，
+/// 允许自定义会让"这盒牛奶在哪儿"变成一道需要回忆的选择题。

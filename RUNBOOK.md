@@ -1905,3 +1905,75 @@ pnpm --dir apps/mobile exec tsc -b; echo "exit=$?"             # exit 2（2 条�
 ### 回归测试
 
 **新增 1 条**（`recipes.test.tsx` 的「标题带」组）：读 `recipes.scss`、剥注释后断言 `h1` 的 `margin` 以 `0` 开头。**反证（1 组）**：改回 `12px` → 精确变红；恢复后 9/9。
+
+## R-041 冰箱库存（M6：F6-01~F6-05）与底部抽屉的封顶 + 拖拽（D-050 / D-051）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：
+
+- **后端（新模块）**：`prisma/schema.prisma` 加 `FridgeItem`（+ `Family`/`User` 的反向关系）+ 迁移 `20261013034902_fridge_items`；新增 `src/modules/fridge/`（`fridge.rules.ts` / `fridge.service.ts` / `fridge.controller.ts` / `fridge.module.ts`）并挂进 `app.module.ts`；`tests/fridge.rules.test.ts`；`scripts/verify-fridge-http.cjs` + `package.json` 的 `test:http:fridge`。
+- **前端**：新增 `api/fridge.ts`、`pages/fridge/ingredients.ts`（48 样预设）、`pages/fridge/components/FridgeStock.tsx`、`components/FridgeItemSheet.tsx`、`public/img/ingredients/`（48 张 PNG + README）；`FridgePage.tsx` 把原来的骨架整段换成真实库存；`pages/fridge/fridge.scss`。
+- **抽屉（`components/ui/BottomSheet.tsx` + `ui.scss`）**：面板 `max-height: 88vh` + 新增 `.sheet__shell` 外壳（标题固定、内容自滚）；新增跟随手指下拖关闭（触摸与鼠标两入口共用一套判定）；拖关收尾**不清 transform**，改 `visibility: hidden`；外壳 ref 换成 `useCallback` 稳定身份。
+
+### 怎么验
+
+```bash
+# 后端
+cd services/api && pnpm run test; echo "exit=$?"            # 195/195
+cd services/api && pnpm exec tsc --noEmit; echo "exit=$?"   # exit 0
+docker compose build api && docker compose up -d --force-recreate api
+# 容器里必须是刚建的镜像，且镜像里要有本轮代码的特征串（R-030 的教训：只看 "构建完成" 不算）
+docker inspect --format '{{.Image}}' "$(docker compose ps -q api)"
+docker images --no-trunc --format '{{.ID}} {{.Repository}}' | grep -m1 cook-api
+docker exec "$(docker compose ps -q api)" sh -lc 'grep -rl "已经记了一条" dist/ | head -3'
+docker compose exec -T api node scripts/verify-fridge-http.cjs; echo "exit=$?"   # 33/33
+
+# 前端
+pnpm --dir apps/mobile test; echo "exit=$?"                 # 321/321
+pnpm --dir apps/mobile exec tsc -b; echo "exit=$?"          # exit 0（输出里仍有 2 条既有错误：CombosPage.test / PrepPage.test）
+pnpm --dir apps/mobile run dev                              # http://127.0.0.1:5173/fridge
+```
+
+浏览器（391×844，也可 360×640 / 320×568）：
+
+1. 冰箱页「＋ 记一样」→ 抽屉应**完整在屏内**（量 `.adm-popup-body` 的 `top >= 0`），内容区可滚（`.sheet__body` 的 `scrollHeight > clientHeight`），滚到底能点到「记进冰箱」；
+2. 抽屉内 48 张预设图**都要真的加载出来**（`img.complete && naturalWidth > 0`，不看 DOM 有没有 `<img>`）；
+3. 点「鸡蛋」→ 名字/一盒/冷藏自动填好、**不提交**；点「今天」→ 日期填成今天；提交后列表里出该条并带红色「今天到期」；
+4. 拖抽屉往下：小幅拖（<110px）弹回、大幅拖（>110px）关闭；松手那一刻面板**不能露回顶部**。
+
+### 实测结果（2026-10-13）
+
+| 项 | 结果 |
+| --- | --- |
+| 后端单测 / 类型 | **195/195**；`tsc --noEmit` exit 0 |
+| 镜像核实 | 容器镜像 ID == latest 镜像 ID；镜像内 `grep` 到本轮特征串（`dist/modules/fridge/fridge.service.js`） |
+| HTTP 验收 | **33/33**：401/404、空板子、按区录入（含数量/保质期/备注）、重复录入 409、同名不同区允许、坏日期/坏区/空名 400、编辑（换区 + 清空数量成 null）、改名撞车 409、过期与临期标签、概览数字、`soon` 排序、共享关掉对他人的条目 403、删除、跨家庭隔离 |
+| 前端全量 | **321/321**（冰箱页 17 条 + 录入抽屉 9 条 + 抽屉 6 条新增） |
+| 前端类型 | `tsc -b` exit 0；仅 2 条既有错误（与本轮无关） |
+| 48 张图 | 浏览器实测 48/48 **全部加载**（`naturalWidth` 非 0），单张 152×152、共 516KB |
+| 抽屉封顶（三档屏） | 面板 top 101 / 77 / 68（屏高 844 / 640 / 568）——**全部在屏内**；内容可滚；滚到底「记进冰箱」底边 824 / 620 / 548，都在屏内 |
+| 拖拽时间线（浏览器） | `translateY(80px)` → `translateY(160px)` →（松手）`translateY(100%)` → 500ms 后 `visibility: hidden`——**没有回到顶部那一下** |
+| 冰箱完整流程 | 点「鸡蛋」填好 名字/一盒/冷藏 → 「今天」= 2026-10-13 → 列表出「鸡蛋 一盒 今天到期」（带红标、概览「有 1 样该先吃」）→ 点行改到「冷冻」并改数量「半盒」→ 改成过去日期显示「过期 2 天」→ 「拿出来了」删除后回到「冰箱还是空的」 |
+| 搜索 | 「番茄」命中「西红柿」（别名）、「豆腐」按名命中、搜不到时说「常用食材里没有「…」——直接写在下面就行，一样的。」 |
+| 反证（抽屉） | **9 组各自精确变红**：高度不封顶 / 外壳去掉 `min-height: 0` / 内容区不滚 / 拖多远都不关 / 不跟手（只在松手写一次）/ 去掉起手阈值 / 横划也抢 / 上划也抢 / 输入框里也拖；另加"回到先 `reset()` 再 `close()` 的老写法"（红在 `expected { visibility: '' } to deeply equal { visibility: 'hidden' }`） |
+| 反证（冰箱） | **11 组各自精确变红**：空态那句话、每行预设图、`is-attention` 标记、未记保质期样数、别名命中、按别名搜索、空名可提交、保质期默认填、快捷按钮全按今天、成功不收起抽屉、失败也收起抽屉 |
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| **每个冰箱请求都 400**（`property name should not exist`） | 控制器用了 class DTO，而全局 `ValidationPipe` 是 `whitelist + forbidNonWhitelisted`；**没有 class-validator 装饰器的 class 会被整类剥空**，于是任何字段都"不该存在" | 本项目既有约定：控制器用**纯 interface**，校验写在 `*.rules.ts`；控制器里留了 ⚠️ 注释防复发 |
+| 保质期**差一天**（存 10-15、读回来是今天） | 该列是 MySQL `DATE`（存 UTC 零点），而日期是本地时区构造的 | 统一用 `orders.rules` 的 `dateOnly`（`Date.UTC`）写、`dateKey`（`getUTC*`）读；`daysUntil` 也改成与"服务器本地日历今天"比 |
+| 「今日先吃」里「过期 1 天」排在「过期 3 天」前面 | `soon` 直接用了过滤顺序，没排序 | 复用同一个 `order` 比较器（临期优先 → 有日期的按日期 → 没日期的 → 名字） |
+| **抽屉内容顶出屏幕**（882px 内容 / 844px 屏） | 面板贴底放、**没有任何高度上限**，内容多高就顶多高（实测 `top` 为负） | `max-height: 88vh` + `.sheet__shell`（`min-height: 0`）+ `.sheet__body` 自滚 |
+| 拖拽**完全没反应**，控制台无报错 | 抽屉内容是**弹簧跑起来之后**才挂到 DOM 上的，`useEffect` 里 `shellRef.current` 还是 null，而依赖 `shown` 不再变 → **监听永远挂不上**（R-031 同类） | 改用 **ref 回调**挂载手势（节点挂上/卸下各一次） |
+| 松手后「**瞬间回到最高点再收回去**」 | 两个位移来源打架：`reset()` 清掉 inline 像素值的瞬间，弹簧那 **0%（=完全打开）** 的百分比值立刻生效 | 拖关收尾**不清 transform**，改 `visibility: hidden` 再走正常关闭 |
+| 上面修完**还是**会弹回 | **内联箭头 ref** 在每次重渲染时被 React 当作新 ref：卸一次、挂一次，清理里的 `reset()` 又把面板露出来（`close()` 自己就触发重渲染） | 外壳 ref 换成 `useCallback` 稳定身份；并把"拖关不清样式"写成显式豁免 |
+| 反证时"撤掉一层防护"却仍然绿 | 两层防护互相遮蔽（稳定 ref 与"不清样式"任一都能挡住症状），只撤一层看不出问题 | 反证要**撤到只剩一层**再验，或者干脆换回"整段老写法"验；最终用"回到先 reset 再 close"这组验到真红 |
+
+### 回归测试
+
+**前端新增 15 条**：`FridgePage.test.tsx` 8 条（空态与入口位置、四区与空格、顺序照接口、过期与临期分开、全过期不说"0 样快到期"、未记保质期样数、内置图 vs 中性占位、共享关掉的口径）+ 改造 2 条旧骨架断言为真数据断言；`FridgeItemSheet.test.tsx` 9 条（48 张图与名字一一对应、点预设填好不提交、别名与中性占位、搜名字/别名/搜不到、空名不能提交、保质期快捷且不默认填、提交的载荷与收尾、409 透传、编辑走 PATCH 与删除）；`bottom-sheet.test.tsx` 6 条（高度封顶、内容区自滚、拖够远关闭、拖不够弹回、三件"不抢"、输入框里不拖）。
+
+**后端新增 10 条**（`fridge.rules.test.ts`）：四区、名字/数量/备注解析、保质期解析（含 2026-02-31 拒绝）、日历天算术、三种状态与文案、attention 边界、`toView`。
+
+**反证**：冰箱 11 组、抽屉 9 组，逐组只让对应断言红；另对"拖关弹回"单独验了老写法会红。

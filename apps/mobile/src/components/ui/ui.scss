@@ -266,6 +266,18 @@
 }
 
 /* 底部抽屉（BottomSheet 封装 antd-mobile Popup） */
+/*
+ * 外壳（标题 + 内容）：面板高度封顶（见 BottomSheet 的 ⚠️ ①）后，这里撑满剩余高度并允许收缩
+ * （`min-height: 0`），滚动条才落在内容区而不是整块面板——标题因此留在原地不跟着滚，
+ * 长表单（冰箱录入那种 882px）也不会再把抽屉顶出屏幕。
+ */
+.sheet__shell {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .sheet__title {
   margin-bottom: 12px;
   font-size: 17px;
@@ -273,6 +285,12 @@
 }
 
 .sheet__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* 滚到底/到顶时别把滚动传给下面的页面（传出去很像"抽屉被拖歪了"） */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   font-size: 13px;
   line-height: 1.8;
   color: var(--color-ink-2);

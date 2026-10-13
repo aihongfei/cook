@@ -3,6 +3,7 @@ import { useFamily } from '@/api/family'
 import { useShoppingList } from '@/api/shopping'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
+import FridgeStock from './components/FridgeStock'
 import '../shared.scss'
 import './fridge.scss'
 
@@ -72,31 +73,7 @@ export default function FridgePage() {
           <p className="fridge-scope">家里关了共享，采购清单只按你自己参与的餐算。</p>
         )}
 
-        <section className="card stock">
-          <div className="stock__head">
-            <span className="stock__title">冰箱里有什么</span>
-            <span className="stock__tag">还没做</span>
-          </div>
-
-          {/* 将来会长这样：四个存放区各一格（F6-04）。现在**不填数字**——
-              库存数据模型（M6）还没做，写死的数会被当真 */}
-          <div className="stock__zones">
-            {['常温', '保鲜', '冷藏', '冷冻'].map((zone) => (
-              <div className="stock__zone" key={zone}>
-                <span className="stock__zone-name">{zone}</span>
-                <span className="stock__zone-slot">食材会列在这里</span>
-              </div>
-            ))}
-          </div>
-
-          <p className="stock__text">
-            做出来之后：每种食材的数量与保质期、快到期的先进「今日先吃」；
-            菜谱里的配料与冰箱里的存货对上之后，采购清单就只算**缺的那几样**。
-          </p>
-          <p className="stock__text stock__text--dim">
-            拍照识别入库（拍一张冰箱自动列食材）是 AI 那一摊的事，要等配好多模态模型。
-          </p>
-        </section>
+        <FridgeStock enabled={Boolean(family.data)} />
       </div>
     </Page>
   )
