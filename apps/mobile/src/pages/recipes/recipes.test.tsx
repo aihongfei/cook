@@ -1,8 +1,11 @@
+/// <reference types="node" />
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AxiosError, type AxiosRequestConfig } from 'axios'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import type { RecipeSummary } from '@/api/recipes'
@@ -179,5 +182,23 @@ describe('recipe browsing states', () => {
     for (const text of ['鸡蛋', '两个', '先打散鸡蛋。', '小火收汁。', 'HowToCook', 'Unlicense', 'abc123', '暂无视频，先跟着文字步骤做吧']) expect(screen.getByText(text)).toBeTruthy()
     expect(screen.getByRole('link', { name: '查看原始菜谱 ↗' }).getAttribute('href')).toBe('https://example.com/recipe')
     expect(document.querySelector('video')).toBeNull()
+  })
+})
+
+/*
+ * 标题带的上间距要和别的页面一致（用户 2026-10-13：「菜谱那页的标题距离上方有点大」）。
+ *
+ * 实测过改前：`h1` 是 `margin: 12px 0 8px`，而它紧跟在 `.page-back`（「← 厨房」）后面——
+ * 其它页面的 `.ptitle` 到返回链接是 0px，只有本页 12px。所以这条守 `h1` 的**上边距为 0**。
+ * jsdom 算不了布局，守规则（与 corner-art.test / DiscoverPage.test 同一手法）。
+ */
+describe('标题带', () => {
+  it('h1 的上边距为 0，与其它页面的标题位置一致', () => {
+    const css = readFileSync(join(__dirname, 'recipes.scss'), 'utf8')
+    const strip = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, '')
+    const h1 = strip(css).match(/\bh1\s*\{[^}]*\}/)?.[0] ?? ''
+    expect(h1, '没读到 .recipes-heading 里的 h1 规则').toBeTruthy()
+    expect(h1, 'h1 的上边距必须是 0（否则标题离返回链接空出 12px，与别的页面不一致）')
+      .toMatch(/margin\s*:\s*0\s/)
   })
 })

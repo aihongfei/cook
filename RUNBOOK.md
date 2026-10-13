@@ -1870,3 +1870,38 @@ pnpm --dir apps/mobile exec tsc -b; echo "exit=$?"     # exit 2（既有错误�
 **新增 8 条**：`DiscoverPage.test.tsx` 1 条（两按钮边框宽度一致，且「AI 帮你想」只准改颜色、「摇一道」不得自带边框）；`ShoppingPage.test.tsx` 2 条（自绘四要素：`appearance: none` + 圆角 + SVG 对勾 + `:focus-visible`；真 `<input type="checkbox">` 仍在且勾选后父级带 `is-packed`）；`FavoritesPage.test.tsx` 1 条（摘要/网格各带 `margin-inline`、容器**不得**加横向 padding）；`HistoryPage.test.tsx` 1 条（三个裸块带 `margin-inline`、容器不得加 padding）+ 三个文件的导入与三斜线引用。
 
 **反证（4 组）**：见上表——每组只让对应那一条红。
+
+## R-040 菜谱小书标题上间距统一（D-048）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：`apps/mobile/src/pages/recipes/recipes.scss` 的 `.recipes-heading h1`——`margin: 12px 0 8px` → `margin: 0 0 8px`。一个值。**其余样式、后端一行未改。**
+
+### 怎么验
+
+```bash
+pnpm --dir apps/mobile exec vitest run src/pages/recipes/recipes.test.tsx; echo "exit=$?"   # 9/9
+pnpm --dir apps/mobile test; echo "exit=$?"                    # 299/299
+pnpm --dir apps/mobile exec tsc -b; echo "exit=$?"             # exit 2（2 条既有错误）
+```
+
+浏览器（391×844）：`/recipes` 首屏，量「`.page-back` 底边 → `h1` 顶边」应为 **0**（改前 12）。
+
+### 实测结果（2026-10-13）
+
+| 项 | 结果 |
+| --- | --- |
+| 改前（各页对照） | 菜谱页 **12px**；收藏页 / 点单历史 / 备菜计划 / 常用组合均为 **0px**（`h1` 是 `.recipes-heading` 里返回链接的兄弟） |
+| 改后 | 菜谱页 **0px**；`h1` 顶边 y=53.5（改前 71.5，正是那 12px）；副标题与 h1 的间距仍 8px（未动） |
+| 新增断言 | **1 条**：`.recipes-heading h1` 的上边距必须为 0（读 scss、先剥注释再匹配） |
+| 全量前端 | **299/299** |
+| 前端类型 | `tsc -b` exit 2、**2 条**既有错误（`CombosPage.test` / `PrepPage.test`），本轮未新增 |
+| 反证 | 把 `margin` 改回 `12px 0 8px` → 那条红：`expected 'h1 { margin: 12px 0 8px; …' to match /margin\s*:\s*0\s/`；恢复后 9/9 |
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| 第一轮在 1280×720 的桌面视口下量，看不出这 12px 的对比 | 桌面视口宽（`.recipes-page` 有 `max-width: 760px`），y 坐标与手机不同，且没有"别的页面"作参照 | 切到 391×844（与用户设备一致）并**逐页取同一组 y 坐标对照**，才定位到"只有本页多 12px" |
+
+### 回归测试
+
+**新增 1 条**（`recipes.test.tsx` 的「标题带」组）：读 `recipes.scss`、剥注释后断言 `h1` 的 `margin` 以 `0` 开头。**反证（1 组）**：改回 `12px` → 精确变红；恢复后 9/9。

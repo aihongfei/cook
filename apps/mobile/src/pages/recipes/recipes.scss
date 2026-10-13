@@ -19,7 +19,13 @@
   /* 给右上角插画留出横向位置（标题是 h1，比 .ptitle 大，留白按它算） */
   padding-right: 88px;
 
-  h1 { margin: 12px 0 8px; font-size: 27px; color: #6e3a1c; }
+  /*
+   * `h1` 的**上边距必须与别的页面一致（0）**（用户 2026-10-13：「菜谱那页的标题距离上方有点大」）。
+   * 原来写的是 `margin: 12px 0 8px`，而这条标题带里 `h1` 紧跟在 `.page-back`（「← 厨房」）后面；
+   * 其它页面这一处是 0（`.ptitle` 不带外边距），只有本页多出 12px——看着就是"标题离上面空了一截"。
+   * 实测「返回链接底边 → 标题顶边」：其它页 0px、本页 12px（改前）。
+   */
+  h1 { margin: 0 0 8px; font-size: 27px; color: #6e3a1c; }
   p { margin: 0 0 20px; font-size: 13px; color: var(--color-ink-3); }
 }
 
