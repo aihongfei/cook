@@ -3335,3 +3335,61 @@ await tab.setViewportSize({ width: 391, height: 420 })
 - **后端**：`ai.tools.ts`（8 个新工具常量 + 声明）、`ai.service.ts`（8 条执行分支 + 提示词三段 + 状态行 + 附件加载的 tolerant）、`ai.module.ts`（引 `DiscoverModule`/`CheckInsModule`/`ShoppingModule`）、`ai-attachment.service.ts`（`loadForModel` 改成返回 `{images, missing}` + `tolerant`）；
 - **前端**：`api/ai.ts`（`invalidateAfterAiWrite` 补 `'taste'`；流式那段的失败处理见 R-059）、`AiAssistantSheet.tsx`（失败留在对话里 + 「再试一次」）、`stores/ai-assistant-session.ts`（`rewindTo`）、`ai-assistant.rules.ts`（`failed`/`aborted` 不算空）、`BottomSheet.tsx`（`bodyClassName`）、`ui.scss`/`discover.scss`/`index.scss`、`AndroidManifest.xml`；
 - **脚本**：`ai-stub-upstream.cjs`（采购/口味/只读三支 + **改成取最后一条 user 消息**）、三个新验收脚本、`verify-ai-vision-http.cjs` 加第 ④ 组。
+
+### 六、装机复验（服务器版 APK，2026-10-14 补）
+
+**先把容器指回真网关**（三组脚本收工之后），再装新包：
+
+```bash
+# ① 确认容器不在 stub 上（R-042 那条检查，每次收工必做）
+ssh cook 'docker exec cook-api-1 printenv AI_API_BASE'   # https://opencode.ai/zen/go/v1 —— 不是 18990
+ssh cook 'docker exec cook-api-1 printenv AI_MODEL'      # deepseek-v4.1-flash
+lsof -nP -iTCP:18990 -sTCP:LISTEN                        # 本机应当没有进程监听
+
+# ② 装包（覆盖旧的、不含本轮修复的那个）
+adb install -r release/御膳-服务器版-20261014.apk
+adb shell monkey -p com.yushan.cook -c android.intent.category.LAUNCHER 1
+```
+
+**在模拟器里逐条验这五件事**：
+
+| 验什么 | 怎么做 | 实测结果 |
+|---|---|---|
+| **锁竖屏** | `adb shell settings put system user_rotation 1` 强制横屏 | 应用仍 1080×2400，`dumpsys` 里 `mRotation=ROTATION_0` |
+| **输入行不被键盘裁** | TAB 轮询到输入框（`mInputShown=true`） | 输入行/发送键/「新对话」整排在键盘之上完整可见 |
+| **非输入文字不可选中** | 900ms 长按 AI 回复气泡（`input swipe x y x y 900`） | 无任何选择手柄 |
+| **卡片不折行** | 滚到菜品卡，裁图量像素 | 「看做法 →」与「点这道」并排一行；胶囊宽 62px、文字宽 47px、左右各留 8px |
+| **AI 真读清单** | 应用内问 "what should I buy for my shopping list" | 答出今天晚餐三道菜推出的 **24 样**并按货架分组，与 `GET /shopping-list` 的 24 条一致 |
+
+**怎么在 WebView 里"点对地方"**（这一轮踩够了，下次直接照做）：
+
+- **`input tap` 的坐标不能照截图目测**。开发机读到的截图被缩放了 ~1.2×，我按目测坐标连点错五次（点在「忘了密码」上、点在建议气泡上、在输入框上方 340px 处空点）。要用坐标就必须**从裁图量**（`magick` 裁一块已知偏移的区域再看）。
+- **可靠做法是 `input keyevent 61`（TAB）**：在 WebView 控件间轮转焦点，每按一次读 `dumpsys input_method | grep mInputShown`，**变 `true` 就是焦点落到输入框了**，再 `input keyevent 66`（Enter）提交。登录页与 AI 输入框都是这么做成的。
+- **`input text` 打不出中文**（`java.lang.NullPointerException: Attempt to get length of null array`），中文输入只能人手动上；应用内验收要么用英文提问，要么另装 ADBKeyboard。
+- **键盘在不在会改坐标**：同一颗「说」按钮，键盘弹出时 y≈1037、收起后 y≈1698。**先固定键盘状态再取坐标**。
+- WebView 的 devtools 端口在 release 包里**不开**（`/json/list` 空），别指望用 CDP 直接操作 DOM。
+
+### 七、同一轮追加的卡片折行（「这块怎么换行了」/「看做法左侧的空白有点小」）
+
+用户在同一天追加报的界面问题，与上面四件事同轮交付（提交 `e19bf0e`）。
+
+**算清楚就不必猜**：菜品卡是**定宽 150px**（三列栅格的格子宽），底部两个胶囊各要 ~60px，减去那一行自己的左右内边距只剩 46px 可用，而「看做法 →」在 12px 字号下要约 47px——**差 1px，于是折行**。
+
+**修法是"从那一行内部借"，不是缩字号也不是加宽卡片**：
+
+```scss
+.dish-card__actions {
+  gap: 6px;            /* 8 → 6，借 2px */
+  padding: 0 9px 12px; /* 11 → 9，借 4px */
+}
+.dish-card__browse {
+  padding: 6px;        /* 左右各留 6px 文字余量 */
+  white-space: nowrap; /* 兜底：不许折 */
+}
+```
+
+**为什么不加宽卡片**：150px 是三列栅格的格子宽，改它整页跟着动（`D-053` 那轮定过这个尺寸）。**为什么不缩字号**：12px 已是可读下限。
+
+**第一版被用户当场否掉**：我先把胶囊内边距压到 `2px` 换来空间，用户说「**看做法左侧的空白有点小**」——那 4px 是文字与描边的呼吸位，不能拿。**结论：改布局要从"没有信息量的空隙"里借（行内边距、胶囊间距），不能从"有信息量的余量"里挤（文字边距、字号）。**
+
+**验证**：模拟器裁图量像素——胶囊宽 62px、文字宽 47px、左右各留 **8px**、单行显示；`kitchen.scss` 的注释里留了这段推算过程，下次改这张卡先看那段注释。
