@@ -17,6 +17,12 @@ const port = Number(process.argv[2] ?? 18990)
 const received = []
 
 const server = http.createServer((req, res) => {
+  // 验收脚本用它取"服务端到底发了什么"（只读，仅本机验收用）
+  if (req.url === '/__received' && req.method === 'GET') {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(received))
+    return
+  }
   if (req.url !== '/v1/chat/completions' || req.method !== 'POST') {
     res.writeHead(404).end()
     return
@@ -47,11 +53,26 @@ const server = http.createServer((req, res) => {
     const system = parsed.messages?.find((m) => m.role === 'system')?.content ?? ''
     const user = parsed.messages?.find((m) => m.role === 'user')?.content ?? ''
     const tools = parsed.tools ?? []
-    received.push({ model: parsed.model, hasAuth: Boolean(req.headers.authorization), system, user, tools: tools.map((t) => t.function?.name) })
+    received.push({
+      model: parsed.model,
+      hasAuth: Boolean(req.headers.authorization),
+      system,
+      user,
+      tools: tools.map((t) => t.function?.name),
+      /**
+       * 收到的结构化输出 schema 名（没有就 null）。
+       *
+       * 为什么要专门记这个：2026-10-13 出过一次真事故——server 对所有 `json: true` 的调用
+       * 统一发推荐用的 `PICKS_SCHEMA`，于是"提示词"那条路被强制返回 `{picks:[...]}`、
+       * 解析必然失败、前端静默回退到写死的那批。**只有从"发出去的请求"这一侧才能看到它**，
+       * 所以 stub 记下来、验收脚本断言它（单测比不了两份常量，那是假安慰——试过，改接线不会红）。
+       */
+      schemaName: parsed.response_format?.json_schema?.name ?? null,
+    })
     // 工具循环的第几轮：靠"消息里有没有 tool 结果"判断（服务端把工具结果回喂时才有 role=tool）
     const toolResults = parsed.messages?.filter((m) => m.role === 'tool') ?? []
     console.log(`[stub] model=${parsed.model} auth=${Boolean(req.headers.authorization)} 候选清单=${/id=/.test(system)} `
-      + `response_format=${parsed.response_format?.type ?? '无'} 工具=${tools.map((t) => t.function?.name).join(',') || '无'} `
+      + `response_format=${parsed.response_format?.type ?? '无'}(schema=${parsed.response_format?.json_schema?.name ?? '-'}) 工具=${tools.map((t) => t.function?.name).join(',') || '无'} `
       + `已回喂工具结果=${toolResults.length} 用户说=${user.slice(0, 40)}`)
 
     // 回包形状要跟真实网关一致：推荐那段**带一条编造的 id**，用来验证服务端会不会丢掉它。

@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common'
-import { PICKS_SCHEMA, type AiConfig, type ChatMessage } from './ai.rules'
+import type { AiConfig, ChatMessage } from './ai.rules'
 import type { ToolCall } from './ai.tools'
 
 /**
@@ -18,8 +18,15 @@ import type { ToolCall } from './ai.tools'
 export interface ChatRequest {
   messages: ChatMessage[]
   systemPrompt: string
-  /** 期望结构化输出时用（OpenAI 兼容的 response_format，见 PICKS_SCHEMA） */
-  json?: boolean
+  /**
+   * 期望结构化输出时用：传**这一条路自己的** `response_format`（OpenAI 兼容的 json_schema）。
+   *
+   * 刻意要求调用方显式给出而不是一个 `json: true` 布尔：曾经布尔为真时统一发推荐的
+   * `PICKS_SCHEMA`，于是"提示词"那条路被强制返回 `{picks:[...]}`、解析必然失败
+   * （见 PROMPTS_SCHEMA 的注释）。**用错 schema 的代价是功能静默失效**，
+   * 所以这里让它变成类型上必须交代的一件事。
+   */
+  jsonSchema?: unknown
   temperature?: number
   signal?: AbortSignal
 }
@@ -51,7 +58,7 @@ export async function chatJson(config: AiConfig, request: ChatRequest): Promise<
     stream: false,
     // 结构化输出：json_schema + strict（**不要用老的 json_object**——那个在本网关下会让模型
     // 把参数当正文回，见 rules 的 PICKS_SCHEMA 注释）
-    ...(structured ? { response_format: PICKS_SCHEMA } : {}),
+    ...(structured ? { response_format: request.jsonSchema } : {}),
   })
 
   // OpenCode ZenGo 这类 agentic 网关强制要 x-opencode-session，不然会 400。
@@ -70,7 +77,7 @@ export async function chatJson(config: AiConfig, request: ChatRequest): Promise<
   })
 
   try {
-    let structured = Boolean(request.json && config.sendJsonSchema)
+    let structured = Boolean(request.jsonSchema && config.sendJsonSchema)
     let response = await post(structured)
 
     // 网关对 response_format 的支持是**按后端路由**的：同一台网关有时回 200，有时 400。

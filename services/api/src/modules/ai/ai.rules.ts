@@ -64,6 +64,32 @@ export const PICKS_SCHEMA = {
 } as const
 
 /**
+ * 提示词（快问 / 示例问题）用的 JSON Schema。
+ *
+ * **必须是这一条路自己的 schema**：`chatJson` 原来对所有 `json: true` 的调用都发
+ * `PICKS_SCHEMA`（推荐用的 `{picks:[{id,reason}]}`，且 `strict` + `additionalProperties:false`）。
+ * 网关接受它时，模型被**强制**返回推荐形状——`hints`/`examples` 根本不在里面，于是
+ * `parsePrompts` 判失败、回 502、前端静默回退到写死的那批。
+ * 2026-10-13 用户报"快问还是写死的"，根因就是这里：**每次结构化请求都要带自己的 schema**。
+ */
+export const PROMPTS_SCHEMA = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'prompts',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        hints: { type: 'array', items: { type: 'string' } },
+        examples: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['hints', 'examples'],
+      additionalProperties: false,
+    },
+  },
+} as const
+
+/**
  * 从环境变量读配置。**没配就是没配**（返回 null），不猜、不给默认模型——
  * 赌一个默认值只会在将来某天悄悄替用户做一个他没同意的选择。
  *
@@ -116,22 +142,6 @@ export const AI_MESSAGES_MAX = 10
  * 一次要多于一次显示的量（一次显示 5 条快问 / 3 条示例）：前端的「换一批」是在这批里抽，
  * 不重新调模型——那按钮点一下要等十几秒的话，等于没了。
  */
-export const PROMPTS_SCHEMA = {
-  type: 'json_schema',
-  json_schema: {
-    name: 'prompts',
-    strict: true,
-    schema: {
-      type: 'object',
-      properties: {
-        hints: { type: 'array', items: { type: 'string' } },
-        examples: { type: 'array', items: { type: 'string' } },
-      },
-      required: ['hints', 'examples'],
-      additionalProperties: false,
-    },
-  },
-} as const
 
 /** 收回来的上限（多余的丢掉，不往界面上堆） */
 export const PROMPTS_HINTS_MAX = 18

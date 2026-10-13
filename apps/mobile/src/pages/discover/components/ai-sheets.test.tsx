@@ -276,7 +276,7 @@ it('没配 AI 时不请求生成快问（少一次注定 503 的往返）', asyn
   expect(post.mock.calls.filter(([url]) => url === '/ai/prompts')).toHaveLength(0)
 })
 
-it('「问 AI」的示例问题也走 AI 那批（两个入口共用一次生成）', async () => {
+it('「问 AI」的示例问题也走 AI 那批（两个入口共用一份生成）', async () => {
   const { post } = mockApi({ prompts: { hints: AI_HINTS, examples: AI_EXAMPLES } })
   renderSheet(<AiChatSheet visible onClose={() => {}} />)
 
@@ -285,8 +285,34 @@ it('「问 AI」的示例问题也走 AI 那批（两个入口共用一次生成
       [...document.querySelectorAll<HTMLButtonElement>('.ai__hint')].some((b) => AI_EXAMPLES.includes(b.textContent ?? '')),
     ).toBe(true),
   )
-  // 两个抽屉各挂一次，但同一个 queryKey 缓存住：所以「问 AI」这边不该再打一次
-  expect(post.mock.calls.filter(([url]) => url === '/ai/prompts').length).toBeLessThanOrEqual(1)
+  // 这一次挂载只发一次（同一个 queryKey；两个抽屉同时开着会合并成一次）。
+  // 「每次重新打开都重新生成」是另一条，见下一条用例
+  expect(post.mock.calls.filter(([url]) => url === '/ai/prompts')).toHaveLength(1)
+})
+
+it('每次打开都重新生成一批（用户 2026-10-12：「不然都是这几个推荐和问题」）', async () => {
+  const { post } = mockApi({ prompts: { hints: AI_HINTS, examples: AI_EXAMPLES } })
+  // 同一个 QueryClient 跨两次挂载：这才是"同一个用户重新打开抽屉"（缓存还在）
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  const promptsCalls = () => post.mock.calls.filter(([url]) => url === '/ai/prompts').length
+  const openDrawer = () =>
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AiSuggestSheet visible onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+  const first = openDrawer()
+  await waitFor(() => expect(promptsCalls()).toBe(1))
+  first.unmount()
+
+  // 重新打开 = 重新生成。给 `staleTime` 加回半小时这类"省额度"的缓存，这里就还是个 1 ——
+  // 第二次、第三次打开又是同一批，正是用户报的那个毛病
+  openDrawer()
+  await waitFor(() => expect(promptsCalls()).toBe(2))
 })
 
 it('推荐为空时说实话（不给"正在想"的假象），并指路去菜谱小书', async () => {

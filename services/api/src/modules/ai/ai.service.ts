@@ -5,6 +5,7 @@ import {
   AI_HINT_MAX, EXAMPLE_TEXT_MAX, HINT_TEXT_MAX, PROMPTS_EXAMPLES_MAX, PROMPTS_HINTS_MAX,
   SUGGEST_CANDIDATES, SUGGEST_MATCHES_MAX, SUGGEST_PICKS_MAX, SUGGEST_PICKS_MIN, AiReplyError,
   extractKeywords, formatCandidates, parseChatMessages, parseHint, parsePicks, parsePrompts, readAiConfig,
+  PICKS_SCHEMA, PROMPTS_SCHEMA,
   sampleList,
   type AiConfig, type AiPrompts, type CandidateDish, type ChatMessage, type SuggestedPick,
 } from './ai.rules'
@@ -95,7 +96,7 @@ export class AiService {
         systemPrompt,
         // 用 user 消息承载任务而不是塞进 system：模型对"最后一个 user 消息"的服从度最高
         messages: [{ role: 'user', content: hint || '今天吃什么好？' }],
-        json: true,
+        jsonSchema: PICKS_SCHEMA,
         temperature: 0.6,
         signal,
       },
@@ -146,7 +147,7 @@ export class AiService {
       {
         systemPrompt,
         messages: [{ role: 'user', content: '按上面的要求写一批。' }],
-        json: true,
+        jsonSchema: PROMPTS_SCHEMA,
         temperature: 0.95,
         signal,
       },

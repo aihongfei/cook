@@ -90,8 +90,14 @@ export function useAiStatus() {
  * 快问/示例问题（按家庭现生成）。**只在 AI 已配置且真的要用时请求**（`enabled`），
  * 失败也不重试——它只是入口处的引导语，拿不到就用写死的那份，不该让用户看见错误提示。
  *
- * `staleTime` 给半小时：它生成的是"这个家的画像"，不是每句话都要变的东西；
- * 抽屉每次打开都打一次上游既慢又白花额度。
+ * **每次打开都现要一批**（用户 2026-10-12：「可以每次点开都使用ai生成，不然都是这几个推荐和问题」）。
+ * `staleTime: 0` 让缓存只当"先垫着的那一份"：重挂载（=重新打开抽屉）必然再去生成一批；
+ * 生成要 8 秒左右，这期间界面用上一次那批，不空着也不闪兜底。两个抽屉同时开只发一次请求
+ * （同一个 queryKey，在途请求会合并）。
+ *
+ * `refetchOnWindowFocus` 关掉：移动端切出去再回来就会重新聚焦，那会在用户正要点的时候
+ * 把标签换掉——"刚要点的那个自己跑掉"，与 AiSuggestSheet 里那处要避免的是同一个毛病。
+ * 重新生成只认"重新打开"这一个由头。
  */
 export function useAiPrompts(enabled: boolean) {
   return useQuery({
@@ -101,7 +107,8 @@ export function useAiPrompts(enabled: boolean) {
       return data
     },
     enabled,
-    staleTime: 30 * 60_000,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
     retry: false,
   })
 }

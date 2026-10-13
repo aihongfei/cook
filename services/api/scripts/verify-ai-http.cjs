@@ -16,6 +16,19 @@
  */
 const base = process.env.BASE_URL ?? 'http://127.0.0.1:3000/api'
 
+/** 本地 stub 上游的地址（可用 STUB_BASE 覆盖；它必须是**宿主可访问**的那个，容器那侧另配） */
+const STUB_BASE = process.env.STUB_BASE ?? 'http://127.0.0.1:18990'
+
+/** 桩在跑吗？探它的只读端点（探不到就是不在这条路径上，相关断言只能跳过） */
+async function probeStub() {
+  try {
+    const response = await fetch(`${STUB_BASE}/__received`, { signal: AbortSignal.timeout(2000) })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
 let failed = 0
 const results = []
 
@@ -361,6 +374,55 @@ async function main() {
       hints.every((h) => !examples.includes(h)),
       `重叠=${JSON.stringify(hints.filter((h) => examples.includes(h)))}`,
     )
+
+    /*
+     * 结构化输出的 schema 必须是**提示词这一条路自己的**。
+     *
+     * 这是 2026-10-13 那次真事故的守门断言：服务端原先对所有 `json: true` 的调用
+     * 统一发推荐的 `PICKS_SCHEMA`（strict + additionalProperties:false），
+     * 于是模型被强制返回 `{picks:[{id,reason}]}`——`hints`/`examples` 不在里面，
+     * 解析必然失败、接口回 502、前端静默回退到写死的那批（用户看到"还是写死的"）。
+     *
+     * 只在**本地 stub 上游**上验（真网关看不到我们发了什么，而且它间歇性地拒收
+     * response_format——见 R-024）；判据取自 stub 记下的 `schemaName`。
+     */
+    /*
+     * 判据是"**桩在不在**"，不是"AI_API_BASE 里有没有 stub 字样"：
+     * 第一版按字符串判（`includes('stub')` 或匹配两个固定地址），而容器里用的是
+     * `http://host.docker.internal:18990/v1`——不含 stub 字样，于是这段**静默走成"跳过"**、
+     * 报 26/26 全绿却没有真验（假绿）。改成直接探测桩的只读端点：可达就验，不可达才跳过。
+     */
+    const stub = await probeStub()
+    if (stub) {
+      try {
+        const received = await (await fetch(`${STUB_BASE}/__received`)).json()
+        const promptsCalls = received.filter((item) => /"hints"/.test(item.system ?? ''))
+        check(
+          '准备条件：stub 确实收到了"提示词"那次请求（按 system 里有没有 hints 认）',
+          promptsCalls.length > 0,
+          `共 ${received.length} 次请求，其中提示词 ${promptsCalls.length} 次`,
+        )
+        check(
+          '提示词那条路发的是**自己的** schema（prompts），不是推荐的 picks——混用会让模型被迫回 {picks:[...]}、解析必然失败',
+          promptsCalls.length > 0 && promptsCalls.every((item) => item.schemaName === 'prompts'),
+          `实际 schemaName=${JSON.stringify(promptsCalls.map((item) => item.schemaName))}`,
+        )
+        const picksCalls = received.filter((item) => /picks|id=/.test(item.system ?? '')).filter((item) => !/"hints"/.test(item.system ?? ''))
+        check(
+          '推荐那条路仍发 picks（两边各用各的，不是把推荐也改成 prompts）',
+          picksCalls.every((item) => item.schemaName === 'picks'),
+          `实际 schemaName=${JSON.stringify(picksCalls.map((item) => item.schemaName))}`,
+        )
+      } catch (error) {
+        check('能取到 stub 收到的请求记录（用于上面的 schema 断言）', false, `${error?.message ?? error}`)
+      }
+    } else {
+      check(
+        '（未用 stub 上游：schema 归属这条只在 stub 上可验，真网关看不到我们发了什么）',
+        true,
+        `跳过——${STUB_BASE} 不可达，见 R-018 用 stub 起服务`,
+      )
+    }
   }
 
   for (const item of results) {

@@ -1576,3 +1576,58 @@ pnpm --dir apps/mobile run lint                   # 6 warnings / 0 errors（不�
 两处均已恢复，恢复后前端 287/287。
 
 **注**：本项**未新增后端/接口用例**——它只重组前端信息架构，数据仍走 F7-01 已验收的 `GET /shopping-list`（27 条断言那一套）。冰箱页对"很多样（比如 30 样）"的展示只验证了"仍是一行"（样数进不去 DOM 的内容区），没有造 30 样的数据；**如实记为未覆盖**（口径上它不影响这一行的形态：行高由 CSS 定，与样数无关）。
+
+## R-034 AI 入口的快问/示例每次打开现生成、各条路各发自己的 schema（D-041）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：后端 `ai.client.ts` 的 `ChatRequest.json?: boolean` → `jsonSchema?: unknown`（`response_format` 直接发调用方给的那份；`structured` 判定随之改）；`ai.service.ts` 两条 `chatJson` 调用各自传 `PICKS_SCHEMA` / `PROMPTS_SCHEMA`；`ai.rules.ts` 的 `PROMPTS_SCHEMA` 从"定义了没人用"移到 `PICKS_SCHEMA` 旁边并补注释。前端 `api/ai.ts` 的 `useAiPrompts`：`staleTime: 30 分钟` → `0`，新增 `refetchOnWindowFocus: false`。测试：`ai-sheets.test.tsx` 新增「每次打开都重新生成一批」（跨两次挂载数请求数），并把旧用例的 `toBeLessThanOrEqual(1)` 收紧为 `toHaveLength(1)`。stub 上游 `ai-stub-upstream.cjs` 记录并暴露 `schemaName`（新增只读 `GET /__received`），接口脚本 `verify-ai-http.cjs` 据此断言"各发各的 schema"。
+
+### 怎么验
+
+```bash
+# 1) 后端单测（规则/服务，含 parsePrompts 与 schema 相关）
+pnpm --dir services/api test                      # 170/170
+pnpm --dir services/api exec tsc --noEmit         # exit=0（后端这条是真检查）
+
+# 2) 接口验收（stub 上游）：stub 会把每次请求实际带的 schema 名记下来
+node services/api/scripts/ai-stub-upstream.cjs &  # 127.0.0.1:18990
+# 让容器把 AI_API_BASE 指向 stub（host.docker.internal:18990）后：
+pnpm --dir services/api run test:http:ai          # 28/28
+
+# 3) 前端
+pnpm --dir apps/mobile test                       # 288/288（本项 +1）
+pnpm --dir apps/mobile exec tsc -b                # ⚠️ 必须带 -b，见 RISKS R-25（仍 7 条既有错误）
+pnpm --dir apps/mobile run lint                   # 6 warnings（不变）
+
+# 4) 真网关连打三次：应当是三批不同的短句
+#    （POST /api/ai/prompts，带登录 token）
+```
+
+### 实测结果（2026-10-13）
+
+| 项 | 结果 |
+| --- | --- |
+| 根因复核 | `PROMPTS_SCHEMA` 在 D-032 的提交（`3643157`）里**没有任何引用**：`git show 3643157:services/api/src/modules/ai/ai.service.ts \| grep PROMPTS_SCHEMA` 为空；客户端当时对所有结构化调用硬发 `PICKS_SCHEMA` |
+| stub 断言 | 28/28，含「提示词那条路发的是**自己的** schema（prompts）… 实际 `schemaName=["prompts"]`」与「推荐那条路仍发 picks」 |
+| 反证 | 把 service 改回 `jsonSchema: PICKS_SCHEMA` → 该断言**红**（`actual ["picks"]`）；恢复后 28/28（改回→红→再改回，两次都留着输出） |
+| 真网关 | `/ai/prompts` 连打三次返回三批不同内容（如 `['今天想清淡点','孩子也能吃','冰箱有剩青菜','想喝点热汤']` / `['清淡点，孩子也吃','冰箱有剩青菜','想吃面，越快越好','天热没胃口']` / `['清淡点，孩子也吃','冰箱有剩青菜','想吃番茄炒蛋','今晚想喝汤']`），每次约 8 秒 |
+| 浏览器（核心诉求） | 重新打开抽屉时 **XHR 记录到各发一次 `/ai/prompts`**（1→2 次），每次 200（约 8.7s）；界面 5 条快问**全部取自该次返回的 18 条**（`shownSubsetOfBatch=true`）、**0 条**落在写死池子里；「问 AI」侧同理（3 条示例取自该次返回的 12 条）；两次打开的两批**互不相同** |
+| 前端测试 | 288/288（34 文件）；反证：把 `staleTime` 改回 `30 * 60_000` → 新用例红（`expected 2, received 1`），恢复后绿 |
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| 浏览器里第一次读到的 5 条快问**全在写死池子里**，差点记成"前端还在兜底" | 我只等了 6 秒，而这次生成要 **7.9 秒**——兜底先渲染、AI 那批还没到 | 改成轮询等待"出现不在池子里的句子"；但更该记的是：**这条读值本身无法区分"兜底"与"AI 恰好说了相似的话"**，所以真正作数的证据是**请求记录（XHR 是否发出、返回了什么）+ 界面值是否为该批次的子集**，而不是"我读了一眼觉得像/不像" |
+| 先前用 `window.fetch` 记请求，什么都没记到 | axios 走 **XHR**，不是 fetch | 改成在 `XMLHttpRequest.prototype.open/send` 上装记录器；同理"请求发生了没有"要用对通道看，不能凭界面现象反推 |
+| 文档里 D-032 有一条"真网关实测通过"，与用户看到的现象矛盾 | 那次**碰上了网关拒绝 `response_format` 的分支**（去掉它重试后模型自由作答，恰好正常）；接受分支下必失败 | 验收要**对"两条分支都能过"负责**：stub 记录实际 schema 名就是为此（stub 上游从不拒绝 `response_format`，专门守住"我们发的是什么"这一层） |
+| `PROMPTS_SCHEMA` 曾经重复定义（我插入时落在两处） | `TS2451 Cannot redeclare` | 删掉重复；**并意识到"有这个常量"不等于"它在被用"**——死代码比错代码更安静（错代码会挂，死代码只让功能悄悄走兜底） |
+
+### 回归测试
+
+**后端**：170/170（含新增/调整的 `parsePrompts`、`chatJson` 相关；比 D-032 的 120 条多出来的部分是这两轮陆续加的规则/服务用例，**其中一条"只比两个 schema 常量、不验接线"的用例被删掉换成 stub 实测**——那是假安心，占着数字不干活）。**接口**：stub 28/28（新增 3 条 schema 断言）。**前端**：288/288。
+
+**新增 1 条**（`ai-sheets.test.tsx`）：「每次打开都重新生成一批（用户 2026-10-12：「不然都是这几个推荐和问题」）」——同一个 `QueryClient` 跨两次挂载，断言 `/ai/prompts` 请求数 `1 → 2`；反证（`staleTime` 回 30 分钟）会红。
+
+**收紧 1 条**：旧用例的 `toBeLessThanOrEqual(1)` → `toHaveLength(1)`（原写法把 0 也当通过，等于半个断言）。
+
+**注**：真网关的三次调用只验了"三批不同"（内容不同即可），**没有**断言"一定包含某词"——真模型写什么不该被测试规定（D-032 踩过这条）。
