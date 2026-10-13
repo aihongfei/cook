@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/stores/auth'
 import { apiClient } from './client'
 
@@ -146,6 +146,8 @@ export interface CookableBoard {
   maxMissing: number
   /** 能做的菜一共几道（不是返回了几道） */
   total: number
+  /** 这一页从第几道开始（0 基）——翻页用 */
+  offset: number
   /** 因为有人过敏被排掉的道数（F5-03）：只数"本来会出现在这份结果里"的 */
   filteredOut: number
   items: CookableDish[]
@@ -155,6 +157,8 @@ export interface CookableQuery {
   /** 手边食材；**不传就用整个冰箱**（F6-07）。传了空串也当没传（后端同一口径） */
   ingredients?: string[]
   limit?: number
+  /** 从第几道开始（0 基）；不传 = 0。「看全部」那一页翻页用 */
+  offset?: number
   /** 最多容忍差几样：0 = 只看不用买的 */
   maxMissing?: number
 }
@@ -163,6 +167,7 @@ export async function fetchCookable(query: CookableQuery = {}): Promise<Cookable
   const params = new URLSearchParams()
   if (query.ingredients?.length) params.set('ingredients', query.ingredients.join(','))
   if (query.limit !== undefined) params.set('limit', String(query.limit))
+  if (query.offset !== undefined && query.offset > 0) params.set('offset', String(query.offset))
   if (query.maxMissing !== undefined) params.set('maxMissing', String(query.maxMissing))
   const suffix = params.toString()
   const { data } = await apiClient.get<CookableBoard>(`/fridge/cookable${suffix ? `?${suffix}` : ''}`)
@@ -170,7 +175,7 @@ export async function fetchCookable(query: CookableQuery = {}): Promise<Cookable
 }
 
 /**
- * 能做点什么。**跟着参数进缓存键**（手边清单与 `maxMissing` 都算）：
+ * 能做点什么。**跟着参数进缓存键**（手边清单、`maxMissing`、翻页起点都算）：
  * 不分开的话，用户切到"只看不用买的"会看到上一次那份列表一闪而过再变。
  *
  * 手边清单排序后进 key：勾选顺序不影响结果，但会影响 key → 同一组食材被当成两份缓存、
@@ -184,8 +189,36 @@ export function useCookable(query: CookableQuery, options: { enabled?: boolean }
   const token = useAuth((state) => state.token)
   const key = query.ingredients === undefined ? 'all' : [...query.ingredients].sort().join(',')
   return useQuery({
-    queryKey: ['fridge', 'cookable', key, query.maxMissing ?? 1, query.limit ?? 0],
+    queryKey: ['fridge', 'cookable', key, query.maxMissing ?? 1, query.limit ?? 0, query.offset ?? 0],
     queryFn: () => fetchCookable(query),
+    enabled: Boolean(token) && options.enabled !== false,
+    staleTime: 30_000,
+  })
+}
+
+/**
+ * 「看全部」那一页用的翻页版（F6-07 的完整列表）。
+ *
+ * 为什么不复用 `useCookable` 一页页自己管：那样得在页面里手写"攒过的几页 + 加载下一页"，
+ * 而这一页要的就是这份累积——`useInfiniteQuery` 正是干这个的（菜谱小书与点单历史同一用法）。
+ * 键多一个 `'page'`：它与冰箱页那份"只取前几道"的缓存**不是同一个东西**，
+ * 混用会让冰箱页拿回一长串、或者这一页只拿到 5 道。
+ *
+ * `offset` 用**累计条数**推（`pages.length * pageSize`），不存数组长度：
+ * 后端返回的道数恒等于请求的 limit（除最后一页），照着它推不会因为"某一页凑巧少一道"而错位。
+ */
+export function useCookablePages(query: Omit<CookableQuery, 'offset'>, options: { enabled?: boolean } = {}) {
+  const token = useAuth((state) => state.token)
+  const pageSize = query.limit ?? 12
+  const key = query.ingredients === undefined ? 'all' : [...query.ingredients].sort().join(',')
+  return useInfiniteQuery({
+    queryKey: ['fridge', 'cookable', 'page', key, query.maxMissing ?? 1, pageSize],
+    queryFn: ({ pageParam }) => fetchCookable({ ...query, limit: pageSize, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) => {
+      const loaded = pages.reduce((sum, page) => sum + page.items.length, 0)
+      return loaded < lastPage.total ? loaded : undefined
+    },
     enabled: Boolean(token) && options.enabled !== false,
     staleTime: 30_000,
   })

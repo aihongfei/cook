@@ -2,6 +2,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import { FRIDGE_ZONES, type CookableBoard, type CookableDish, type FridgeBoard, type FridgeItem, type FridgeZone } from '@/api/fridge'
@@ -22,6 +24,9 @@ import FridgeCookable from './FridgeCookable'
  */
 
 const clients: QueryClient[] = []
+
+/** 源码根目录（拼 scss 路径用；菜名那条测试要读样式规则） */
+const srcDir = join(__dirname, '..', '..', '..')
 
 function Probe() {
   const location = useLocation()
@@ -75,7 +80,7 @@ function dish(over: Partial<CookableDish> & { id: string; name: string }): Cooka
 function cookableBoard(over: Partial<CookableBoard> = {}): CookableBoard {
   return {
     source: 'fridge', scope: 'family', pantry: [], usable: 0, skipSeasonings: 0,
-    maxMissing: 1, total: 0, filteredOut: 0, items: [], ...over,
+    maxMissing: 1, total: 0, offset: 0, filteredOut: 0, items: [], ...over,
   }
 }
 
@@ -390,26 +395,28 @@ it('**同一个 tick 里连点两个标签，两次都要算数**（函数式更
   })
 })
 
-it('"还有 N 道"只在真有更多时说（与榜单那条同一规矩：不编"看全部"入口）', async () => {
+it('末尾那块只在**真有更多**时才出现（5 道以内不画一个"看全部 3 道"）', async () => {
   mockGet({
     cookable: cookableBoard({
-      pantry: ['鸡蛋'], usable: 1, total: 20,
-      items: [dish({ id: 'r1', name: '蒸蛋', have: ['鸡蛋'] })],
+      pantry: ['鸡蛋'], usable: 1, total: 2,
+      items: [
+        dish({ id: 'r1', name: '蒸蛋', have: ['鸡蛋'] }),
+        dish({ id: 'r2', name: '蛋花汤', have: ['鸡蛋'] }),
+      ],
     }),
   })
   renderCookable()
 
-  expect(await screen.findByText(/还有 19 道能做/)).toBeTruthy()
+  expect(await screen.findByText('蒸蛋')).toBeTruthy()
   expect(screen.queryByText(/看全部/)).toBeNull()
 })
 
-it('B 方案：横滑条上只摆 5 道，多出来的由末尾那块说清（不再竖排 12 道）', async () => {
+it('B 方案：横滑条上只摆 5 道，剩下多少由末尾那块说清（不再竖排 12 道）', async () => {
   /*
    * 这条钉住降高的那一刀（D-063）：竖排 12 道 = 694px，把整块推到首屏之外。
-   * 现在只摆 5 道，剩下的说"还有 N 道能做"。**数量不能悄悄变**：
-   * "还有 N 道"里的 N 必须是 total 减去**真的摆出来的那几道**，
-   * 否则用户看到 5 道卡 + "还有 15 道"，加起来 20 对得上，但若哪天改成只摆 3 道
-   * 而 N 还按 5 算，就会凭空少掉 2 道菜——所以这里按实际渲染的卡数算。
+   * 现在只摆 5 道，剩下的进「看全部」那一页。**数字不能悄悄变**：
+   * 那块上写的必须是总数（20 道），而不是"还有 15 道"——它是**入口**，
+   * 说的该是"点进去一共有多少"，不是"这一页之外还有多少"（两者都能算，但入口用总数更准）。
    */
   mockGet({
     cookable: cookableBoard({
@@ -423,27 +430,71 @@ it('B 方案：横滑条上只摆 5 道，多出来的由末尾那块说清（�
 
   expect(await screen.findByText('菜0')).toBeTruthy()
   await waitFor(() => expect(document.querySelectorAll('.cook__card-link')).toHaveLength(5))
-  // 5 道摆出来 + 还有 15 道 = 20（算式对得上）
-  expect(screen.getByText('还有 15 道能做')).toBeTruthy()
+  expect(screen.getByText('20')).toBeTruthy()
+  expect(screen.getByText('道能做')).toBeTruthy()
   // 第 6 道（菜5）不摆
   expect(screen.queryByText('菜5')).toBeNull()
 })
 
-it('B 方案：盘子（末尾那块"还有 N 道"）**不是链接**——没有"看全部"那个页面', async () => {
+it('末尾那块是**真链接**，指向完整的能做列表并带上当前口径', async () => {
   /*
-   * 它看着像一张卡，所以最容易被顺手做成 `<Link>`。但菜谱大全里没有"冰箱能做的全部"
-   * 这个筛选视图，点了就等于给死路（与 FamilyPicks 那条同一规矩）。
-   * 所以用 closest('a') 断言它不在任何链接里。
+   * 用户 2026-10-13：「这个更多也不好看还不能点击，需要实现和优化」。
+   * 原先它不是链接（那时没有那一页，做成入口等于给死路）；现在 `/fridge/cookable` 有了，
+   * 所以这里钉住它**必须是 `<Link>`**，且把"挑好的几样"和"只看不用买的"带过去——
+   * 点进去看到的应该是**我刚才这份结果的全部**，而不是另换一套算法重算一遍。
    */
   mockGet({
+    // 两样都得在冰箱里：可选标签是"冰箱里的东西 ∩ 手边清单"（见 usableItems）
+    fridge: fridgeBoard({ 冷藏: [stockItem('鸡蛋'), stockItem('西红柿')] }),
     cookable: cookableBoard({
-      pantry: ['鸡蛋'], usable: 1, total: 20,
+      pantry: ['鸡蛋', '西红柿'], usable: 2, total: 20,
       items: [dish({ id: 'r1', name: '蒸蛋', have: ['鸡蛋'] })],
     }),
   })
   renderCookable()
 
-  const more = (await screen.findByText(/还有 19 道能做/)).closest('.cook__card--more') as HTMLElement
+  /*
+   * 先切到"只看不用买的"，再进挑选模式去掉西红柿 → 两个口径都偏离默认值。
+   *
+   * ⚠️ **顺序不能反**（第一版就是先点筛选再点挑几样，红了）：点「只看不用买的」会换掉
+   * 请求参数、基础那份数据进入 pending，而可选标签取自那份数据——那个窗口里
+   * `usableItems` 是空的，点「挑几样」就以**空选**进模式（见 R-51，已知的既有边界）。
+   * 这里按真人顺序走：数据已经在眼前了才去挑。
+   */  ;(await screen.findByRole('button', { name: '挑几样' })).click()
+  await screen.findByRole('button', { name: '西红柿' })
+  ;(screen.getByRole('button', { name: '只看不用买的' })).click()
+  ;(screen.getByRole('button', { name: '西红柿' })).click()
+
+  /*
+   * ⚠️ href 要**等它变**再断言：上面那次点击引发重渲染，而末尾那块本来就在 DOM 里
+   * （`findByText` 会立刻返回旧节点）——不等就会读到点之前的 href。
+   */
+  await waitFor(() => {
+    const href = (screen.getByText('道能做').closest('a') as HTMLAnchorElement).getAttribute('href') ?? ''
+    expect(href).not.toContain('%E8%A5%BF%E7%BA%A2%E6%9F%BF') // 去掉的那样不该带过去
+  })
+
+  const more = screen.getByText('道能做').closest('a') as HTMLAnchorElement
   expect(more).toBeTruthy()
-  expect(more.closest('a')).toBeNull()
+  const href = more.getAttribute('href') ?? ''
+  expect(href.startsWith('/fridge/cookable?')).toBe(true)
+  expect(href).toContain('maxMissing=0')
+  expect(href).toContain('ingredients=')
+})
+
+it('菜名**一行、超出省略**（用户 2026-10-13：「这块不要换行，用省略吧」）', () => {
+  /*
+   * jsdom 量不了"视觉上真的出现省略号"，所以这一条守的是**产生它的那几条 CSS 规则**
+   * （与勾选框那条同一手法）：单行省略的三件套缺一不可，另外 `title` 要带上全名
+   * （桌面端悬停还能看到完整的）。
+   *
+   * 这条同时是一个回归钉：改前是两行 clamp，一条长名字会把整条横滑条的每张卡都撑高。
+   */
+  const css = readFileSync(join(srcDir, 'pages/fridge/fridge.scss'), 'utf8')
+  const rule = css.match(/\.cook__card-name\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+  expect(rule, '没读到 .cook__card-name 规则').toBeTruthy()
+  expect(rule, '必须是单行（两行 clamp 会被一条长名字撑高整条横滑条）').toContain('white-space: nowrap')
+  expect(rule, '超出要省略号，不能硬截断').toContain('text-overflow: ellipsis')
+  expect(rule, 'overflow 不写就看不到省略号').toContain('overflow: hidden')
+  expect(rule, '不该再有 -webkit-line-clamp（那是多行的做法）').not.toContain('line-clamp')
 })

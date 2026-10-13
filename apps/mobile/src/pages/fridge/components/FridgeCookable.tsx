@@ -31,11 +31,29 @@ import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
  * ⑤ **菜横着摆，不竖着列**（B 方案，见 D-063）。竖着列 12 道要 694px，把这一块整个推到
  *    首屏之外（打开冰箱页只看得见"冰箱里有什么"）。现在是一条横滑卡：一屏 2 张整卡 +
  *    第 3 张露出个边（**露出本身就是"还能滑"的信号**），只占 259px。
- *    仍然只给 5 道 + 末尾一块「还有 N 道能做」——"够决定今晚做什么"的量没有变，
- *    只是从"往下翻"换成"往右翻"。同样**不编"看全部"入口**（没有那个页面）。
+ *    仍然只给 5 道 + 末尾一块「还有 N 道 / 看全部 ›」——"够决定今晚做什么"的量没有变，
+ *    只是从"往下翻"换成"往右翻"。
+ *
+ *    末尾那块**是真入口**（2026-10-13 用户：「这个更多也不好看还不能点击，需要实现和优化」）：
+ *    点进 `/fridge/cookable`（完整的能做列表），并把当前口径（挑好的几样、只看不用买的）
+ *    一起带过去——用户看到的是"我刚才那份结果的全部"，不是另换一套算法重算一遍。
  */
-/** 横滑条上摆几道（够决定今晚做什么；剩下的由末尾那块说清有多少） */
+/** 横滑条上摆几道（够决定今晚做什么；剩下的进「看全部」那一页） */
 const STRIP_MAX = 5
+
+/**
+ * 这一条横滑条当前的口径（挑好的几样 / 只看不用买的）拼成查询串，带给「看全部」那一页。
+ *
+ * 两个参数**只在偏离默认值时出现**：整个冰箱（`undefined`）与容忍差 1 样是常态，
+ * 写进 URL 只会让地址变长、还会在"挑几样"与"整个冰箱"之间产生两个本该相同的键。
+ */
+function stripQuery(picked: string[] | null, readyOnly: boolean): string {
+  const params = new URLSearchParams()
+  if (picked && picked.length > 0) params.set('ingredients', picked.join(','))
+  if (readyOnly) params.set('maxMissing', '0')
+  const suffix = params.toString()
+  return suffix ? `?${suffix}` : ''
+}
 
 function DishCard({ dish, from }: { dish: CookableDish; from: string }) {
   const ready = dish.missing.length === 0
@@ -57,8 +75,14 @@ function DishCard({ dish, from }: { dish: CookableDish; from: string }) {
             {ready ? '不用买' : `差 ${dish.missingCount} 样`}
           </span>
         </span>
-        {/* 菜名最多两行：横滑卡宽 128px，不限的话「超级下饭的番茄炒蛋.西红柿炒鸡蛋」能撑到三行 */}
-        <span className="cook__card-name">{dish.name}</span>
+        {/*
+         * 菜名**一行、超出省略**（用户 2026-10-13：「这块不要换行，用省略吧」）。
+         *
+         * 原来给两行（`-webkit-line-clamp: 2`）：卡宽只有 128px，「超级下饭的番茄炒蛋.西红柿炒鸡蛋」
+         * 这种名字会把那一格撑到 32px、整条横滑条的每一张卡都跟着长高——为了一条长名字，
+         * 五张卡一起变高。名字本来就是"扫一眼认出是哪道菜"，认不出可以点进去看全名。
+         */}
+        <span className="cook__card-name" title={dish.name}>{dish.name}</span>
         {/*
          * 两行都是"具体哪几样"，不是数字：
          * 第一行说用掉了冰箱里的什么（这是他最想看到的功劳），第二行说还差什么。
@@ -279,14 +303,26 @@ export default function FridgeCookable({ enabled }: { enabled: boolean }) {
             <DishCard key={dish.id} dish={dish} from="/fridge" />
           ))}
           {/*
-           * 横滑条的终点：只说"还有多少"，**不给入口**——没有"看全部"那个页面，
-           * 编一个点了没用的入口等于给死路（与 FamilyPicks 那条同一规矩）。
-           * 所以它不是一个链接，样式上也刻意是虚线的（看着就不像一道菜）。
+           * 横滑条的终点：「还有 N 道 / 看全部 ›」——**真入口**（D-063 修订）。
+           *
+           * 原来它不是链接（那时没有完整列表页，做个点了没用的入口等于给死路）。
+           * 用户 2026-10-13 指出「这个更多也不好看还不能点击，需要实现和优化」，
+           * 于是补上 `/fridge/cookable` 那一页并把它接过来：**说得出"还有 N 道"，
+           * 就该给得出来**。上一行的口径（挑好的几样 / 只看不用买的）原样带过去，
+           * 保证点进去看到的是"这份结果的全部"。
            */}
           {data && data.total > Math.min(dishes.length, STRIP_MAX) && (
-            <li className="cook__card cook__card--more">
-              <span className="cook__card-more-arrow" aria-hidden>›</span>
-              <span className="cook__card-more-text">还有 {data.total - Math.min(dishes.length, STRIP_MAX)} 道能做</span>
+            <li className="cook__card">
+              <Link
+                className="cook__card-more"
+                to={`/fridge/cookable${stripQuery(picked, readyOnly)}`}
+                state={{ from: '/fridge' }}
+                aria-label={`看全部 ${data.total} 道能做的菜`}
+              >
+                <span className="cook__card-more-count">{data.total}</span>
+                <span className="cook__card-more-text">道能做</span>
+                <span className="cook__card-more-go">看全部 ›</span>
+              </Link>
             </li>
           )}
         </ul>

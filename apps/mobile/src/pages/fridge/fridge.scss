@@ -984,16 +984,26 @@
   background: var(--color-sage);
 }
 
-/* 名字最多两行：卡宽 128px，"超级下饭的番茄炒蛋.西红柿炒鸡蛋"不限的话能撑到三行 */
+/*
+ * 名字**一行、超出省略**（用户 2026-10-13：「这块不要换行，用省略吧」）。
+ *
+ * 原来给两行（`-webkit-line-clamp: 2`）：卡宽只有 128px，「超级下饭的番茄炒蛋.西红柿炒鸡蛋」
+ * 这种名字会把这一格撑到 32px，**整条横滑条的每张卡都跟着长高**——为一条长名字，
+ * 五张卡一起变高。名字的作用是"扫一眼认出是哪道菜"，认不出点进去看全名就行
+ * （所以组件里给了 `title`，桌面端悬停仍能看到全的）。
+ *
+ * 单行省略的三件套缺一不可：`overflow: hidden` + `white-space: nowrap` +
+ * `text-overflow: ellipsis`；少任何一个都会变成硬截断或换行。
+ */
 .cook__card-name {
-  display: -webkit-box;
+  display: block;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
   margin-top: 5px;
   font-size: 12px;
   line-height: 1.35;
   color: var(--color-ink);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* 一行省略号：这一格是背景信息（用掉了冰箱里的什么），不必读完 */
@@ -1018,37 +1028,53 @@
 }
 
 /*
- * 横滑条的终点：「还有 N 道能做」。
- * **不是链接**——没有"看全部"那个页面，编一个点了没用的入口等于给死路（同 FamilyPicks）。
- * 虚线 + 居中，看着就不像一道菜（否则用户会去点它，然后什么都不会发生）。
+ * 横滑条的终点：「N 道能做 / 看全部 ›」——**真入口**（D-063 修订，2026-10-13 用户
+ * 「这个更多也不好看还不能点击，需要实现和优化」）。
+ *
+ * 三条刻意的：
+ * - **与菜卡同样的宽度与圆角**（128px / 14px），但底色是品牌色的浅调而不是纸白：
+ *   它排在同类卡片里，一眼看得出是"这一步的出口"而不是又一道菜；
+ * - **数字当主角**（22px 品牌色）：用户在这里真正想知道的是"还有多少"；
+ * - **一行「看全部 ›」**：光有个数字看着像个标签，"看全部"三个字才说明它点得动。
  */
-.cook__card--more {
+.cook__card-more {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   align-items: center;
   justify-content: center;
-  width: 96px;
+  height: 100%;
   padding: 0 8px;
   text-align: center;
-  background: none;
-  border: 1px dashed var(--color-line);
+  text-decoration: none;
+  background: rgb(224 123 57 / 8%);
+  border: 1px solid rgb(224 123 57 / 35%);
   border-radius: 14px;
 }
 
-.cook__card-more-arrow {
-  font-size: 15px;
+.cook__card-more:active {
+  background: rgb(224 123 57 / 16%);
+}
+
+.cook__card-more-count {
+  font-size: 22px;
+  line-height: 1.1;
   color: var(--color-brand);
 }
 
 .cook__card-more-text {
-  font-size: 11.5px;
-  line-height: 1.45;
+  font-size: 11px;
+  color: var(--color-ink-2);
+}
+
+.cook__card-more-go {
+  margin-top: 3px;
+  font-size: 11px;
   color: var(--color-brand);
 }
 
 /* B 方案：原来那段"还有 N 道能做，先把眼前这几道做了"从竖排列表下面**搬进了横滑条末尾**
- * （见 .cook__card--more），`.cook__more-line` 已无引用，随之下线。 */
+ * （见 .cook__card-more），`.cook__more-line` 已无引用，随之下线。 */
 
 /* ---------------------------------------------------------------
  * 最近录入（M6 / F6-06，D-062）
@@ -1182,4 +1208,212 @@
   .recent__arrow {
     transition: none;
   }
+}
+
+/* ---------------------------------------------------------------
+ * 「能做点什么」的完整列表（F5-04 / F6-07，D-063 修订）
+ *
+ * 冰箱页那条横滑卡末尾的「看全部」点进来。与那一块的关系：
+ * - **同一份结果**（同一个接口、同一个顺序），这里只是把剩下的翻出来；
+ * - 形态换成**竖排一行一道**：这里不需要"一眼看完"，需要的是"每道都看得清
+ *   （图 + 名字 + 用上了什么 + 还差什么）"，而且能一直往下翻。
+ * --------------------------------------------------------------- */
+
+.cooklist__filters {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 12px var(--spacing-page) 0;
+}
+
+/* 「只看不用买的」沿用冰箱页那颗筛选胶囊的语汇（同一件事在两个页面长得一样） */
+.cooklist__filter {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.cooklist__filter.is-on {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+.cooklist__summary {
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-ink-3);
+}
+
+.cooklist__status {
+  margin-top: 12px;
+  padding: 15px;
+}
+
+.cooklist__scope,
+.cooklist__filtered {
+  margin: 10px var(--spacing-page) 0;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-2);
+  background: rgb(224 123 57 / 7%);
+  border-radius: 10px;
+}
+
+.cooklist__empty {
+  margin-top: 12px;
+  padding: 15px;
+}
+
+.cooklist__empty-text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.cooklist__link-out {
+  display: block;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--color-brand);
+}
+
+.cooklist {
+  margin-top: 12px;
+  padding: 4px 10px;
+}
+
+.cooklist__items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 一行一道：图 + 主栏（名字/用上了/还差） + 徽章。整行可点进详情 */
+.cooklist__link {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 4px;
+  text-decoration: none;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.cooklist__item:last-child .cooklist__link {
+  border-bottom: 0;
+}
+
+.cooklist__link:active {
+  background: rgb(224 123 57 / 6%);
+}
+
+.cooklist__pic {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  background: var(--color-cream-2);
+  border-radius: 9px;
+}
+
+.cooklist__pic img,
+.cooklist__pic .recipe-image-placeholder {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cooklist__main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 名字这里可以给两行：竖排一行占满宽度（~230px），比横滑卡里宽得多，
+ * 长名字放得下，不必一进来就省略 */
+.cooklist__name {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 13.5px;
+  line-height: 1.35;
+  color: var(--color-ink);
+}
+
+/* 用上了什么 / 还差什么：各一行，超出省略（具体哪几样，用户要拿它决定买不买） */
+.cooklist__have,
+.cooklist__missing {
+  display: block;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cooklist__have {
+  color: var(--color-ink-2);
+}
+
+.cooklist__missing {
+  color: #a8542a;
+}
+
+/* 徽章在行的右边（与冰箱页横滑卡的徽章同一套配色与话术：能直接做 / 差几样） */
+.cooklist__badge {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font-size: 10px;
+  color: var(--color-ink-3);
+  background: var(--color-cream-2);
+  border-radius: 999px;
+}
+
+.cooklist__badge.is-ready {
+  color: var(--color-ink);
+  background: var(--color-sage);
+}
+
+.cooklist__more-error {
+  margin-top: 10px;
+}
+
+/* 「再看一页」：纸色胶囊 + 虚线，与"这一页到头了"那句呼应（不是主按钮的位置） */
+.cooklist__more {
+  display: block;
+  width: calc(100% - 2 * var(--spacing-page));
+  margin: 12px var(--spacing-page) 0;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: #ab5527;
+  text-align: center;
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1px dashed #d9b48c;
+  border-radius: 12px;
+}
+
+.cooklist__more:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.cooklist__end {
+  margin: 14px var(--spacing-page) 20px;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+  text-align: center;
 }

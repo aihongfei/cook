@@ -6,6 +6,8 @@ import {
   canonicalName,
   isSeasoning,
   matchDish,
+  parseCookableLimit,
+  parseCookableOffset,
   parseMaxMissing,
   parsePantry,
   rankMatches,
@@ -284,5 +286,30 @@ describe('参数解析', () => {
     assert.equal(parseMaxMissing(3), 3)
     assert.throws(() => parseMaxMissing(4))
     assert.throws(() => parseMaxMissing('两样'))
+  })
+
+  it('一页几道：1～30，默认 12（超了明说，不静默截断）', () => {
+    assert.equal(parseCookableLimit(undefined), 12)
+    assert.equal(parseCookableLimit(''), 12)
+    assert.equal(parseCookableLimit('1'), 1)
+    assert.equal(parseCookableLimit(30), 30)
+    assert.throws(() => parseCookableLimit(31))
+    assert.throws(() => parseCookableLimit(0))
+    assert.throws(() => parseCookableLimit('半道'))
+  })
+
+  /*
+   * 翻页从第几道开始。默认 0（不传 = 从开头），所以**老调用方不受影响**——
+   * 「看全部」那一页才传 offset，其余地方一个字的代码都不用改。
+   */
+  it('翻页起点：0～1000，默认 0', () => {
+    assert.equal(parseCookableOffset(undefined), 0)
+    assert.equal(parseCookableOffset(''), 0)
+    assert.equal(parseCookableOffset(0), 0)
+    assert.equal(parseCookableOffset('30'), 30)
+    assert.equal(parseCookableOffset(1000), 1000)
+    assert.throws(() => parseCookableOffset(-1))
+    assert.throws(() => parseCookableOffset(1001))
+    assert.throws(() => parseCookableOffset('第三道'))
   })
 })

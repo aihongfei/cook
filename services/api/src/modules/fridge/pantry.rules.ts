@@ -285,6 +285,13 @@ export interface RankedMatch extends DishMatch {
 /** 一页最多几道（选了食材之后要"扫一眼决定做什么"，不是又给一个菜谱列表） */
 export const COOKABLE_LIMIT_DEFAULT = 12
 export const COOKABLE_LIMIT_MAX = 30
+/**
+ * 从第几道开始（0 基）。给「看全部」那一页翻页用。
+ *
+ * 上限存在的意义只是别让人拿 `offset=999999` 来探边界：菜谱库一共几百道，
+ * 1000 已经远超任何真实结果集，超了就是参数写错了——明说，不静默截断。
+ */
+export const COOKABLE_OFFSET_MAX = 1000
 /** 默认容忍差几样：差 1 样是"顺路买一下"，差 2 样以上就不叫"手边食材能做的"了 */
 export const MAX_MISSING_DEFAULT = 1
 export const MAX_MISSING_MAX = 3
@@ -294,6 +301,15 @@ export function parseCookableLimit(raw: unknown): number {
   const value = typeof raw === 'number' ? raw : Number(String(raw).trim())
   if (!Number.isInteger(value) || value < 1 || value > COOKABLE_LIMIT_MAX) {
     throw new BadRequestException(`一页要在 1～${COOKABLE_LIMIT_MAX} 道之间`)
+  }
+  return value
+}
+
+export function parseCookableOffset(raw: unknown): number {
+  if (raw === undefined || raw === null || raw === '') return 0
+  const value = typeof raw === 'number' ? raw : Number(String(raw).trim())
+  if (!Number.isInteger(value) || value < 0 || value > COOKABLE_OFFSET_MAX) {
+    throw new BadRequestException(`从第几道开始要在 0～${COOKABLE_OFFSET_MAX} 之间`)
   }
   return value
 }

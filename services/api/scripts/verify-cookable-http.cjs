@@ -8,7 +8,8 @@
  *       → 默认用整个冰箱（F6-07）→ 指定 ingredients 就用指定的（F5-04）
  *       → **"用上了什么"是真用上了**（每一样都在菜谱配料里）→ missing 是**能买的**（不列调料）
  *       → **反证组**：五花肉≠猪肉、蛋清≠鸡蛋、"有土豆"不该让"要番茄的菜"变成 0 差
- *       → maxMissing=0 只剩不用买的 → limit 生效 → 参数非法 400
+ *       → maxMissing=0 只剩不用买的 → limit 生效 → **offset 翻页（两页不重叠、总数不变）**
+ *       → 参数非法 400
  *       → 口味过敏的菜被排掉且报数（F5-03）→ 共享关掉时只看自己放的 → 跨家庭互不可见。
  */
 const base = process.env.BASE_URL ?? 'http://127.0.0.1:3000/api'
@@ -377,6 +378,35 @@ async function main() {
   )
   const badLimit = await cookable(mama.token, 'limit=99')
   check('limit 超上限：400', badLimit.status === 400, `status=${badLimit.status}`)
+
+  /*
+   * 翻页（「看全部」那一页用）：offset 从第几道开始。
+   * 两条一起验才有意义——**第一页与第二页不许有重叠**，否则用户翻着翻着发现
+   * 同一道菜出现了两次（而"总数"还说自己看得完）。
+   */
+  const page1 = await cookable(mama.token, 'limit=5&offset=0')
+  const page2 = await cookable(mama.token, 'limit=5&offset=5')
+  const ids1 = (page1.body?.items ?? []).map((item) => item.id)
+  const ids2 = (page2.body?.items ?? []).map((item) => item.id)
+  check(
+    'offset 翻页：第二页从第 6 道开始，**与第一页不重叠**',
+    ids1.length > 0 && ids2.length > 0 && ids2.every((id) => !ids1.includes(id)),
+    `第1页=${ids1.length} 第2页=${ids2.length} 重叠=${ids2.filter((id) => ids1.includes(id)).length}`,
+  )
+  check(
+    '翻页不改总数（total 是"一共有几道"，与这一页从哪开始无关）',
+    page1.body?.total === page2.body?.total && page1.body?.offset === 0 && page2.body?.offset === 5,
+    `total=${page1.body?.total}/${page2.body?.total} offset=${page1.body?.offset}/${page2.body?.offset}`,
+  )
+  const tail = await cookable(mama.token, `limit=30&offset=${Math.max(0, (page1.body?.total ?? 0) - 1)}`)
+  check(
+    '翻到最后一页：给得出剩下的那道（不是空页，也不是 400）',
+    tail.status === 200 && (tail.body?.items ?? []).length === 1,
+    `status=${tail.status} items=${(tail.body?.items ?? []).length}`,
+  )
+  const badOffset = await cookable(mama.token, 'offset=-1')
+  check('offset 负数：400（不是当成 0 静默修正）', badOffset.status === 400, `status=${badOffset.status}`)
+
   const badMissing = await cookable(mama.token, 'maxMissing=9')
   check('maxMissing 超上限：400', badMissing.status === 400, `status=${badMissing.status}`)
   const emptyList = await cookable(mama.token, 'ingredients=,,,')

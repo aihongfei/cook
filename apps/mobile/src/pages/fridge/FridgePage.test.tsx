@@ -70,6 +70,11 @@ function board(overrides: Partial<ShoppingList> = {}): ShoppingList {
     coveredCount: 0,
     unsureCount: 0,
     stockEmpty: true,
+    // F7-03 新加的三个字段：冰箱页不读它们（分组与勾选是采购页的事），
+    // 但类型要求给全，缺了编译就红——这样哪天采购页加了字段，这里不会悄悄落后。
+    aisles: [],
+    checkedNames: [],
+    checkedCount: 0,
     missing: [],
     dishCount: 3,
     ...overrides,
@@ -157,6 +162,7 @@ function emptyCookable(fridge: FridgeBoard): CookableBoard {
     skipSeasonings: 0,
     maxMissing: 1,
     total: 0,
+    offset: 0,
     filteredOut: 0,
     items: [],
   }

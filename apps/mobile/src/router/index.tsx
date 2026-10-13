@@ -10,6 +10,7 @@ import FamilyPage from '@/pages/family/FamilyPage'
 import TastePage from '@/pages/taste/TastePage'
 import DiscoverPage from '@/pages/discover/DiscoverPage'
 import FridgePage from '@/pages/fridge/FridgePage'
+import CookablePage from '@/pages/fridge/CookablePage'
 import KitchenPage from '@/pages/kitchen/KitchenPage'
 import MinePage from '@/pages/mine/MinePage'
 import PrepPage from '@/pages/prep/PrepPage'
@@ -57,6 +58,12 @@ export const router = createBrowserRouter([
       { path: 'combos', element: <CombosPage /> },
       { path: 'discover', element: <DiscoverPage /> },
       { path: 'fridge', element: <FridgePage /> },
+      /*
+       * 「能做点什么」的完整列表：冰箱页那条横滑卡末尾的「看全部」点进来。
+       * 静态路径写在父级 `fridge` 之后不影响匹配（v6 按具体度排），
+       * 但读路由表的人会先找 `fridge`——它才是这一页的来源。
+       */
+      { path: 'fridge/cookable', element: <CookablePage /> },
       { path: 'mine', element: <MinePage /> },
       { path: 'checkins', element: <CheckInPage /> },
       { path: 'family', element: <FamilyPage /> },

@@ -57,14 +57,16 @@ export class FridgeController {
   @ApiOperation({ summary: '手边食材能做哪些菜（不传 ingredients 就用整个冰箱）（F5-04 / F6-07）' })
   @ApiQuery({ name: 'ingredients', required: false, description: '手边食材，逗号分隔（如 `鸡蛋,土豆`）；不传 = 用整个冰箱' })
   @ApiQuery({ name: 'limit', required: false, description: '一页最多几道，默认 12、上限 30' })
+  @ApiQuery({ name: 'offset', required: false, description: '从第几道开始（0 基），默认 0——「看全部」那一页翻页用' })
   @ApiQuery({ name: 'maxMissing', required: false, description: '最多容忍差几样，默认 1、上限 3（0 = 只看不用买的）' })
   async cookable(
     @CurrentUserId() userId: string,
     @Query('ingredients') ingredients?: string,
     @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
     @Query('maxMissing') maxMissing?: string,
   ) {
-    return this.fridge.cookable(userId, { ingredients, limit, maxMissing })
+    return this.fridge.cookable(userId, { ingredients, limit, offset, maxMissing })
   }
 
   @Patch(':id')

@@ -22,6 +22,7 @@ import {
   isSeasoning,
   matchDish,
   parseCookableLimit,
+  parseCookableOffset,
   parseMaxMissing,
   parsePantry,
   rankMatches,
@@ -220,11 +221,12 @@ export class FridgeService {
    */
   async cookable(
     userId: string,
-    options: { ingredients?: unknown; limit?: unknown; maxMissing?: unknown; forMeal?: unknown } = {},
+    options: { ingredients?: unknown; limit?: unknown; offset?: unknown; maxMissing?: unknown; forMeal?: unknown } = {},
   ) {
     const { familyId, role, shared } = await this.requireMember(userId)
     const scope = visibleToMember(shared, role)
     const limit = parseCookableLimit(options.limit)
+    const offset = parseCookableOffset(options.offset)
     const maxMissing = parseMaxMissing(options.maxMissing)
 
     const given = parsePantry(options.ingredients)
@@ -266,6 +268,8 @@ export class FridgeService {
         filteredOut: 0,
         /** 什么都不做（不是"没找到"）：冰箱空着，任何"推荐"都是编的 */
         total: 0,
+        /** 与下面那条正常返回保持同一个形状（前端只认一种响应，不用分情况） */
+        offset,
         items: [],
       }
     }
@@ -319,9 +323,11 @@ export class FridgeService {
       maxMissing,
       /** 能做的菜一共几道（不是返回了几道）——界面据此说"还有 N 道" */
       total: ranked.length,
+      /** 这一页从第几道开始（0 基）。翻页的调用方拿它算下一页，不用自己记 */
+      offset,
       /** 口味挡掉了几道（F5-03）：只数**本来会出现在这份结果里**的 */
       filteredOut,
-      items: ranked.slice(0, limit).flatMap((row) => {
+      items: ranked.slice(offset, offset + limit).flatMap((row) => {
         const entry = byId.get(row.recipeId)
         if (!entry) return []
         const { recipe } = entry
