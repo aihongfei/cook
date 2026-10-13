@@ -55,6 +55,10 @@ model User {
   aiAttachments  AiAttachment[]
   /// 这个账号的口味与健康档案（M8 / F8-01、F8-02）
   tasteProfile   TasteProfile?
+  /// 这个账号勾掉的采购条目（M7 / F7-03）
+  shoppingChecks ShoppingCheck[]
+  /// 这个账号加到采购清单里的条目（M7 / F7-03）
+  shoppingExtras ShoppingExtra[]
 
   @@index([createdAt])
 }
@@ -98,6 +102,10 @@ model Family {
   aiActions     AiAction[]
   /// 这一家的 AI 附件（对话里的图片）
   aiAttachments AiAttachment[]
+  /// 这一家的采购清单勾选（M7 / F7-03）
+  shoppingChecks ShoppingCheck[]
+  /// 这一家自己往采购清单上加的条目（M7 / F7-03）
+  shoppingExtras ShoppingExtra[]
 
   @@index([createdAt])
 }
@@ -509,4 +517,57 @@ model TasteProfile {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// 采购清单的勾选状态（M7 / F7-03）。
+///
+/// 为什么值得建表：勾选原来是组件里的 `useState`，页面自己写着"只记在这一屏，刷新就没了"。
+/// 而真实用法是**拿着手机在超市里一样一样划掉**——中途切个 App、回个消息，划掉的全没了。
+///
+/// **按 `name` 存，不按"清单条目 id"**：清单是每次请求从菜单现算出来的（F7-01），
+/// 它没有稳定 id；而"这袋盐我买了"这件事与"哪份菜单要多少盐"无关。
+/// 顺带的好处：清单里没有的名字**天然被忽略**（不必清理），
+/// 而自加条目（`ShoppingExtra`）与菜单推出来的条目**共用同一套勾选**（都是清单上的一行）。
+///
+/// **有保质期**（`checkedAt`，服务端按 `SHOPPING_CHECK_TTL_DAYS` 判过期）：
+/// 上周勾掉的"葱"如果这周还亮着勾，用户会以为自己买过了——**宁可让他重新勾一次，
+/// 也不要拿上周的勾当这周的**。过期行在每次读取时顺手删掉（不留垃圾）。
+model ShoppingCheck {
+  id        String   @id @default(cuid())
+  familyId  String
+  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  /// 勾掉的那样东西（食材名，与清单上的 `name` 同一口径）
+  name      String   @db.VarChar(40)
+  /// 谁在超市里划掉的（共享关掉时只认自己勾的，与清单可见性同一套闸门）
+  checkedById String
+  checkedBy User   @relation(fields: [checkedById], references: [id], onDelete: Cascade)
+  checkedAt DateTime @default(now())
+
+  /// 同一家、同一样只留一条：勾是一个状态，不是一串事件
+  @@unique([familyId, name])
+  @@index([familyId, checkedAt])
+}
+
+/// 用户自己往采购清单上加的条目（M7 / F7-03「增减条目」）。
+///
+/// 清单是从菜单推出来的，推不出来的东西不代表不用买：垃圾袋、洗洁精、
+/// 孩子明天要带的水果——买菜路上想起来的东西没有菜谱。
+/// 不给这个入口，用户就得为了记一样东西去编一道菜（或者干脆忘掉）。
+///
+/// **只存用户加的那部分**：菜单推出来的条目仍然每次现算（改了菜单就该跟着变），
+/// 两者在接口层合成一张清单。所以这张表**不需要**跟随菜单变动做同步。
+model ShoppingExtra {
+  id        String   @id @default(cuid())
+  familyId  String
+  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  name      String   @db.VarChar(40)
+  /// 要买多少（自由文本，可空——与冰箱那侧同一口径：逼人填数字会让人干脆不记）
+  amount    String?  @db.VarChar(24)
+  addedById String
+  addedBy   User     @relation(fields: [addedById], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  /// 同一家同名只留一条（与冰箱同名同区只留一条同一规矩：两条同名会让人不知道怎么算）
+  @@unique([familyId, name])
+  @@index([familyId, createdAt])
 }

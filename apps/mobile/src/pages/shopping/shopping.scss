@@ -58,8 +58,125 @@
   color: var(--color-ink-3);
 }
 
+/* ---- 一键补货（F7-05）：勾掉的那样记进冰箱 ---- */
+
+/*
+ * 主按钮，但**只在勾了东西之后才出现**：一样都没勾时它按不了（服务端也会 400），
+ * 画一个按不动的按钮不如不画。
+ * 圆角 999px 与页面其它主按钮（冰箱扫描的"拍照/相册"）一致。
+ */
+.shop__restock {
+  display: block;
+  width: calc(100% - 2 * var(--spacing-page));
+  margin: 12px var(--spacing-page) 0;
+  padding: 13px 14px;
+  font: inherit;
+  font-size: 14px;
+  color: #fff;
+  text-align: center;
+  cursor: pointer;
+  background: var(--color-brand);
+  border: 0;
+  border-radius: 999px;
+}
+
+.shop__restock:active {
+  opacity: 0.85;
+}
+
+.shop__restock:disabled {
+  opacity: 0.6;
+}
+
+/* ---- 加一样清单上没有的（F7-03「增减条目」）---- */
+
+.shop__add {
+  margin: 10px var(--spacing-page) 0;
+}
+
+/* 收起时就是一行小字按钮：这个功能偶尔用一次，不该常占一块地方 */
+.shop__add-open {
+  width: 100%;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--color-brand);
+  text-align: center;
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1px dashed #d9b48c;
+  border-radius: 12px;
+}
+
+.shop__add-open:active {
+  background: rgb(224 123 57 / 6%);
+}
+
+.shop__add-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 名字占大头、数量窄一点（"半盒"这类就两三个字） */
+.shop__add-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink);
+  background: var(--color-cream-2);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+}
+
+.shop__add-input--amount {
+  flex: 0 1 92px;
+}
+
+.shop__add-input:focus-visible {
+  outline: none;
+  border-color: var(--color-focus-line);
+  box-shadow: var(--shadow-focus);
+}
+
+.shop__add-submit {
+  flex: 0 0 auto;
+  padding: 9px 13px;
+  font: inherit;
+  font-size: 13px;
+  color: #fff;
+  cursor: pointer;
+  background: var(--color-brand);
+  border: 0;
+  border-radius: 12px;
+}
+
+.shop__add-submit:disabled {
+  color: var(--color-ink-3);
+  cursor: default;
+  background: var(--color-cream-2);
+}
+
 .shop__list {
   padding: 6px 10px;
+}
+
+/*
+ * 按货架分组（F7-03）：一个组一个小标题，组内还是那些行。
+ * 标题压得很轻（11.5px 次要色）——它只是"走到哪个区了"的路标，
+ * 不该跟"买多少"（.shop__amount）抢注意力。
+ */
+.shop__aisle + .shop__aisle {
+  margin-top: 8px;
+}
+
+.shop__aisle-name {
+  margin: 6px 4px 2px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-ink-3);
 }
 
 .shop__items {
@@ -68,6 +185,38 @@
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* 一行 + 行尾那个「删掉」（只有自加条目才有） */
+.shop__item {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.shop__item .shop__label {
+  /* 行本身仍占满整行（点名字就能勾上）；宽度让给 ✕ 的那 30px 不影响这条 */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.shop__remove {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: 9px;
+}
+
+.shop__remove:active {
+  color: var(--color-brick);
+  background: rgb(185 74 44 / 8%);
 }
 
 /* 一行一样食材：勾选框 + 名字 + 用量 + 为哪几道菜买。

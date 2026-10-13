@@ -38,6 +38,7 @@
     "test:http:taste": "node scripts/verify-taste-http.cjs",
     "test:http:cookable": "node scripts/verify-cookable-http.cjs",
     "test:http:stock-match": "node scripts/verify-stock-match-http.cjs",
+    "test:http:shopping-edit": "node scripts/verify-shopping-edit-http.cjs",
     "test:http:decide": "node scripts/verify-decide-http.cjs"
   },
   "dependencies": {
