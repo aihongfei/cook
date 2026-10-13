@@ -49,39 +49,6 @@
   background: #e9a15e;
 }
 
-/* 数据三栏 */
-.stats {
-  display: flex;
-  margin: 14px var(--spacing-page) 0;
-  overflow: hidden;
-  background: var(--color-paper);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-}
-
-.stats__cell {
-  flex: 1;
-  padding: 15px 0;
-  text-align: center;
-  border-left: 1px dashed var(--color-line);
-}
-
-.stats__cell:first-child {
-  border-left: 0;
-}
-
-.stats__num {
-  display: block;
-  font-size: 23px;
-  color: #6e3a1c;
-}
-
-.stats__label {
-  font-size: 10.5px;
-  color: var(--color-ink-3);
-}
-
 /* 列表行 */
 .rows {
   margin: 14px var(--spacing-page) 0;
@@ -185,67 +152,6 @@
   justify-content: space-between;
   margin-top: 10px;
   font-size: 10px;
-  color: var(--color-ink-3);
-}
-
-/* AI 入口卡（冰箱页） */
-.aicta {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin: 14px var(--spacing-page) 0;
-  padding: 15px;
-  background: linear-gradient(100deg, #f8d9a8, #eeb877);
-  border-radius: var(--radius-card);
-  box-shadow: 0 8px 18px rgb(150 110 50 / 16%);
-}
-
-.aicta__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  height: 42px;
-  font-size: 20px;
-  background: rgb(255 255 255 / 55%);
-  border-radius: 14px;
-}
-
-.aicta__title {
-  font-size: 14.5px;
-  color: #7a4a18;
-}
-
-.aicta__desc {
-  margin-top: 3px;
-  font-size: 11px;
-  color: #96702f;
-}
-
-/* 四宫格 */
-.grid2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 11px;
-  margin: 14px var(--spacing-page) 0;
-}
-
-.quad {
-  padding: 13px;
-  background: var(--color-paper);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-tile);
-  box-shadow: var(--shadow-card);
-}
-
-.quad__title {
-  font-size: 13px;
-  color: #6e3a1c;
-}
-
-.quad__num {
-  margin-top: 3px;
-  font-size: 11px;
   color: var(--color-ink-3);
 }
 

@@ -84,21 +84,6 @@ export default function DiscoverPage() {
           </div>
         </section>
 
-        <div className="stats">
-          <div className="stats__cell">
-            <b className="stats__num">85</b>
-            <span className="stats__label">私房菜</span>
-          </div>
-          <div className="stats__cell">
-            <b className="stats__num">12</b>
-            <span className="stats__label">冰箱食材</span>
-          </div>
-          <div className="stats__cell">
-            <b className="stats__num">3</b>
-            <span className="stats__label">临期</span>
-          </div>
-        </div>
-
         {/* 家人最爱（F5-02）：排在"本周菜单"之后——先看"这几天吃什么"（当下要办的），
             再看"我们家平时吃什么"（回顾与找灵感）。 */}
         <FamilyPicks />

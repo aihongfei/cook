@@ -36,7 +36,7 @@ cook/
 │     │  ├─ data/            # demo.ts（M0 占位数据；订单示例已删除——点菜单在 M3 改用真实接口）
 │     │  ├─ layouts/         # TabLayout（外壳 + 底部导航）
 │     │  ├─ pages/           # kitchen/ recipes/（列表 + 详情）/ auth/（登录、注册、忘记密码、重设密码、auth.scss）
-│     │  │                   # / shopping/（采购清单，M7 F7-01）/ recipes/favorites/（我收藏的菜，M1 F1-09）/ family/（家庭与成员 + family.scss）/ order/（点菜单 + OrderDishSheet
+│     │  │                   # / shopping/（采购清单页，M7 F7-01；入口在「冰箱」Tab 首屏，D-040）/ fridge/（冰箱页：采购一行入口 + 库存骨架）/ recipes/favorites/（我收藏的菜，M1 F1-09）/ family/（家庭与成员 + family.scss）/ order/（点菜单 + OrderDishSheet
 │     │  │                   # 点菜抽屉 + order.scss）/ checkins/（家庭打卡墙 + components/CheckInUploadSheet
 │     │  │                   # 打卡上传抽屉 + checkins.scss）/ discover/ fridge/ mine/ + shared.scss
 │     │  │                   # kitchen/components/：HeroBanner / CategoryRow（配 category-icons.ts 的品类→素材查表）/

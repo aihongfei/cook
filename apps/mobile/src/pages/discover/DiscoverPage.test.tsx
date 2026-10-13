@@ -125,6 +125,21 @@ it('两个 AI 入口都还在（合并成一块之后位置变了，别改丢）
   expect(await screen.findByText(/说说想吃什么/)).toBeTruthy()
 })
 
+it('发现页不再有那三格假数字，也不再有重复的入口胶囊（2026-10-13 信息架构改版，D-040）', async () => {
+  mockRecipes(12)
+  renderDiscover()
+
+  await screen.findByText('摇一道')
+  // 三格（85 私房菜 / 12 冰箱食材 / 3 临期）是 M0 拼版面用的写死数据：
+  // 库内实际 600 道、冰箱功能还没做。它们该是**冰箱页**的数据，不该在发现页，
+  // 更不该是假的。这条守住"别哪天又给加回来"。
+  expect(document.querySelector('.stats')).toBeNull()
+  for (const ghost of ['私房菜', '冰箱食材', '临期']) expect(screen.queryByText(ghost)).toBeNull()
+  // 入口胶囊只留跟「本周菜单」走的两个；收藏/点菜不再从发现页重复给
+  const pills = [...document.querySelectorAll('.picks__more, .weekplan__more')].map((p) => p.textContent?.trim())
+  expect(pills).toEqual(['常用组合 →', '备菜计划 →'])
+})
+
 it('问 AI 那行只有后半句可点：前半句是说明，不该看着像按钮', async () => {
   mockRecipes(12)
   renderDiscover()

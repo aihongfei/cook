@@ -165,14 +165,14 @@ it('接口失败时给可重试的提示，不是一片空白', async () => {
   expect(await screen.findByText('最近几天的安排暂时打不开')).toBeTruthy()
 })
 
-// 备菜计划入口（F4-03）：这张卡只看 3 天，排满一周得进备菜计划。
-// 盯的是"两个入口都在、且各自指向对的地方"——只剩一个的话，要么排不了整周、
-// 要么点了没反应（去点菜单也重要：改状态在那）。
-it('卡头给两个出口：备菜计划（排满一周）与去点菜单（改状态）', async () => {
+// 卡头出口（F4-03 / 2026-10-13 信息架构改版）：这张卡只看 3 天，排满一周得进备菜计划，
+// 所以「备菜计划」留着；「去点菜单」撤掉了——底栏「订单」Tab 自家就是它，
+// 发现页再挂一个是重复入口（用户说"有点乱"的那一类）。
+it('卡头只留「备菜计划」出口（「去点菜单」已撤）', async () => {
   mockGet()
   renderWeekPlan()
 
   const prep = await screen.findByRole('link', { name: /备菜计划/ })
   expect(prep.getAttribute('href')).toBe('/prep')
-  expect(screen.getByRole('link', { name: /去点菜单/ }).getAttribute('href')).toBe('/order')
+  expect(screen.queryByRole('link', { name: /去点菜单/ })).toBeNull()
 })

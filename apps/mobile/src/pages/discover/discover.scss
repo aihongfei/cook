@@ -565,36 +565,6 @@
   color: #6e3a1c;
 }
 
-.picks__links {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-left: auto;
-}
-
-/* 与 .weekplan__more 同一套"可点"语汇（用户 2026-10-12 指出过纯文字看不出来能点） */
-.picks__more {
-  padding: 3px 8px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: #c4652a;
-  text-decoration: none;
-  background: rgb(224 123 57 / 9%);
-  border: 1px solid #e2a06c;
-  border-radius: 999px;
-}
-
-.picks__more:active {
-  transform: scale(0.94);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .picks__more:active {
-    transform: none;
-  }
-}
-
 .picks__status-line {
   padding: 6px 0;
 }

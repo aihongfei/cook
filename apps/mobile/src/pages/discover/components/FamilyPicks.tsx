@@ -77,15 +77,6 @@ export default function FamilyPicks() {
     <section className="card picks">
       <div className="picks__head">
         <span className="picks__title">家人最爱</span>
-        {/* 只给"做过"与"收着"两个来源，所以出路只有两条：去点菜（做过）与去收藏 */}
-        <span className="picks__links">
-          <Link className="picks__more" to="/favorites" state={{ from: location.pathname }}>
-            我收藏的菜 →
-          </Link>
-          <Link className="picks__more" to="/recipes" state={{ from: location.pathname }}>
-            去点菜 →
-          </Link>
-        </span>
       </div>
 
       {picks.isPending && (

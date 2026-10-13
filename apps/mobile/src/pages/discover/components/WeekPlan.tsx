@@ -101,9 +101,6 @@ export default function WeekPlan() {
           <Link className="weekplan__more" to="/prep" state={{ from: location.pathname }}>
             备菜计划 →
           </Link>
-          <Link className="weekplan__more" to="/order" state={{ from: location.pathname }}>
-            去点菜单 →
-          </Link>
         </span>
       </div>
 

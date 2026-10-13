@@ -125,6 +125,19 @@ figcaption b{color:var(--ink)}
 .legend b{display:inline-flex;width:17px;height:17px;border-radius:50%;background:var(--brick);color:#fff;
   font-size:10.5px;align-items:center;justify-content:center;margin-right:6px;vertical-align:1px}
 
+/* 采购一行入口（最终形态） */
+.shopentry{display:flex;gap:10px;align-items:center;padding:11px 14px}
+.shopentry__icon{font-size:19px;line-height:1}
+.shopentry__main{display:flex;flex:1 1 auto;flex-direction:column;gap:1px;min-width:0}
+.shopentry__title{font-size:14px;color:var(--ink)}
+.shopentry__meta{font-size:11.5px;color:var(--ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shopentry__arrow{font-size:17px;color:var(--ink3)}
+/* 冰箱四区骨架（还没做，只画空槽） */
+.zones{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:11px}
+.zone{display:flex;flex-direction:column;gap:3px;padding:11px 12px;font-size:13px;color:var(--ink2);
+  background:rgb(255 255 255 / 55%);border:1px dashed #cbb69c;border-radius:18px}
+.zone span{font-size:10.5px;color:var(--ink3)}
+
 /* 状态小卡（方案 A 的采购卡在三种状态下的样子） */
 .states{display:flex;gap:14px;overflow-x:auto;padding:2px 2px 14px}
 .statecard{flex:0 0 auto;width:300px;padding:13px;background:var(--paper);border:1px solid var(--line);
@@ -274,11 +287,12 @@ figcaption b{color:var(--ink)}
 <!-- ==================== 方案 A ==================== -->
 <section id="a" class="panel">
   <div class="panel-note">
-    <h3>方案 A：采购清单进「冰箱」Tab 第一屏 <span class="tag ok">推荐</span></h3>
+    <h3>方案 A：采购清单进「冰箱」Tab 第一屏 <span class="tag ok">✅ 用户已选定（2026-10-13）</span></h3>
     <p style="margin:4px 0 8px;font-size:12.5px">买与存是一件事的两半：要买什么 ↔ 家里有什么。做成"只买缺的"（F7-02）、"买完一键入库"（F7-05）都建立在这个配对之上。冰箱 Tab 现在本来就没有真内容，正好把这块真实的放进去，顺手把整页假数据撤掉。</p>
     <ul>
       <li>代价：改动面最大（要重做冰箱页这一屏）。</li>
       <li>好处：离手最近（底部 Tab 一层，点开就是）；冰箱页从"假的空页"变成"每天都会用的一页"。</li>
+      <li><b>⚠️ 形态已按用户反馈收紧</b>：采购块**只占一行**（下图已是最终形态）——用户指出"要去买什么还是占据太大位置了，冰箱相关应该才是主题"。所以采购是**一行入口**（要去买什么 · 共 N 样 ›），主体留给冰箱（四个存放区骨架 + 明说"还没做"）。完整清单在 `/shopping`。</li>
     </ul>
   </div>
   <p class="hint">左右滑动看三屏：冰箱页（新）/ 发现页（收干净）/ 采购清单卡在四种状态下的样子。</p>
@@ -286,21 +300,25 @@ figcaption b{color:var(--ink)}
     <figure>
       <div class="phone"><div class="screen">
         <div class="phead"><div class="ptitle">我的冰箱</div><div class="psub">要买的、家里有的，都在这儿</div></div>
-        <div class="card hl">
-          <div class="chead"><span class="ctitle">🛒 要去买什么</span><span class="pill">共 15 样 →</span></div>
-          <div class="psub" style="margin-top:2px">按「已安排 / 正在做」的菜单算 · 3 天 2 餐 3 道菜</div>
-          <div style="margin-top:8px">
-            <div class="shopline"><span>花椒 <span class="amt">3-4颗</span></span><span class="preason">【红烧排骨】</span></div>
-            <div class="shopline"><span>白砂糖 <span class="amt mute">用量没写</span></span><span class="preason">【红烧排骨】</span></div>
-            <div class="shopline"><span>桂圆肉 <span class="amt">6个</span></span><span class="preason">【桂圆银耳羹】</span></div>
-          </div>
-          <div class="cta">看一眼完整清单 →</div>
-          <div class="psub" style="margin-top:6px">勾选、按名字排序、还能看到"为哪几道菜买"</div>
+        <div class="card shopentry">
+          <span class="shopentry__icon">🛒</span>
+          <span class="shopentry__main">
+            <span class="shopentry__title">要去买什么</span>
+            <span class="shopentry__meta">10-13 起 3 天 · 共 15 样</span>
+          </span>
+          <span class="shopentry__arrow">›</span>
         </div>
         <div class="card dim">
-          <div class="chead"><span class="ctitle">冰箱库存 · 还没做</span><span class="pill">M6</span></div>
-          <p style="margin:6px 0 0;font-size:11.5px;color:var(--ink3)">
-            做出来之后这里显示：在库食材 · 临期提醒 · 存放位置（常温/保鲜/冷藏/冷冻）。拍照识别入库是 M16 的事。
+          <div class="chead"><span class="ctitle">冰箱里有什么</span><span class="pill">还没做</span></div>
+          <div class="zones">
+            <span class="zone">常温<span>食材会列在这里</span></span>
+            <span class="zone">保鲜<span>食材会列在这里</span></span>
+            <span class="zone">冷藏<span>食材会列在这里</span></span>
+            <span class="zone">冷冻<span>食材会列在这里</span></span>
+          </div>
+          <p style="margin:9px 0 0;font-size:11.5px;color:var(--ink2);line-height:1.75">
+            做出来之后：每种食材的数量与保质期、快到期的先进「今日先吃」；菜谱配料与存货对上之后，
+            采购清单就只算缺的那几样。拍照识别入库是 AI 那一摊的事。
           </p>
         </div>
       </div>
@@ -311,7 +329,7 @@ figcaption b{color:var(--ink)}
         <i class="on"><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 10h14" stroke="currentColor" stroke-width="2"/></svg>冰箱</i>
         <i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="currentColor"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6Z" fill="currentColor"/></svg>我的</i>
       </nav></div>
-      <figcaption><b>冰箱页（新）</b>：第一块就是今天要买什么，点一下进完整清单</figcaption>
+      <figcaption><b>冰箱页（最终形态）</b>：采购**一行入口**（约 63px），主体是冰箱骨架</figcaption>
     </figure>
 
     <figure>
@@ -550,7 +568,7 @@ figcaption b{color:var(--ink)}
   <div class="panel-note" style="border-left-color:#8e6b52">
     <h3>三个方案都要做的共同动作</h3>
     <ul>
-      <li><b>撤掉假数字</b>：发现页那三格（85 / 12 / 3）直接删——它不是内容，是拼版面用的。冰箱页的假数据只有方案 A 会一并清掉，B / C 要另开一刀。</li>
+      <li><b>撤掉假数字</b>：发现页那三格（85 / 12 / 3）直接删——它不是内容，是拼版面用的。冰箱页的假数据只有方案 A 会一并清掉，B / C 要另开一刀。<span class="tag ok">✅ 已做（方案 A）</span></li>
       <li><b>「收藏」入口只留「我的」</b>（我的页那条已经在），外加每张菜卡右上角那颗心本身。收藏是私人功能，不放在"家人最爱"旁边。</li>
       <li><b>点菜入口不再从发现页重复给</b>：订单 Tab、菜谱小书、每张卡的「点这道」、详情页「想吃这道」已经够了。</li>
       <li><b>「常用组合」与「备菜计划」留在「本周菜单」卡上</b>：它们是排菜工具，跟着这张卡走读得通。（如果你觉得也该挪走，说一声，我把「常用组合」挪到备菜计划页。）</li>

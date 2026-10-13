@@ -125,13 +125,15 @@ it('点一行进那道菜的详情页', async () => {
   expect(screen.getByTestId('probe').textContent).toBe('/recipes/jis-abc')
 })
 
-it('名单超过一屏时说还有多少道，并给出出路（收藏 / 去点菜）', async () => {
+it('名单超过一屏时说还有多少道；**卡头不再挂"收藏/点菜"入口**（2026-10-13 信息架构改版）', async () => {
   mockGet({ picks: board({ total: 20, items: [pick()] }) })
   renderPicks()
 
   expect(await screen.findByText(/还有 19 道做过或收过的菜/)).toBeTruthy()
-  expect(screen.getByRole('link', { name: '我收藏的菜 →' })).toBeTruthy()
-  expect(screen.getByRole('link', { name: '去点菜 →' })).toBeTruthy()
+  // 收藏归「我的」+ 每张卡右上角那颗心；点菜有订单 Tab / 菜谱小书 / 卡片上的「点这道」。
+  // 这一块是"看我们家吃什么"的内容，不该再当入口集散地（用户 2026-10-13 说"有点乱"）
+  expect(screen.queryByRole('link', { name: '我收藏的菜 →' })).toBeNull()
+  expect(screen.queryByRole('link', { name: '去点菜 →' })).toBeNull()
 })
 
 it('没加入家庭时给出去处，不去问榜单', async () => {
