@@ -4,13 +4,19 @@ import { useQueryClient } from '@tanstack/react-query'
 import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
 import {
-  StreamError, invalidateAfterAiWrite, streamAiChat, useAiStatus, useUndoAiAction, type AiReceipt,
+  StreamError, invalidateAfterAiWrite, streamAiChat, uploadAiAttachment, useAiStatus, useUndoAiAction,
+  type AiReceipt,
 } from '@/api/ai'
+import { shrinkImage } from '@/api/checkins'
 import { useAddOrderItem } from '@/api/orders'
 import { toast } from '@/components/ui/toast'
 import { selectActiveConversation, useAiAssistantSession } from '@/stores/ai-assistant-session'
 import { chatTimeLabel, wireMessages } from '@/stores/ai-assistant.rules'
 import AiReceiptCard from '@/components/ai/AiReceiptCard'
+import AiTurnAttachment from '@/components/ai/AiTurnAttachment'
+import PhotoSourceInputs from '@/components/ui/PhotoSource'
+import { photoSourceIds } from '@/components/ui/photo-source'
+import { AlbumIcon, CameraIcon, CloseIcon, PlusIcon } from '@/components/icons/TabIcons'
 import './ai-assistant.scss'
 
 /**
@@ -67,6 +73,17 @@ export default function AiAssistantSheet() {
   const queryClient = useQueryClient()
   /** 正在撤的那一笔（给那一行转圈，避免连点） */
   const [undoing, setUndoing] = useState<string | null>(null)
+  /**
+   * 已经传上去、等这条消息发出去的那几张图（F16-05）。
+   *
+   * **先传后发**：上传是重操作（解码 + 写私有桶），与"发消息"绑在一起的话，
+   * 用户在模型回答前要等两段（先传图、再等模型），而且失败时说不清是哪一步坏了。
+   * 所以选图就立刻传，拿到 id 挂在待发区，用户按下发送时只带 id（几十字节）。
+   */
+  const [attached, setAttached] = useState<string[]>([])
+  /** 「＋」点开之后的来源选择（拍照 / 从相册选）露着没有 */
+  const [choosing, setChoosing] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const threadRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -112,7 +129,8 @@ export default function AiAssistantSheet() {
 
   const send = useCallback(async (text: string) => {
     const content = text.trim()
-    if (!content || useAiAssistantSession.getState().pending) return
+    // **有图就能发**：拍张照直接发是最自然的用法，逼用户配一句话是多余的仪式
+    if ((!content && attached.length === 0) || useAiAssistantSession.getState().pending) return
     /*
      * 历史要**在 beginTurn 之前**取（它会把这一句推上去），并且**先过 wireMessages**：
      * 只发最近十条、且一条空的都不带（后端两条红线，见文件头 ②）。
@@ -120,9 +138,17 @@ export default function AiAssistantSheet() {
      * ⚠️ 这一句**必须一起进去过筛**，不能写成"截十条历史 + 追加这一句"——
      * 那样总数是十一条，后端 `AI_MESSAGES_MAX = 10` 直接 400（第一版就是那么写的，
      * 单测当场算出 11 条把它抓红了）。新问的这句本来就该占掉最老的那条的位置。
+     *
+     * 这一轮带的图也要一起进去（`attachments`）：服务端凭 id 去私有桶取字节给模型看。
      */
-    const history = wireMessages([...turns, { role: 'user' as const, content }])
-    beginTurn(content)
+    const sending = attached
+    const history = wireMessages([
+      ...turns,
+      { role: 'user' as const, content, ...(sending.length ? { attachments: sending } : {}) },
+    ])
+    beginTurn(content, sending)
+    // 发出去就把待发区清空：图现在挂在那一轮消息上了（重复带会让每轮都重发一遍图）
+    setAttached([])
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -145,7 +171,31 @@ export default function AiAssistantSheet() {
     } finally {
       abortRef.current = null
     }
-  }, [appendChunk, handleReceipts, beginTurn, endTurn, setProposals, setStage, turns])
+  }, [appendChunk, handleReceipts, beginTurn, endTurn, setProposals, setStage, turns, attached])
+
+  /**
+   * 选图 → 缩图 → 上传，拿到 id 放进待发区（F16-05）。
+   *
+   * 缩图用**与打卡照片同一个函数**（`shrinkImage`：最长边 1600px / JPEG 0.85）：
+   * 手机原图 3–10MB，不缩的话 base64 之后是十几 MB 的请求体，还没到模型就先超时。
+   *
+   * 一张一张传、传不成如实说：失败就**不进待发区**（把一张没上传成功的图留在预览里，
+   * 用户要等模型回答完才发现它根本没看图）。
+   */
+  const pickAttachment = async (file: File | undefined) => {
+    if (!file) return
+    setChoosing(false)
+    setUploading(true)
+    try {
+      const shrunk = await shrinkImage(file)
+      const { id } = await uploadAiAttachment(shrunk)
+      setAttached((current) => (current.includes(id) ? current : [...current, id]))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : apiErrorMessage(error))
+    } finally {
+      setUploading(false)
+    }
+  }
 
   /** 撤一笔：成不成由服务端说，前端只负责把结果如实转达 */
   const undoReceipt = (item: AiReceipt) => {
@@ -256,6 +306,17 @@ export default function AiAssistantSheet() {
                 if (turn.role === 'assistant' && turn.content === '') return null
                 return (
                   <div className={`ai__turn ai__turn--${turn.role}`} key={`${turn.role}-${index}`}>
+                    {/*
+                     * 带图的那些先画图再画字（与发给模型的顺序一致：文字在前、图在后）。
+                     * 图随对话一起落盘，所以**翻历史时它们还在**（用户明确要的那条）。
+                     */}
+                    {(turn.attachments?.length ?? 0) > 0 && (
+                      <div className="ai__turn-photos">
+                        {turn.attachments!.map((id, at) => (
+                          <AiTurnAttachment key={id} id={id} index={at} />
+                        ))}
+                      </div>
+                    )}
                     {turn.content}
                     {pending && turn.role === 'assistant' && index === turns.length - 1 && (
                       <span className="ai__caret" aria-hidden />
@@ -312,12 +373,64 @@ export default function AiAssistantSheet() {
             </div>
           )}
 
+          {/*
+           * 还没发出去的那几张图（F16-05）。放在输入框**上方**：它是"这条消息的一部分"，
+           * 与输入框贴在一起才看得出这个从属关系。
+           */}
+          {attached.length > 0 && (
+            <div className="ai__pending-photos">
+              {attached.map((id) => (
+                <span className="ai__pending-photo" key={id}>
+                  <AiTurnAttachment id={id} index={0} />
+                  <button
+                    type="button"
+                    className="ai__pending-drop"
+                    aria-label="不发了"
+                    onClick={() => setAttached((current) => current.filter((item) => item !== id))}
+                  >
+                    <CloseIcon width={11} height={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/*
+           * 图片来源：**先点「＋」，再选怎么给**（用户 2026-10-13：「需要能拍照或者从相册选两种」）。
+           * 为什么不在输入行里并排摆两个按钮：那一行只剩几十像素，塞两个圆钮会把输入框挤到
+           * 连占位文字都放不下；而且"加一张图"是一件事，先表明意图再问怎么给更顺（微信也是这个次序）。
+           * 两个入口各自对应一个控件：带 `capture` 的直接开相机、不带的走相册（见 PhotoSource.tsx）。
+           */}
+          {choosing && (
+            <div className="ai__sources">
+              <label className="ai__source" htmlFor={photoSourceIds('ai-attachment').cameraId}>
+                <CameraIcon width={17} height={17} />
+                拍一张
+              </label>
+              <label className="ai__source" htmlFor={photoSourceIds('ai-attachment').albumId}>
+                <AlbumIcon width={17} height={17} />
+                从相册选
+              </label>
+            </div>
+          )}
+
           <div className="ai__ask">
+            <button
+              type="button"
+              className="ai__attach"
+              aria-label={choosing ? '收起图片来源' : '加一张图'}
+              aria-expanded={choosing}
+              disabled={uploading}
+              onClick={() => setChoosing((current) => !current)}
+            >
+              {uploading ? <DotLoading color="currentColor" /> : <PlusIcon width={20} height={20} />}
+            </button>
+            <PhotoSourceInputs id="ai-attachment" onPick={(file) => void pickAttachment(file)} />
             <input
               className="ai__note"
               value={draft}
               maxLength={1000}
-              placeholder="说一句，如：记一下冰箱里有酸奶"
+              placeholder={attached.length > 0 ? '配一句话（也可以直接发）' : '说一句，如：记一下冰箱里有酸奶'}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') void send(draft)
@@ -326,7 +439,8 @@ export default function AiAssistantSheet() {
             <button
               type="button"
               className="ai__go"
-              disabled={pending || !draft.trim()}
+              // 有图就能发（拍张照直接发是最自然的用法，不必先打字）
+              disabled={pending || uploading || (!draft.trim() && attached.length === 0)}
               onClick={() => void send(draft)}
             >
               {pending ? <DotLoading color="currentColor" /> : '说'}

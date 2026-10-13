@@ -9,6 +9,7 @@ import { OrdersModule } from '../orders/orders.module'
 import { RecipesModule } from '../recipes/recipes.module'
 import { PrismaService } from '../recipes/prisma.service'
 import { AiActionService } from './ai-action.service'
+import { AiAttachmentService } from './ai-attachment.service'
 import { AiController } from './ai.controller'
 import { AiService } from './ai.service'
 
@@ -40,6 +41,6 @@ import { AiService } from './ai.service'
     CombosModule,
   ],
   controllers: [AiController],
-  providers: [PrismaService, AiService, AiActionService, JwtAuthGuard],
+  providers: [PrismaService, AiService, AiActionService, AiAttachmentService, JwtAuthGuard],
 })
 export class AiModule {}

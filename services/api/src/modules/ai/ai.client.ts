@@ -35,6 +35,14 @@ export interface ChatRequest {
   jsonSchema?: unknown
   temperature?: number
   signal?: AbortSignal
+  /**
+   * 挂在**最后一条 user 消息**上的图片（F16-04 冰箱拍照识别用它）。
+   *
+   * 为什么做成一个独立字段而不是让 `messages` 自带内容块：这条路（非流式 + 结构化输出）
+   * 的调用方只有一个，而"给最后那句话附一张图"正好就是它的形状。把 `ChatMessage` 也改成
+   * 联合类型会波及 `chatStreamEvents` 与它的所有调用点，而它们本来就走另一条路。
+   */
+  images?: { data: string; mimeType: string }[]
 }
 
 export class AiUpstreamError extends Error {
@@ -93,7 +101,7 @@ export async function chatJson(config: AiConfig, request: ChatRequest): Promise<
         runtime.model,
         {
           systemPrompt: request.systemPrompt,
-          messages: simpleMessages(request.messages, { provider: runtime.model.provider, model: runtime.model.id }),
+          messages: simpleMessages(request.messages, { provider: runtime.model.provider, model: runtime.model.id }, request.images),
         },
         {
           ...options(request.temperature ?? 0.7),
@@ -215,21 +223,34 @@ export async function* chatStreamEvents(config: AiConfig, request: ToolStreamReq
 function simpleMessages(
   messages: readonly ChatMessage[],
   identity: { provider: string; model: string },
+  images: { data: string; mimeType: string }[] = [],
 ): Message[] {
-  return messages.map((message) => (
-    message.role === 'assistant'
-      ? {
-          role: 'assistant' as const,
-          content: [{ type: 'text' as const, text: message.content }],
-          api: 'openai-completions' as const,
-          provider: identity.provider,
-          model: identity.model,
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-          stopReason: 'stop' as const,
-          timestamp: Date.now(),
-        }
-      : { role: 'user' as const, content: message.content, timestamp: Date.now() }
-  ))
+  return messages.map((message, index) => {
+    if (message.role === 'assistant') {
+      return {
+        role: 'assistant' as const,
+        content: [{ type: 'text' as const, text: message.content }],
+        api: 'openai-completions' as const,
+        provider: identity.provider,
+        model: identity.model,
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: 'stop' as const,
+        timestamp: Date.now(),
+      }
+    }
+    /*
+     * 图片挂**最后一条** user 消息（调用方的语义就是"给这句话附一张图"）。
+     * 空文本块要丢掉：有的网关会把空 text 判成非法，而"只给一张图 + 一句要求"
+     * 是很常见的形状（提示词本身就承载了全部任务说明）。
+     */
+    if (images.length > 0 && index === messages.length - 1) {
+      const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = []
+      if (message.content) content.push({ type: 'text' as const, text: message.content })
+      for (const image of images) content.push({ type: 'image' as const, data: image.data, mimeType: image.mimeType })
+      return { role: 'user' as const, content, timestamp: Date.now() }
+    }
+    return { role: 'user' as const, content: message.content, timestamp: Date.now() }
+  })
 }
 
 /**

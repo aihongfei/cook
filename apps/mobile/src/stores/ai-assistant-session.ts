@@ -68,7 +68,7 @@ interface AiAssistantState {
   clearAll: () => void
   toggleHistory: () => void
   setDraft: (draft: string) => void
-  beginTurn: (userText: string) => void
+  beginTurn: (userText: string, attachments?: string[]) => void
   appendChunk: (chunk: string) => void
   endTurn: (options?: { dropEmptyAssistant?: boolean }) => void
   setStage: (stage: string) => void
@@ -162,7 +162,7 @@ export const useAiAssistantSession = create<AiAssistantState>()(
       toggleHistory: () => set((state) => ({ historyOpen: !state.historyOpen })),
       setDraft: (draft) => set({ draft }),
 
-      beginTurn: (userText) => set((state) => {
+      beginTurn: (userText, attachments) => set((state) => {
         const active = ensureActive(state)
         const now = Date.now()
         const next: AiConversation = {
@@ -170,7 +170,17 @@ export const useAiAssistantSession = create<AiAssistantState>()(
           // 第一句话定标题（已经聊过的别改：标题是"从哪儿翻回去"的线索）
           title: active.turns.length === 0 ? conversationTitle(userText) : active.title,
           updatedAt: now,
-          turns: [...active.turns, { role: 'user', content: userText }, { role: 'assistant', content: '' }],
+          turns: [
+            /*
+             * ⚠️ `...active.turns` 一定不能丢（这里曾经漏过一次）：少了它，每问一句都会把
+             * 前面所有对话冲掉——症状是"聊到第三句它就不记得第一句了"，
+             * 而抽屉里也只剩最后一句。已由「发给模型的只有最近十条」那条用例钉住。
+             */
+            ...active.turns,
+            // 图片 id 跟着这一句一起落盘 → 翻历史时图还在（用户明确要的那条）
+            { role: 'user', content: userText, ...(attachments?.length ? { attachments } : {}) },
+            { role: 'assistant', content: '' },
+          ],
         }
         return {
           ...upsert(state, next),

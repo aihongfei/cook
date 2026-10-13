@@ -232,3 +232,159 @@
     animation: none;
   }
 }
+
+/*
+ * 对话里的图片（F16-05；用户 2026-10-13「ai助手那里也需要添加附件上传功能，
+ * 会话中也要能展示图片，历史会话图片也得展示，不能丢失」）。
+ *
+ * 三种位置共用同一张缩略图样式：
+ * - `.ai__turn-photos`：**已经发出去**的那条消息带的图（翻历史时看的就是它）；
+ * - `.ai__pending-photos`：选好还没发的那几张（在输入框上方）；
+ * - `.ai__photo`：单个缩略图本身。
+ */
+
+.ai__turn-photos,
+.ai__pending-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* 用户那条消息的图排在自己那句话上方，与气泡贴紧一点 */
+.ai__turn-photos {
+  margin-bottom: 6px;
+}
+
+.ai__pending-photos {
+  margin-top: 10px;
+}
+
+/* 待发的那一张带一个「×」，所以要相对定位 */
+.ai__pending-photo {
+  position: relative;
+  display: inline-flex;
+}
+
+/*
+ * 缩略图。它是**一颗按钮**（点一下看大图，见 AiTurnAttachment），所以这里要把
+ * 浏览器给 button 的默认外观全摁掉（内边距、背景、居中文字），否则图会被挤小一圈。
+ */
+.ai__photo {
+  display: block;
+  width: 68px;
+  height: 68px;
+  padding: 0;
+  overflow: hidden;
+  cursor: zoom-in;
+  background: var(--color-cream-2);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+
+  &:active { opacity: 0.82; }
+
+  img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+}
+
+/* 取图途中先占住位置（不然图片到达时整段对话会跳一下） */
+.ai__photo--loading {
+  background: linear-gradient(100deg, var(--color-cream-2) 30%, #f7ece0 50%, var(--color-cream-2) 70%);
+  background-size: 200% 100%;
+  animation: ai-photo-shimmer 1.2s linear infinite;
+}
+
+@keyframes ai-photo-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* 很旧的对话里那张图可能已被清理（后端有留存上限）：说一句人话，别画个碎图标 */
+.ai__photo-missing {
+  display: inline-flex;
+  align-items: center;
+  height: 68px;
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--color-ink-3);
+  background: var(--color-cream-2);
+  border: 1px dashed var(--color-line);
+  border-radius: 12px;
+}
+
+/* 待发图右上角的「×」：压在图上、但不遮住图的主体（图标是矢量，不靠 font-size 调大小） */
+.ai__pending-drop {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: #fff;
+  cursor: pointer;
+  background: #b5744b;
+  border: 1.5px solid var(--color-paper);
+  border-radius: 50%;
+}
+
+/* 附件按钮：与输入框同一行的次要动作，做成描边圆形，不与「说」抢注意力 */
+/*
+ * 「＋」：38px 的圆钮，图标是描边的（不是文字 `＋`）。
+ *
+ * 用户 2026-10-13 报「这个加号没有居中」：原先那个是全角 `＋`（U+FF0B），量出来墨迹中心
+ * 比圆钮中心偏左 3.7px、偏下 2.7px——那是字形自带的边距与基线，flex 居中治不了。
+ * 换成 `PlusIcon` 之后中心就是几何中心（见该图标上的说明）。
+ */
+.ai__attach {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  color: #ab5527;
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1.5px solid #de9057;
+  border-radius: 50%;
+
+  &:disabled { cursor: wait; opacity: 0.6; }
+}
+
+.ai__attach:active {
+  opacity: 0.8;
+}
+
+/*
+ * 「拍一张 / 从相册选」两行（点开 ＋ 之后才出现，见 AiAssistantSheet）。
+ * 摆在输入行**上方**、与输入框同宽：它回答的是"这张图从哪来"，属于输入这件事的一部分。
+ */
+.ai__sources {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ai__source {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 10px;
+  font-size: 13px;
+  color: #8a4a24;
+  cursor: pointer;
+  background: var(--color-cream);
+  border: 1.5px dashed #de9057;
+  border-radius: 12px;
+
+  &:active { background: var(--color-cream-2); }
+}

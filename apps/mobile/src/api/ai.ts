@@ -54,6 +54,17 @@ export interface SuggestResult {
 export interface ChatTurn {
   role: 'user' | 'assistant'
   content: string
+  /**
+   * 这条消息带的图片（F16-05：用户 2026-10-13「ai助手那里也需要添加附件上传功能」）。
+   *
+   * **存的是服务端的 id，不是图片本身**：会话整场落盘在 localStorage（约 5MB），
+   * 一张缩过的照片也有几百 KB——塞两张就会写失败，而且失败是静默的（连对话本身都存不进去）。
+   * 图片字节在服务端私有桶里，显示时按 id 取（`attachmentPhotoUrl`）。
+   *
+   * 它随对话一起落盘，所以**翻历史时图还在**——这正是用户明确要的那条
+   * （「历史会话图片也得展示，不能丢失」）。
+   */
+  attachments?: string[]
 }
 
 /**
@@ -97,6 +108,53 @@ export interface AiReceipt {
    * 撤过的卡不删掉而是划掉——撤了什么也该看得见，否则用户回头会以为自己没点过。
    */
   undone?: boolean
+}
+
+/**
+ * 传一张图给 AI，拿回它的 id（对话里只传 id）。
+ *
+ * 缩图**由调用方完成**（`shrinkImage`：最长边 1600px / JPEG 0.85，与打卡照片同一个口径）：
+ * 手机原图 3–10MB，直接 base64 之后是十几 MB 的请求体，还没到模型就先超时了。
+ */
+export async function uploadAiAttachment(image: string): Promise<{ id: string; mimeType: string }> {
+  const { data } = await apiClient.post<{ id: string; mimeType: string }>('/ai/attachments', { image })
+  return data
+}
+
+/**
+ * 一张对话图片的显示地址。
+ *
+ * **不能直接放进 `<img src>`**：取图接口要过登录令牌，而 `<img>` 带不上 Authorization 头。
+ * 与打卡照片同一个问题、同一个解法——`AiTurnAttachments` 用这个地址取 blob 再转 blob URL。
+ * 返回的是**完整地址**（拼了 API 前缀），因为用它发出的是普通 fetch。
+ */
+export function attachmentPhotoUrl(id: string): string {
+  return `${API_BASE}/ai/attachments/${encodeURIComponent(id)}/photo`
+}
+
+export interface FridgeScanDraft {
+  name: string
+  amount: string | null
+  zone: '常温' | '保鲜' | '冷藏' | '冷冻'
+  /** 这个存放区是模型推断的（不是照片里读出来的），界面上要标出来 */
+  zoneGuessed: boolean
+  note: string | null
+}
+
+export interface FridgeScanResult {
+  items: FridgeScanDraft[]
+  summary: string
+}
+
+/**
+ * 冰箱拍照识别（F16-04）：一张图 → 食材清单**草稿**。
+ *
+ * 后端只回草稿、不写库（这是整个功能的护栏）：照片识别一定会认错，而冰箱是
+ * 「今日先吃」与推荐的输入。入库那一步由用户逐项确认后走 `POST /fridge`（与手填同一个口）。
+ */
+export async function scanFridge(attachmentId: string): Promise<FridgeScanResult> {
+  const { data } = await apiClient.post<FridgeScanResult>('/ai/scan-fridge', { attachmentId }, { timeout: AI_TIMEOUT_MS })
+  return data
 }
 
 export async function fetchAiStatus(): Promise<AiStatus> {

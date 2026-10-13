@@ -11,10 +11,22 @@
  */
 import type { Message, Tool, ToolCall as PiToolCall } from '@earendil-works/pi-ai'
 
+/** 上游线格式里的一条用户消息内容块（文本 / 图片） */
+export type WireContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string }
+
 /** 内部消息（与 ai.client 的 WireMessage 结构一致；结构性类型，避免循环依赖） */
 export interface WireLike {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | null
+  /**
+   * 纯文本，或**带图的内容块数组**（F16-05：对话里的图片）。
+   *
+   * 两种形状并存是有原因的：助手/工具消息永远是纯文本（模型不返图），
+   * 只有用户消息可能带图。统一成数组会让"纯文本那条路"多一层包装，
+   * 而那条路是**每轮工具循环都要重放**的（多一层就多一处出错的地方）。
+   */
+  content: string | WireContentBlock[] | null
   tool_calls?: { id: string; name: string; arguments: string }[]
   tool_call_id?: string
 }
@@ -89,13 +101,37 @@ export function toPiMessages(messages: readonly WireLike[], identity: PiModelIde
     }
 
     if (message.role === 'user') {
-      out.push({ role: 'user', content: message.content ?? '', timestamp: Date.now() })
+      /*
+       * 用户消息：纯文本直接给，**带图的要翻成 pi-ai 的内容块**
+       * （`{type:'image', data, mimeType}` → 它按 `data:<mime>;base64,<data>` 发出去）。
+       *
+       * 空的文本块要丢掉：pi-ai 那边会把"只剩一个空 text"的内容整条跳过，
+       * 而"只发一张图不说话"正是最常见的用法（用户拍张照直接发）。
+       */
+      if (typeof message.content === 'string' || message.content === null) {
+        out.push({ role: 'user', content: message.content ?? '', timestamp: Date.now() })
+      } else {
+        const blocks = message.content
+          .filter((block) => block.type !== 'text' || block.text.length > 0)
+          .map((block) => (block.type === 'text'
+            ? { type: 'text' as const, text: block.text }
+            : { type: 'image' as const, data: block.data, mimeType: block.mimeType }))
+        // 全是空块时给一个空串（而不是空数组）：后者在 pi-ai 里会被整条跳过，
+        // 于是"这条用户消息"凭空消失，模型看到的对话少了半句
+        out.push({ role: 'user', content: blocks.length > 0 ? blocks : '', timestamp: Date.now() })
+      }
       continue
     }
 
     if (message.role === 'assistant') {
       const content: (Message & { role: 'assistant' })['content'] = []
-      if (message.content) content.push({ type: 'text', text: message.content })
+      /*
+       * 助手消息**只能是文本**（模型不返图）。用 `asText` 收窄而不是直接当字符串用：
+       * `WireLike.content` 是联合类型，这里若不收窄，将来某处误把带图的内容块塞进助手消息，
+       * 会被序列化成 `[object Object]` 发出去——那种错误上游只回一句"格式不对"。
+       */
+      const said = asText(message.content)
+      if (said) content.push({ type: 'text', text: said })
       for (const call of message.tool_calls ?? []) {
         toolNames.set(call.id, call.name)
         content.push({ type: 'toolCall', id: call.id, name: call.name, arguments: parseArguments(call.arguments) })
@@ -118,13 +154,28 @@ export function toPiMessages(messages: readonly WireLike[], identity: PiModelIde
       role: 'toolResult',
       toolCallId: message.tool_call_id ?? '',
       toolName: toolNames.get(message.tool_call_id ?? '') ?? 'unknown_tool',
-      content: [{ type: 'text', text: message.content ?? '' }],
+      content: [{ type: 'text', text: asText(message.content) }],
       isError: false,
       timestamp: Date.now(),
     })
   }
 
   return out
+}
+
+/**
+ * 把内容收窄成纯文本：助手/工具消息只可能是文本。
+ *
+ * 内容块数组里的文本块**拼起来**（而不是丢掉）：真出现那种形状时，
+ * 至少把话说出来，比发出一句空话强。
+ */
+function asText(content: WireLike['content']): string {
+  if (typeof content === 'string') return content
+  if (content === null) return ''
+  return content
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
 }
 
 /** 工具参数的字符串 → 对象（pi-ai 的形状）；解析不了就给空对象，让模型下一轮纠正 */

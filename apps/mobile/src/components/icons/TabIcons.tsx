@@ -75,6 +75,64 @@ export function FilterIcon(props: IconProps) {
   )
 }
 
+/**
+ * 拍照与相册。
+ *
+ * 这两个与底部的导航图标不是一回事，但同一套线描语言（同一个 `base`），
+ * 所以留在这个文件里而不是另开一份——它们都只是"一个 24×24 的描边图形"。
+ */
+export function CameraIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="3" y="7.2" width="18" height="12.6" rx="3.2" />
+      <path d="M9 7.2l1.3-2.3h3.4L15 7.2" />
+      <circle cx="12" cy="13.4" r="3.5" />
+    </svg>
+  )
+}
+
+/** 相册：一张画着太阳与山的方图（比"文件夹"更贴近"从相册选一张照片"） */
+export function AlbumIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="3" y="4.6" width="18" height="14.8" rx="3.2" />
+      <circle cx="8.6" cy="9.8" r="1.6" />
+      <path d="M4.2 17.4l4.4-4.1 3.2 2.9 3-2.4 4.8 3.6" />
+    </svg>
+  )
+}
+
+/**
+ * 加号。
+ *
+ * ⚠️ **为什么不用文字 `＋`**（用户 2026-10-13：「这个加号没有居中」）：
+ * 那是全角 `＋`（U+FF0B），墨迹只占字形的一个小数——实测量出来它比圆钮中心
+ * **偏左 3.7px、偏下 2.7px**（字体自带的基线与边距，`align-items:center` 治不了）。
+ * 描边图形是几何作图，中心就是中心；顺带在 38px 的钮里也比一个字更利落。
+ */
+export function PlusIcon(props: IconProps) {
+  return (
+    <svg {...base} strokeWidth={2.2} {...props}>
+      <path d="M12 5.4v13.2M5.4 12h13.2" />
+    </svg>
+  )
+}
+
+/**
+ * 关闭 / 去掉一个的「×」。
+ *
+ * ⚠️ 与 `PlusIcon` 同一个理由（用户 2026-10-13：「叉号没有居中」）：文字 `×`（U+00D7）
+ * 的墨迹也不在字形框中心——实测在 38px 的圆钮里**偏下 3.4px**。
+ * 凡是"一颗按钮上只有一个叉"的地方都用这个，尺寸交给 `width`/`height`。
+ */
+export function CloseIcon(props: IconProps) {
+  return (
+    <svg {...base} strokeWidth={2.3} {...props}>
+      <path d="M6.4 6.4l11.2 11.2M17.6 6.4L6.4 17.6" />
+    </svg>
+  )
+}
+
 /** 底部导航两角的手绘小枝（右侧用 CSS 镜像） */
 export function LeafSprig(props: IconProps) {
   return (

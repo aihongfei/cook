@@ -3,12 +3,16 @@ import { PrismaService } from '../recipes/prisma.service'
 import { AiUpstreamError, chatJson, chatStreamEvents, type StreamEvent, type WireMessage } from './ai.client'
 import {
   AI_HINT_MAX, EXAMPLE_TEXT_MAX, HINT_TEXT_MAX, PROMPTS_EXAMPLES_MAX, PROMPTS_HINTS_MAX,
-  SUGGEST_CANDIDATES, SUGGEST_MATCHES_MAX, SUGGEST_PICKS_MAX, SUGGEST_PICKS_MIN, AiReplyError,
-  extractKeywords, formatCandidates, parseChatMessages, parseHint, parsePicks, parsePrompts, readAiConfig,
+  SUGGEST_CANDIDATES, SUGGEST_MATCHES_MAX, SUGGEST_PICKS_MAX, SUGGEST_PICKS_MIN, AI_MESSAGES_MAX,
+  AI_MESSAGE_MAX, AiReplyError,
+  extractKeywords, formatCandidates, parseHint, parsePicks, parsePrompts, readAiConfig,
   PICKS_SCHEMA, PROMPTS_SCHEMA,
   sampleList,
-  type AiConfig, type AiPrompts, type CandidateDish, type ChatMessage, type SuggestedPick,
+  type AiConfig, type AiPrompts, type CandidateDish, type SuggestedPick,
 } from './ai.rules'
+import { parseChatMessagesWithImages, toModelContent, type ChatMessage } from './ai-attachment.rules'
+import { FRIDGE_SCAN_PROMPT, FRIDGE_SCAN_SCHEMA, parseFridgeScan, type FridgeScanResult } from './fridge-scan.rules'
+import { AiAttachmentService } from './ai-attachment.service'
 import {
   AI_TOOLS, FRIDGE_ADD_MAX, MENU_ADD_MAX, PROPOSALS_MAX, SEARCH_RESULTS_MAX, TOOL_ADD_COMBO_TO_MEAL,
   TOOL_ADD_FRIDGE_ITEMS, TOOL_ADD_MENU_ITEMS, TOOL_CREATE_COMBO, TOOL_CREATE_RECIPE, TOOL_DELETE_COMBO,
@@ -47,6 +51,8 @@ export class AiService {
     private readonly fridge: FridgeService,
     // 组合的读走用户自己那套（`list` 里有"家庭内共用 + canEdit"的判定，AI 不该另写一份）
     private readonly combosService: CombosService,
+    // 对话里的图片（F16-05）：字节在服务端，消息里只传 id
+    private readonly attachments: AiAttachmentService,
   ) {}
 
   /** 前端据此决定"显示 AI 入口"还是"提示去配置"（只回是否配置与模型名，不回密钥） */
@@ -209,6 +215,37 @@ export class AiService {
     ].join('\n')
   }
 
+  /**
+   * 冰箱拍照识别（F16-04）：一张照片 → 食材清单草稿。
+   *
+   * **只回草稿、不写库**（这一步是整个功能的护栏，理由见 `fridge-scan.rules` 文件头）：
+   * 照片识别一定会认错，而冰箱是"今日先吃"与推荐的输入。写库那一步由前端逐项确认之后
+   * 走用户自己那条 `POST /fridge`（与手填同一个口，校验与同名判定都在那里）。
+   *
+   * 走的是**非流式 + 结构化输出**那条路（与推荐同一个理由）：要的是一份能解析的 JSON，
+   * 而不是一段边生成边上屏的话。
+   */
+  async scanFridge(userId: string, attachmentId: string, signal?: AbortSignal): Promise<FridgeScanResult> {
+    const config = this.requireConfig()
+    // 先取图（家庭校验在 loadOne 里）：拿不到就不必白烧一次模型调用
+    const image = await this.attachments.loadOne(userId, attachmentId)
+
+    return this.ask(
+      config,
+      {
+        systemPrompt: FRIDGE_SCAN_PROMPT,
+        // 图挂在最后这条 user 消息上（`ChatRequest.images` 的约定）
+        messages: [{ role: 'user', content: '看看这张照片里有什么。' }],
+        images: [image],
+        jsonSchema: FRIDGE_SCAN_SCHEMA,
+        // 识别要的是"照着照片说"，不需要创造力；温度低一点能少一些顺口编的
+        temperature: 0.2,
+        signal,
+      },
+      (text) => parseFridgeScan(text),
+    )
+  }
+
   /** 问 AI：带家庭上下文的自由问答（消息历史由前端带上，服务端不存） */
   async chat(
     userId: string,
@@ -216,7 +253,7 @@ export class AiService {
     signal?: AbortSignal,
   ): Promise<{ reply: string; proposals: MenuProposal[] }> {
     // 同上：先验输入（400）再验配置（503）
-    const messages = parseChatMessages(rawMessages)
+    const messages = parseChatMessagesWithImages(rawMessages, { messagesMax: AI_MESSAGES_MAX, messageMax: AI_MESSAGE_MAX })
     const config = this.requireConfig()
     const context = await this.familyContext(userId)
 
@@ -248,7 +285,7 @@ export class AiService {
     signal?: AbortSignal,
   ): AsyncGenerator<ChatEvent> {
     // 同上：先验输入（400）再验配置（503）
-    const messages = parseChatMessages(rawMessages)
+    const messages = parseChatMessagesWithImages(rawMessages, { messagesMax: AI_MESSAGES_MAX, messageMax: AI_MESSAGE_MAX })
     const config = this.requireConfig()
     const context = await this.familyContext(userId)
     try {
@@ -277,7 +314,7 @@ export class AiService {
     config: AiConfig,
     userId: string,
     messages: ChatMessage[],
-    context: { meal: string | null; note: string; summary: string },
+    context: { meal: string | null; note: string; summary: string; familyId: string | null },
     signal?: AbortSignal,
   ): AsyncGenerator<ChatEvent> {
     const systemPrompt = [
@@ -330,7 +367,19 @@ export class AiService {
       '如果被问到与下厨、食材、营养无关的事，礼貌地把话题带回来。',
     ].filter(Boolean).join('\n')
 
-    const wire: WireMessage[] = messages.map((message) => ({ role: message.role, content: message.content }))
+    /*
+     * 消息 → 上游线格式。**带了图的要先把字节取回来**（前端只给 id，字节在私有桶里）。
+     *
+     * 图取不回来就抛（见 `AiAttachmentService.loadForModel`）：静默少给模型一张，
+     * 它会拿着剩下的回答一个需要全部图的问题，而用户完全不知道少了哪张。
+     */
+    const wire: WireMessage[] = []
+    for (const message of messages) {
+      const images = message.attachments?.length
+        ? await this.attachments.loadForModel(context.familyId ?? '__none__', message.attachments)
+        : []
+      wire.push({ role: message.role, content: toModelContent(message.content, images) })
+    }
     const proposals: MenuProposal[] = []
     const proposed = new Set<string>()
     /** AI 这一轮真写进库的那些（回执卡）：前端据此长出「撤」 */
@@ -860,12 +909,14 @@ export class AiService {
     meal: string | null
     note: string
     summary: string
+    /** 这一家的 id；没有家庭时 null。**加载对话图片要用它**（附件按家庭放行） */
+    familyId: string | null
   }> {
     const membership = await this.prisma.familyMember.findUnique({
       where: { userId },
       include: { family: { include: { members: true } } },
     })
-    if (!membership) return { meal: null, note: '', summary: '' }
+    if (!membership) return { meal: null, note: '', summary: '', familyId: null }
 
     const now = new Date()
     const from = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
@@ -890,7 +941,7 @@ export class AiService {
       diner ? `最近一餐按 ${diner} 人做` : '',
     ].filter(Boolean).join('，')
 
-    return { meal: null, note, summary }
+    return { meal: null, note, summary, familyId: membership.familyId }
   }
 }
 

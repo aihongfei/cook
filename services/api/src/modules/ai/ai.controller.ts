@@ -1,13 +1,16 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpException, Param, Post, Req, Res, UseGuards } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Get, Header, HttpCode, HttpException, Param, Post, Req, Res, UseGuards } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import type { Request, Response } from 'express'
 import { CurrentUserId, JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { AiService, type ChatEvent } from './ai.service'
 import { AiActionService } from './ai-action.service'
+import { AiAttachmentService } from './ai-attachment.service'
 
 interface SuggestBody { hint?: string; mealKey?: string }
 interface ChatBody { messages?: unknown }
+interface AttachmentBody { image?: unknown; contentType?: unknown }
+interface ScanBody { attachmentId?: unknown }
 
 @ApiTags('ai')
 @Controller('ai')
@@ -15,6 +18,7 @@ export class AiController {
   constructor(
     private readonly ai: AiService,
     private readonly actions: AiActionService,
+    private readonly attachments: AiAttachmentService,
   ) {}
 
   // 免登录可读：前端据此决定显示"AI 帮你想"还是"先去配置"（不含密钥）
@@ -59,6 +63,67 @@ export class AiController {
   async undo(@CurrentUserId() userId: string, @Param('id') id: string) {
     if (!id?.trim()) throw new BadRequestException('缺一个要撤销的 id')
     return this.actions.undo(userId, id.trim())
+  }
+
+  /**
+   * 对话里的图片附件（F16-05；用户 2026-10-13「ai助手那里也需要添加附件上传功能」）。
+   *
+   * 前端先传图拿 id，再把 id 放进消息里（见 `chatStream`）。**图片字节不走消息体**：
+   * 会话是整场落盘在浏览器 localStorage 的（约 5MB），一张缩过的照片也有几百 KB，
+   * 塞两张就会写失败——而且失败是静默的，连对话本身都存不进去。
+   *
+   * 限流比照打卡上传（也是重操作：解码 + 写私有桶）。
+   */
+  @Post('attachments')
+  @HttpCode(201)
+  @Throttle({ default: { limit: 12, ttl: 60_000 } })
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '上传一张对话图片，返回它的 id' })
+  async uploadAttachment(@CurrentUserId() userId: string, @Body() body: AttachmentBody) {
+    return this.attachments.create(userId, body)
+  }
+
+  /**
+   * 取回一张对话图片的字节。
+   *
+   * 与打卡照片同一条路（**不放直链**）：这些图在家里冰箱/厨房的照片一级，
+   * 链接一旦泄漏就等于永久可读。所以过两道门——签名（这里省了，因为有登录令牌）
+   * 与家庭归属，再校验一次身份后才从私有桶读字节。
+   *
+   * `Cache-Control: private` 而不是 `no-store`：同一张图在会话里会被反复显示
+   * （滚动、切会话），每次都重取会白烧流量；但**不能给中间代理缓存**。
+   */
+  @Get('attachments/:id/photo')
+  @UseGuards(JwtAuthGuard)
+  @Header('Cache-Control', 'private, max-age=3600')
+  @ApiOperation({ summary: '取一张对话图片的字节（限同家庭）' })
+  async attachmentPhoto(
+    @CurrentUserId() userId: string,
+    @Param('id') id: string,
+    @Res() response: Response,
+  ) {
+    const photo = await this.attachments.read(userId, id)
+    response.setHeader('Content-Type', photo.contentType)
+    response.setHeader('Content-Length', String(photo.body.byteLength))
+    response.end(photo.body)
+  }
+
+  /**
+   * 冰箱拍照识别（F16-04）：一张图 → 食材清单草稿。
+   *
+   * **只回草稿，不写库**：用户逐项确认校正之后，前端走用户自己那条 `POST /fridge` 入库
+   * （与手填同一个口）。直接入库的后果不是"多了一条错的"那么轻——冰箱是"今日先吃"
+   * 与推荐的输入，错一条会让用户照着过期的做菜。
+   */
+  @Post('scan-fridge')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '拍照识别冰箱食材（只回草稿，入库要用户确认）' })
+  async scanFridge(@CurrentUserId() userId: string, @Body() body: ScanBody, @Req() request: Request) {
+    const attachmentId = typeof body?.attachmentId === 'string' ? body.attachmentId.trim() : ''
+    if (!attachmentId) throw new BadRequestException('缺一个图片 id（先调 /ai/attachments 上传）')
+    return this.ai.scanFridge(userId, attachmentId, abortSignal(request))
   }
 
   /**

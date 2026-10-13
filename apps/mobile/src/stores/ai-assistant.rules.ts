@@ -40,9 +40,18 @@ export const KEEP_CONVERSATIONS = 20
  */
 export function wireMessages(turns: ChatTurn[]): ChatTurn[] {
   return turns
-    .filter((turn) => turn.content.trim() !== '')
+    /*
+     * 只留"有文字 或 有图"的那些：**只看文字会把"拍张照片直接发"这条最自然的用法整条丢掉**
+     * （内容为空、图有一张），后端也会因为"消息内容不能为空"而 400。
+     */
+    .filter((turn) => turn.content.trim() !== '' || (turn.attachments?.length ?? 0) > 0)
     .slice(-WIRE_MAX)
-    .map((turn) => ({ role: turn.role, content: turn.content.trim() }))
+    .map((turn) => ({
+      role: turn.role,
+      content: turn.content.trim(),
+      // 图片 id 要跟着发（服务端凭它去私有桶取字节）。助手消息没有图，不必带空数组
+      ...(turn.attachments?.length ? { attachments: turn.attachments } : {}),
+    }))
 }
 
 /**
@@ -54,7 +63,10 @@ export function wireMessages(turns: ChatTurn[]): ChatTurn[] {
 export function pruneTurns(turns: ChatTurn[]): ChatTurn[] {
   const kept = turns.slice(-KEEP_TURNS)
   const last = kept[kept.length - 1]
-  const trimmed = last?.role === 'assistant' && last.content === '' ? kept.slice(0, -1) : kept
+  // 判"空格"要连图一起看：只有图、没文字的**用户消息是完整的**（拍张照直接发），
+  // 按文字判空会把它当成没长出来的那格剪掉，用户的照片就凭空消失了
+  const isEmpty = (turn: ChatTurn) => turn.content === '' && (turn.attachments?.length ?? 0) === 0
+  const trimmed = last?.role === 'assistant' && isEmpty(last) ? kept.slice(0, -1) : kept
   return trimmed
 }
 

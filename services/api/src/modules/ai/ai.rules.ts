@@ -363,7 +363,7 @@ export function parsePicks(text: string, candidates: CandidateDish[]): Suggested
  * 先剥代码块，再依次试整体解析、第一个 `{` 到最后一个 `}`——
  * 模型经常在 JSON 前后写一句"好的，这是你要的内容："，那不剥掉就永远解析不了。
  */
-function extractJsonObject(text: string): Record<string, unknown> | null {
+export function extractJsonObject(text: string): Record<string, unknown> | null {
   const cleaned = text.replace(/```(?:json)?/gi, '').trim()
   const candidates = [cleaned, cleaned.slice(cleaned.indexOf('{'), cleaned.lastIndexOf('}') + 1)]
   for (const raw of candidates) {

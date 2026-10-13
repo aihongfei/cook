@@ -10,6 +10,8 @@ import { WIRE_MAX, chatTimeLabel, conversationTitle, pruneTurns, wireMessages } 
  * ① `wireMessages` 越过后端的条数上限 → 整句话 400（用户看到"它突然不理我了"）；
  * ② `pruneTurns` 漏掉那个空格 → 下次请求同样 400；
  * ③ `chatTimeLabel` 算错 → 历史列表里写着"3 分钟前"而其实是昨天。
+ * 再加上图片那两条（附件，F16-05）：图片 id 丢了等于模型看不到图、
+ * "只有图没有字"的消息被剪掉等于用户的照片凭空消失。
  * 所以全部直接单测，不经过界面。
  */
 
@@ -88,4 +90,38 @@ it('历史里的时间说人话：刚刚 / N 分钟前 / HH:MM / 昨天 / 月日
   expect(chatTimeLabel(at('2026-10-12T09:00:00+08:00'), now)).toBe('昨天')
   expect(chatTimeLabel(at('2026-10-03T09:00:00+08:00'), now)).toBe('10 月 3 日')
   expect(chatTimeLabel(at('2025-12-31T09:00:00+08:00'), now)).toBe('2025 年 12 月 31 日')
+})
+
+/*
+ * 以下是图片那两条（F16-05）。它们都属于"错了用户看不懂为什么"的类型：
+ * 用户只看到"我明明发了照片，它却说不知道我在说什么"或者"照片没了"。
+ */
+
+it('图片 id 要跟着消息发出去，且**只看文字判空会把它整条丢掉**', () => {
+  // 拍张照直接发（没有文字）是最自然的用法。若按 `content.trim() !== ''` 过滤，
+  // 这条消息会消失——模型那边完全不知道用户发了图，只会回一句"你还没说呢"
+  const withImage: ChatTurn = { role: 'user', content: '', attachments: ['a1'] }
+  const wire = wireMessages([turn('user', '先问一句'), withImage])
+
+  expect(wire).toHaveLength(2)
+  expect(wire[1]).toEqual({ role: 'user', content: '', attachments: ['a1'] })
+})
+
+it('有文字又有图：两个都带上（图不能因为"这条有文字"而被省掉）', () => {
+  const wire = wireMessages([{ role: 'user', content: '看看这个', attachments: ['a1', 'a2'] }])
+
+  expect(wire).toEqual([{ role: 'user', content: '看看这个', attachments: ['a1', 'a2'] }])
+  // 没图的消息不带空数组：那会被后端当成"有附件但取不到"（后端按 id 去私有桶取字节）
+  expect(wireMessages([turn('user', '普通一句')])).toEqual([{ role: 'user', content: '普通一句' }])
+})
+
+it('落盘时**不能**把"只有图"的用户消息剪掉（那是用户的照片，不是没长出来的空格）', () => {
+  // pruneTurns 剪的是末尾那个 assistant 空格。若按文字判空，末尾这条只有图的
+  // **用户**消息会被当成空格剪掉——刷新一次，用户的照片就没了
+  const turns: ChatTurn[] = [{ role: 'user', content: '', attachments: ['a1'] }]
+  expect(pruneTurns(turns)).toEqual(turns)
+
+  // 末尾是"没有图也没有字"的 assistant 空格：照剪（这条规矩不能因为上面那条而松掉）
+  expect(pruneTurns([turn('user', '记一下'), { role: 'assistant', content: '' }]))
+    .toEqual([turn('user', '记一下')])
 })

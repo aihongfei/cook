@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useFridge, type FridgeItem } from '@/api/fridge'
 import { findPresetByName, ingredientImage } from '../ingredients'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
+import FridgeScanSheet from './FridgeScanSheet'
 import FridgeItemSheet from './FridgeItemSheet'
 
 /**
@@ -62,6 +63,8 @@ export default function FridgeStock({ enabled }: { enabled: boolean }) {
   const fridge = useFridge({ enabled })
   const [editing, setEditing] = useState<FridgeItem | null>(null)
   const [adding, setAdding] = useState(false)
+  /** 拍照录入（F16-04）。它是一整条流程（认图 → 逐项确认 → 入库），所以单开一个抽屉 */
+  const [scanning, setScanning] = useState(false)
 
   const board = fridge.data
 
@@ -69,10 +72,20 @@ export default function FridgeStock({ enabled }: { enabled: boolean }) {
     <section className="card stock">
       <div className="stock__head">
         <span className="stock__title">冰箱里有什么</span>
-        {/* 录入入口就在这一块的标题上：它是这一块的唯一写操作，放别处要找 */}
-        <button type="button" className="stock__add" onClick={() => setAdding(true)}>
-          ＋ 记一样
-        </button>
+        {/*
+         * 两个录入入口并排在标题上：手动记（最常用、也最准）与**拍照记**
+         * （用户 2026-10-13「冰箱ocr识别食材那块也可以开始干了」）。
+         * 手填留在前、拍照在后：「拍一张就全有了」听着更省事，但识别一定会认错，
+         * 而手填一个字都不会错——不该把用户往那条要核对的路引。
+         */}
+        <span className="stock__add-row">
+          <button type="button" className="stock__add" onClick={() => setAdding(true)}>
+            ＋ 记一样
+          </button>
+          <button type="button" className="stock__scan" onClick={() => setScanning(true)}>
+            📷 拍照
+          </button>
+        </span>
       </div>
 
       {fridge.isPending && (
@@ -142,6 +155,7 @@ export default function FridgeStock({ enabled }: { enabled: boolean }) {
 
       {adding && <FridgeItemSheet visible onClose={() => setAdding(false)} />}
       {editing && <FridgeItemSheet visible item={editing} onClose={() => setEditing(null)} />}
+      {scanning && <FridgeScanSheet visible onClose={() => setScanning(false)} />}
     </section>
   )
 }

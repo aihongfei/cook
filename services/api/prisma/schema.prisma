@@ -51,6 +51,8 @@ model User {
   aiActions      AiAction[]
   /// 这个账号上传的自建菜谱（F1-12）
   recipes        Recipe[]
+  /// 这个账号传给 AI 的图片附件
+  aiAttachments  AiAttachment[]
 
   @@index([createdAt])
 }
@@ -71,27 +73,29 @@ model PasswordReset {
 
 /// 家庭：一人创建，其他人凭六位邀请码加入（D-021）。
 model Family {
-  id          String         @id @default(cuid())
-  name        String         @db.VarChar(32)
+  id            String         @id @default(cuid())
+  name          String         @db.VarChar(32)
   /// 六位邀请码，字符集去掉了易混的 I/O/0/1；长期有效，掌勺人可重置（重置即旧码失效）
-  inviteCode  String         @unique @db.VarChar(8)
+  inviteCode    String         @unique @db.VarChar(8)
   /// 家庭级共享开关（F2-07）：关掉后家庭成员之间不互相可见（M3 起由各功能读取）
-  shared      Boolean        @default(true)
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  members     FamilyMember[]
+  shared        Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  members       FamilyMember[]
   /// 这一家的点单（M3）
-  mealOrders  MealOrder[]
+  mealOrders    MealOrder[]
   /// 这一家的打卡照片（M9 / F9-03）
-  checkIns    CheckIn[]
+  checkIns      CheckIn[]
   /// 这一家的常用组合（M4 / F4-04）
-  combos      Combo[]
+  combos        Combo[]
   /// 这一家的冰箱食材（M6 / F6-01）
-  fridgeItems FridgeItem[]
+  fridgeItems   FridgeItem[]
   /// 这一家自建的菜谱（F1-12）
-  recipes     Recipe[]
+  recipes       Recipe[]
   /// 这一家的 AI 写库记录（F16-10）
-  aiActions   AiAction[]
+  aiActions     AiAction[]
+  /// 这一家的 AI 附件（对话里的图片）
+  aiAttachments AiAttachment[]
 
   @@index([createdAt])
 }
@@ -414,7 +418,7 @@ model AiAction {
   actor    User   @relation(fields: [actorId], references: [id], onDelete: Cascade)
 
   /// 干了什么。v1 只有 `fridge.create` / `fridge.update` / `fridge.remove`（A 档）
-  kind String @db.VarChar(32)
+  kind    String @db.VarChar(32)
   /// 人话摘要（回执卡上那句"鸡蛋 · 一盒 · 冷藏"直接用它，前端不必自己拼）
   summary String @db.VarChar(120)
 
@@ -427,11 +431,46 @@ model AiAction {
   undoneAt DateTime?
   /// 结果对象（如冰箱那条的 id）。**不做外键**：撤销会把那个对象删掉，
   /// 外键会让"已撤销"的记录连带消失——而它恰恰是要留下来证明撤过的
-  targetId String? @db.VarChar(40)
+  targetId String?   @db.VarChar(40)
 
   createdAt DateTime @default(now())
 
   /// 撤销按"这一家最近几条"找，以及"这条是否已经撤过"的判定
   @@index([familyId, createdAt])
   @@index([actorId, createdAt])
+}
+
+/// AI 助手的图片附件（F16-05 的一次落地；用户 2026-10-13：
+/// 「ai助手那里也需要添加附件上传功能，会话中也要能展示图片，历史会话图片也得展示，不能丢失」）。
+///
+/// **为什么图片必须存服务端，而不是塞进前端那份 localStorage**：
+/// 会话是整场落盘在前端的（见 `stores/ai-assistant-session`），但一张手机照片缩完也有几百 KB，
+/// 而 localStorage 只有 5MB 左右——塞两张图就会写失败，**而且失败是静默的**：
+/// 对话本身也存不进去了，用户下次打开发现整场对话没了。所以图片字节存对象存储，
+/// 前端只留一个 id（几十字节），要显示时按需取（见 `GET /ai/attachments/:id/photo`）。
+///
+/// 放在**私有桶**（`MEDIA_S3_PRIVATE_BUCKET` 的 `ai/` 前缀下）：这些图是家里冰箱/厨房的照片，
+/// 与打卡照片同一级别的私人内容，不能像菜谱图那样公开读。
+model AiAttachment {
+  id       String @id @default(cuid())
+  familyId String
+  family   Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  /// 谁传的。读取时按"同家庭"放行，但留这一列是为了额度控制与将来"只看自己传的"
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 私有桶里的对象 key（按内容 sha256 命名，同一张图重复上传只存一份）
+  imageKey  String @db.VarChar(512)
+  /// 图片字节的 sha256
+  imageHash String @db.VarChar(64)
+  /// 归一后的真实类型（`image/jpeg` / `image/png` / `image/webp`），发给定型接口时要带它
+  mimeType  String @db.VarChar(32)
+  /// 字节数。用来算"这个人一共占了多少"，不必去问对象存储
+  bytes     Int
+
+  createdAt DateTime @default(now())
+
+  /// 取图按 id、额度按"这个人最近传了多少"
+  @@index([familyId, createdAt])
+  @@index([userId, createdAt])
 }

@@ -508,3 +508,184 @@
 .fridge-sheet__submit {
   flex: 1 1 auto;
 }
+
+/*
+ * 拍照录入冰箱（F16-04）。三步在同一个抽屉里换（选图 → 认图 → 逐项确认），
+ * 所以样式都围着一个面板转，而不是三个弹窗来回跳——用户拍完就该在同一个地方改。
+ */
+.stock__add-row {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/*
+ * 「拍照」是描边的次要入口：手填最常用也最准，不该被它抢走注意力。
+ * 内边距比 `.stock__add` 少 1px，正好抵掉那条 1px 边框——两个胶囊一样高，
+ * 否则并排摆着会一个高一个低（这类"差 1-2px"的错位是要在浏览器里量出来的）。
+ */
+.stock__scan {
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: #ab5527;
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1px solid #de9057;
+  border-radius: 999px;
+}
+
+.stock__scan:active {
+  opacity: 0.8;
+}
+
+/*
+ * 「拍一张 / 从相册选」并排两颗（用户 2026-10-13：「需要能拍照或者从相册选两种」）。
+ *
+ * 原来只有一颗"拍一张 / 选一张"，进相机还是进相册由系统决定——有些机型的 WebView
+ * 干脆只进相册，相机永远不出现。两颗分别绑到带 `capture` 与不带 `capture` 的控件上，
+ * 才是"想拍就能拍"（见 components/ui/PhotoSource.tsx）。
+ * 拍照是这条路的主动作（实心），相册是备用（描边）——拍照入库才是这个功能的卖点。
+ */
+.fridge-scan__sources {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.fridge-scan__pick {
+  flex: 1;
+  padding: 13px 14px;
+  font-size: 14px;
+  color: #fff;
+  text-align: center;
+  cursor: pointer;
+  background: var(--color-brand);
+  border-radius: 999px;
+}
+
+.fridge-scan__pick--album {
+  color: #ab5527;
+  background: var(--color-paper);
+  border: 1px solid #de9057;
+}
+
+.fridge-scan__pick:active {
+  opacity: 0.85;
+}
+
+.fridge-scan__reading {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+
+.fridge-scan__preview {
+  display: block;
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+}
+
+.fridge-scan__status {
+  font-size: 13px;
+  color: var(--color-ink-3);
+}
+
+/* 模型对这张照片的一句话判断：给用户核对的抓手（"它到底看到了什么"） */
+.fridge-scan__summary {
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--color-ink-2);
+}
+
+.fridge-scan__lead {
+  margin-top: 12px;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+
+.fridge-scan__list {
+  padding: 0;
+  margin: 8px 0 0;
+  list-style: none;
+}
+
+/* 一行 = 名字 + 数量 + 存放区 + （猜的）+ 不要。能改的都在这一行上，改完就能提交 */
+.fridge-scan__item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--color-line);
+}
+
+.fridge-scan__item input,
+.fridge-scan__item select {
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-ink);
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 10px;
+  outline: none;
+}
+
+.fridge-scan__name { flex: 1 1 96px; min-width: 0; }
+.fridge-scan__amount { flex: 0 1 76px; min-width: 0; }
+.fridge-scan__zone { flex: 0 0 auto; }
+
+/* 备注单独占一行（它比名字长，挤在上面那行会把名字压没）；淡一档，表明它可有可无 */
+.fridge-scan__note {
+  flex: 1 0 100%;
+  font-size: 13px;
+  color: var(--color-ink-2);
+}
+
+/* "猜的"那个记号：小、淡，但看得见——用户据此决定要不要改 */
+.fridge-scan__guessed {
+  padding: 2px 6px;
+  font-size: 10px;
+  color: #a8785a;
+  background: var(--color-cream-2);
+  border: 1px dashed var(--color-line);
+  border-radius: 999px;
+}
+
+.fridge-scan__drop {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--color-ink-3);
+  cursor: pointer;
+  background: var(--color-cream-2);
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+}
+
+.fridge-scan__actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+
+  .recipe-button { flex: 1; margin-top: 0; }
+}
+
+/* 「都记进去」是主行动（实心），「重拍一张」是退路（描边） */
+.fridge-scan__save {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
