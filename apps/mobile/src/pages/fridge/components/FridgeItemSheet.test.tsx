@@ -33,6 +33,7 @@ function item(over: Partial<FridgeItem> = {}): FridgeItem {
     note: null,
     addedBy: '妈妈',
     addedAt: '2026-10-13T01:00:00.000Z',
+    addedLabel: '刚刚',
     ...over,
   }
 }

@@ -59,6 +59,68 @@ function ItemRow({ item, onOpen }: { item: FridgeItem; onOpen: () => void }) {
   )
 }
 
+/**
+ * 「最近录入」（M6 / F6-06）。口径见 D-062。
+ *
+ * 上面那四区回答"现在有什么"（按**临期**排），这一块回答"最近新添了什么、谁添的"
+ * （按**记的时间**排）。两个问题不一样，所以是两块而不是一块：
+ * 刚拍完照批量入库时，用户想核对的是"我刚记进去的那几样在不在"，
+ * 而它们在按临期排的列表里是散开的。
+ *
+ * 默认收着：上面四区才是这一页的主体（用户 2026-10-13 明确说过"冰箱相关应该才是主题"），
+ * 这一块是补充信息。可点开的那条线沿用采购清单与「都不合意？」那两处的语汇
+ * （虚线上边框 + 圆形箭头 + 过渡动画），三处一致。
+ */
+function RecentList({ items, total }: { items: FridgeItem[]; total: number }) {
+  const [open, setOpen] = useState(false)
+  if (items.length === 0) return null
+  return (
+    <div className="recent">
+      <button
+        type="button"
+        className={['recent__toggle', open && 'is-open'].filter(Boolean).join(' ')}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="recent__toggle-text">
+          最近记的 {items.length} 样
+          {/* 只列了前 8 样时说清还有多少，免得用户以为冰箱里就这些 */}
+          {total > items.length && `（一共 ${total} 样）`}
+        </span>
+        <span className={['recent__arrow', open && 'is-open'].filter(Boolean).join(' ')} aria-hidden>
+          <svg viewBox="0 0 12 12" width="12" height="12">
+            <path
+              d="M2.5 4.4 L6 7.9 L9.5 4.4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+      </button>
+      {open && (
+        <ul className="recent__list">
+          {items.map((item) => (
+            <li className="recent__item" key={item.id}>
+              <span className="recent__name">{item.name}</span>
+              {/* 数量可能没写（F6-01 允许为空）：没写就不显示这一格，不编一个"1" */}
+              {item.amount && <span className="recent__amount">{item.amount}</span>}
+              <span className="recent__when">{item.addedLabel}</span>
+              {/*
+               * 谁记的（共享关掉时后端已收窄成"只有自己放的"，那这里显示的也是自己）。
+               * 这一句是这一块的重点之一："家里最近添了什么"不看人就只剩一半意思。
+               */}
+              <span className="recent__who">{item.addedBy}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export default function FridgeStock({ enabled }: { enabled: boolean }) {
   const fridge = useFridge({ enabled })
   const [editing, setEditing] = useState<FridgeItem | null>(null)
@@ -152,6 +214,9 @@ export default function FridgeStock({ enabled }: { enabled: boolean }) {
           还有 {board.summary.total - board.summary.withExpiry} 样没记保质期，写了才能提醒你。
         </p>
       )}
+
+      {/* 最近录入（F6-06）：四区之后、补充信息的位置 */}
+      {board && <RecentList items={board.recent} total={board.recentTotal} />}
 
       {adding && <FridgeItemSheet visible onClose={() => setAdding(false)} />}
       {editing && <FridgeItemSheet visible item={editing} onClose={() => setEditing(null)} />}

@@ -34,6 +34,13 @@ export interface FridgeItem {
   /** 谁放的（昵称） */
   addedBy: string
   addedAt: string
+  /**
+   * 「什么时候记的」那句话（F6-06）：「刚刚」「今天」「昨天」「3 天前」「更早」。
+   *
+   * **由后端算好**，前端不重算——与 `expiryLabel` 同一条规矩（两边各算一遍必然漂移，
+   * 而"昨天记的"和"1 天前记的"不一致时，用户会开始怀疑这个功能）。
+   */
+  addedLabel: string
 }
 
 export interface FridgeZoneGroup {
@@ -55,6 +62,15 @@ export interface FridgeBoard {
   }
   /** 「今日先吃」：临期清单单独给一份，前端不必自己筛 */
   soon: FridgeItem[]
+  /**
+   * 最近记的几样（F6-06）：**按记的时间倒序**，最长 8 条。
+   *
+   * 与上面的排序（临期优先）**不是同一套**：这一块回答"家里最近新添了什么"，
+   * 用临期那套排会让人以为"最近记的是那盒快过期的奶"。排序在后端做，前端不重排。
+   */
+  recent: FridgeItem[]
+  /** 冰箱里一共几条（界面据此说"最近 8 样，共 N 样"） */
+  recentTotal: number
 }
 
 export interface FridgeInput {

@@ -7,6 +7,7 @@ import { TasteService } from '../taste/taste.service'
 import { judgeDish } from '../taste/taste.rules'
 import {
   FRIDGE_ZONES,
+  RECENT_LIMIT_DEFAULT,
   expiryState,
   type FridgeZone,
   parseAmount,
@@ -89,9 +90,25 @@ export class FridgeService {
      * 于是"过期 1 天"排在"过期 3 天"前面——最该先处理的反而在最后（验收脚本抓到的）。
      */
     const attention = items.filter(item => item.attention).sort(order)
+    /*
+     * 「最近录入」（F6-06）：按**记的时间**倒序给一页，与上面的排序（临期优先）无关。
+     *
+     * 这一块回答的是"家里最近新添了什么、谁添的"，所以它的排序**必须**是时间倒序——
+     * 用临期那套排会让人以为"最近记的是那盒快过期的奶"。
+     *
+     * 可见性**沿用同一份 `items`**（已经在上面按共享开关收窄过了）：这里绝不能再查一次库，
+     * 否则两处口径会分叉（一处收窄一处没收窄，就是 D-056 那个泄漏的形状）。
+     */
+    const recent = [...items]
+      .sort((a, b) => (a.addedAt < b.addedAt ? 1 : a.addedAt > b.addedAt ? -1 : a.name.localeCompare(b.name, 'zh')))
+      .slice(0, RECENT_LIMIT_DEFAULT)
     return {
       scope,
       zones,
+      /** 最近记的几样（F6-06）：时间倒序，每条带「刚刚/今天/昨天/N 天前」那句话 */
+      recent,
+      /** 最近记的一共几样（界面说"还有 N 样"用；`items` 是全量） */
+      recentTotal: items.length,
       /** 概览（F6-02）：都是真数字（空冰箱就是 0，不是"还没做"） */
       summary: {
         total: items.length,

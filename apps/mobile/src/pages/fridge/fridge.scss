@@ -927,3 +927,135 @@
   font-size: 11px;
   color: var(--color-ink-3);
 }
+
+/* ---------------------------------------------------------------
+ * 最近录入（M6 / F6-06，D-062）
+ *
+ * 与四区的关系：四区按**临期**排（今天先吃什么），这一块按**记的时间**排
+ * （最近添了什么、谁添的）。默认收着——四区才是这一页的主体。
+ * 可点开的那条线沿用采购清单与「都不合意？」的同一套语汇：
+ * 虚线上边框 + 圆形箭头 + 180° 旋转过渡。
+ * --------------------------------------------------------------- */
+.recent {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-line);
+}
+
+.recent__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  padding: 7px 2px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+  text-align: left;
+  background: none;
+  border: 0;
+  transition: color 0.15s ease;
+
+  &.is-open {
+    color: #8a4a1e;
+  }
+}
+
+.recent__toggle-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.6;
+}
+
+/* 圆形箭头：与「都不合意？」那处同一个形状（22px 圆底 + 旋转 180°） */
+.recent__arrow {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: #8a4a1e;
+  background: rgb(224 123 57 / 13%);
+  border: 1px solid rgb(224 123 57 / 28%);
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+
+  &.is-open {
+    transform: rotate(180deg);
+  }
+}
+
+.recent__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  animation: recent-in 0.2s ease-out both;
+}
+
+/*
+ * 一行：名字（占满）· 数量 · 什么时候 · 谁。
+ * 名字用 flex:1 把后面三格推到右边——不这样的话"谁记的"会在中间参差不齐，
+ * 而这几行的价值正是**能竖着扫**（谁、什么时候）。
+ */
+.recent__item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  padding: 6px 2px;
+  font-size: 12.5px;
+  border-bottom: 1px dashed var(--color-line);
+
+  &:last-child {
+    border-bottom: 0;
+  }
+}
+
+.recent__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--color-ink);
+}
+
+.recent__amount {
+  flex: 0 0 auto;
+  color: var(--color-ink-3);
+}
+
+.recent__when {
+  flex: 0 0 auto;
+  color: #8a4a1e;
+}
+
+.recent__who {
+  flex: 0 0 auto;
+  color: var(--color-ink-3);
+}
+
+@keyframes recent-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 关了动效偏好就只留状态变化（与其它几处一致） */
+@media (prefers-reduced-motion: reduce) {
+  .recent__list {
+    animation: none;
+  }
+
+  .recent__arrow {
+    transition: none;
+  }
+}

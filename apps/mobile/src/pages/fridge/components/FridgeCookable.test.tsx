@@ -48,6 +48,7 @@ function stockItem(name: string, zone: FridgeZone = '冷藏'): FridgeItem {
     id: name, name, amount: null, zone,
     expiresOn: null, expiryLabel: null, attention: false,
     note: null, addedBy: '妈妈', addedAt: '2026-10-13T01:00:00.000Z',
+    addedLabel: '刚刚',
   }
 }
 
@@ -58,6 +59,8 @@ function fridgeBoard(groups: Partial<Record<FridgeZone, FridgeItem[]>> = {}): Fr
     scope: 'family',
     zones,
     summary: { total: items.length, attention: 0, expired: 0, withExpiry: 0 },
+    recent: items,
+    recentTotal: items.length,
     soon: [],
   }
 }

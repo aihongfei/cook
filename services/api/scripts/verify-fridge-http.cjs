@@ -291,6 +291,51 @@ async function main() {
     `withExpiry=${board.body?.summary?.withExpiry} total=${board.body?.summary?.total}`,
   )
 
+  // ---------- 最近录入（F6-06） ----------
+
+  /*
+   * 刚记的那几样必须排在**最前**（时间倒序），而且"什么时候记的"那句话是真的。
+   * 这一块的排序与上面那套（临期优先）**不是同一套**：混用会让人以为
+   * "最近记的是那盒快过期的奶"。
+   */
+  /*
+   * **先故意拉开时间戳**再断言倒序：连续几条记下去时 `createdAt` 可能落在同一毫秒，
+   * 那时"倒序"与"不排序"给出的结果一样。
+   *
+   * ⚠️ 而且这一条**必须挑对地方放**，否则它验的不是倒序而是运气（R-45 那条教训的又一次）：
+   * 反证时把服务端换成"不排序"，这条一开始**照样绿**——因为 MySQL 在没有 ORDER BY 时
+   * 的返回顺序碰巧就是那几样的插入顺序（`[familyId, zone, name]` 索引给的顺序，
+   * 而"保鲜"恰好排在前面）。于是"最后记的排第一"在**没排序**时也成立。
+   *
+   * 修法：把最后记的那一样放进**自然顺序会排在最后**的位置（`冷冻` + 名字靠后），
+   * 这样"不排序"时它必然不在第一条——反证才会真的红（已实测）。
+   */
+  await sleep(1100)
+  await callWithRetry('POST', '/fridge', { token: mama.token, body: { name: '最后记的柠檬', zone: '冷冻' } })
+  const board2 = await callWithRetry('GET', '/fridge', { token: mama.token })
+  const recent = board2.body?.recent ?? []
+  check(
+    '最近录入按**记的时间倒序**：最后记的那样必须排第一（时间戳拉开后才有意义）',
+    recent.length >= 4 && recent[0]?.name === '最后记的柠檬',
+    `前 5 条=${recent.slice(0, 5).map((item) => `${item.name}(${item.addedLabel})`).join(', ')}`,
+  )
+  check(
+    '每条都带「什么时候记的」那句话（F6-06），而且刚记的算"刚刚"',
+    recent.every((item) => typeof item.addedLabel === 'string' && item.addedLabel !== '')
+      && recent[0]?.addedLabel === '刚刚',
+    `addedLabel=${recent[0]?.addedLabel}`,
+  )
+  check(
+    '每页最多 8 条（界面按 `recentTotal` 说"还有 N 样"）',
+    recent.length <= 8 && board2.body?.recentTotal === board2.body?.summary?.total,
+    `recent=${recent.length} recentTotal=${board2.body?.recentTotal} total=${board2.body?.summary?.total}`,
+  )
+  check(
+    '最近录入带**谁记的**（F6-06 的意义就是"家里最近添了什么"，不看人就没意义）',
+    recent.every((item) => typeof item.addedBy === 'string' && item.addedBy !== ''),
+    `addedBy=${recent.slice(0, 3).map((item) => item.addedBy).join(', ')}`,
+  )
+
   // ---------- 共享关掉：吃货只看自己放的 ----------
 
   const son = await newUser('冰箱验收娃')

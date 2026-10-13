@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
@@ -87,6 +87,7 @@ function stockItem(over: Partial<FridgeItem> & { name: string }): FridgeItem {
     note: null,
     addedBy: '妈妈',
     addedAt: '2026-10-13T01:00:00.000Z',
+    addedLabel: '刚刚',
     ...over,
   }
 }
@@ -113,6 +114,9 @@ function fridgeBoard(
       withExpiry: items.filter((entry) => entry.expiresOn !== null).length,
     },
     soon: attention,
+    // 最近录入（F6-06）：这一块的排序口径在服务层，测试里照"按记的时间倒序"给
+    recent: [...items].sort((a, b) => (a.addedAt < b.addedAt ? 1 : -1)).slice(0, 8),
+    recentTotal: items.length,
   }
 }
 
@@ -380,4 +384,70 @@ it('一个假数字都没有：页面上的数都来自接口（写死的 12/3/8
   // 这一条既没写保质期也没临期：不该冒出"该先吃""过期"那种话
   expect(screen.queryByText(/该先吃/)).toBeNull()
   expect(screen.queryByText(/过期/)).toBeNull()
+})
+
+/*
+ * 最近录入（M6 / F6-06，D-062）。
+ *
+ * 要盯住四件事：
+ * ① **默认收着**（四区才是这一页的主体：用户 2026-10-13 说过"冰箱相关应该才是主题"）；
+ * ② 展开后**按记的时间倒序**，而且顺序**不取自四区那套**（临期优先）——
+ *    这也是后端单独给 `recent` 的原因，前端若自己按 zones 拼就会串味；
+ * ③ 每行给**谁记的**（"家里最近添了什么"不看人就只剩一半意思）；
+ * ④ 只列了前 8 样时**说清一共多少**（不然用户以为冰箱里就这些）。
+ */
+it('最近录入默认收着，展开后按记的时间倒序、带"谁记的"（F6-06）', async () => {
+  mockGet({
+    fridge: fridgeBoard({
+      冷藏: [
+        stockItem({ name: '早记的鸡蛋', addedAt: '2026-10-11T01:00:00.000Z', addedLabel: '2 天前', addedBy: '妈妈' }),
+        stockItem({ name: '刚记的牛奶', addedAt: '2026-10-13T09:00:00.000Z', addedLabel: '刚刚', addedBy: '爸爸' }),
+      ],
+    }),
+  })
+  renderFridge()
+
+  // 收着：只给一条可点开的线，名字不在（它是补充信息，不抢四区的位置）
+  const toggle = await screen.findByRole('button', { name: /最近记的/ })
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  expect(screen.queryByText('刚记的牛奶')).not.toBeNull() // 四区里当然有它
+  expect(document.querySelector('.recent__list')).toBeNull()
+
+  fireEvent.click(toggle)
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  const rows = [...document.querySelectorAll('.recent__item')].map((row) => row.textContent ?? '')
+  // 倒序：刚记的在前
+  expect(rows[0]).toContain('刚记的牛奶')
+  expect(rows[1]).toContain('早记的鸡蛋')
+  // 谁记的、什么时候记的都在
+  expect(rows[0]).toContain('爸爸')
+  expect(rows[0]).toContain('刚刚')
+  expect(rows[1]).toContain('妈妈')
+  expect(rows[1]).toContain('2 天前')
+})
+
+it('最近只列了前 8 样时说清一共多少（别让用户以为冰箱里就这些）', async () => {
+  const many = Array.from({ length: 12 }, (_, index) =>
+    stockItem({
+      name: `第${index}样`,
+      addedAt: `2026-10-${String(13 - index).padStart(2, '0')}T01:00:00.000Z`,
+      addedLabel: '刚刚',
+    }),
+  )
+  mockGet({ fridge: fridgeBoard({ 冷藏: many }) })
+  renderFridge()
+
+  const toggle = await screen.findByRole('button', { name: /最近记的/ })
+  // 12 样里只列 8 样，所以要说"（一共 12 样）"
+  expect(toggle.textContent).toContain('一共 12 样')
+  fireEvent.click(toggle)
+  expect(document.querySelectorAll('.recent__item')).toHaveLength(8)
+})
+
+it('冰箱空的时候不画"最近录入"那一行（没有东西可最近）', async () => {
+  mockGet({ fridge: fridgeBoard() })
+  renderFridge()
+
+  await screen.findByText(/冰箱还是空的/)
+  expect(screen.queryByRole('button', { name: /最近记的/ })).toBeNull()
 })

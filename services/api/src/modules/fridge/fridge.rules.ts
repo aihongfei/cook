@@ -81,6 +81,45 @@ export function expiryLabel(expiresOn: Date | null, now: Date = new Date()): str
   return `还有 ${days} 天`
 }
 
+/**
+ * 「最近录入」一页给几条（F6-06）。
+ *
+ * 8 条是"两屏之内能扫完"的量：这一块回答的是"最近家里新添了什么"，
+ * 而不是"库存清单"（那是上面四个区的事）。要看全部就去分区里看。
+ */
+export const RECENT_LIMIT_DEFAULT = 8
+
+/**
+ * 「这一条是什么时候记的」那句话（F6-06）。**由后端算好**，前端不重算
+ * ——与保鲜期那句 `expiryLabel` 同一条规矩（两边各算一遍必然漂移）。
+ *
+ * 四档：刚刚（一小时内）/ 今天 / 昨天 / N 天前 / 更早。
+ *
+ * **按日历日数，不按 24 小时**：昨晚 23:00 记的，今早 8:00 看就该是"昨天"，
+ * 而不是"9 小时前"——用户判断"这盒奶是不是我刚买的"用的是日历，不是秒表。
+ * 这与 `daysUntil` 用日历日算保质期是同一条理由。
+ *
+ * 未来的时间**一律当"刚刚"**：服务器与数据库时钟差几秒就可能造出"未来"的行，
+ * 而"3 天后记的"是句胡话（宁可不精确，也不说一句假的）。
+ */
+export function addedLabel(addedAt: Date, now: Date = new Date()): string {
+  const added = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  const when = Date.UTC(addedAt.getFullYear(), addedAt.getMonth(), addedAt.getDate())
+  const days = Math.round((added - when) / 86_400_000)
+  if (days <= 0) {
+    /*
+     * 同一天：一小时内说"刚刚"，更早说"今天"。
+     * 未来的时间（minutes 为负）也走"刚刚"——见上面那条：时钟偏差造出的"未来"
+     * 不该显示成"今天"以外的任何说法，而它确实就是刚刚才发生的事。
+     */
+    const minutes = (now.getTime() - addedAt.getTime()) / 60_000
+    return minutes < 60 ? '刚刚' : '今天'
+  }
+  if (days === 1) return '昨天'
+  if (days <= 6) return `${days} 天前`
+  return '更早'
+}
+
 /** 该不该出现在「今日先吃」里（F6-05）：已过期与三天内都算 */
 export function needsAttention(expiresOn: Date | null, now: Date = new Date()): boolean {
   return expiryState(expiresOn, now) !== null
@@ -162,6 +201,8 @@ export interface FridgeItemView {
   note: string | null
   addedBy: string
   addedAt: string
+  /** 「什么时候记的」那句话（F6-06）：「刚刚」「今天」「昨天」「3 天前」「更早」 */
+  addedLabel: string
 }
 
 /** 数据库行 → 界面行（保质期那句话在这里算好） */
@@ -177,5 +218,6 @@ export function toView(row: FridgeItemRow, now: Date = new Date()): FridgeItemVi
     note: row.note,
     addedBy: row.addedByName,
     addedAt: row.createdAt.toISOString(),
+    addedLabel: addedLabel(row.createdAt, now),
   }
 }
