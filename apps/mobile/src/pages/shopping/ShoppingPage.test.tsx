@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
-import type { ShoppingList } from '@/api/shopping'
+import type { ShoppingItem, ShoppingList } from '@/api/shopping'
 import { useAuth } from '@/stores/auth'
 import ShoppingPage from './ShoppingPage'
 
@@ -42,6 +42,16 @@ const FAMILY = {
   myRole: 'OWNER', myCapabilities: ['order.create'], members: [],
 }
 
+/**
+ * 采购页测试的默认口径是**冰箱里什么都没记**（`noStock`）：这一页的既有用例讲的是
+ * "从菜单推出来的清单长什么样"，与库存无关。F7-02 的行为在下面单独一组验。
+ */
+const noStock = {
+  stock: { verdict: 'missing' as const, stockName: null, stockAmount: null, remaining: null },
+  needsBuy: true,
+  stockLabel: null,
+}
+
 function board(overrides: Partial<ShoppingList> = {}): ShoppingList {
   return {
     scope: 'family',
@@ -50,9 +60,13 @@ function board(overrides: Partial<ShoppingList> = {}): ShoppingList {
     to: '2026-10-15',
     meals: [{ mealKey: '2026-10-13-DINNER', date: '2026-10-13', mealLabel: '晚餐', dishCount: 2 }],
     items: [
-      { name: '鸡蛋', amount: '5个', from: ['番茄炒蛋', '蛋花汤'] },
-      { name: '葱', amount: '1根', from: ['番茄炒蛋'] },
+      { name: '鸡蛋', amount: '5个', from: ['番茄炒蛋', '蛋花汤'], ...noStock },
+      { name: '葱', amount: '1根', from: ['番茄炒蛋'], ...noStock },
     ],
+    toBuyCount: 2,
+    coveredCount: 0,
+    unsureCount: 0,
+    stockEmpty: true,
     missing: [],
     dishCount: 2,
     ...overrides,
@@ -95,7 +109,7 @@ it('每样食材都显示用量与"为哪几道菜买"', async () => {
 })
 
 it('菜谱没写用量时说「用量没写」，不替菜谱编「适量」', async () => {
-  mockGet({ list: board({ items: [{ name: '白糖', amount: null, from: ['红烧肉'] }] }) })
+  mockGet({ list: board({ items: [{ name: '白糖', amount: null, from: ['红烧肉'], ...noStock }] }) })
   renderList()
 
   expect(await screen.findByText('用量没写')).toBeTruthy()
@@ -207,4 +221,151 @@ it('真 `<input type="checkbox">` 还在（键盘空格勾选、读屏语义都�
   // 勾上后整行要标记为已买（`.is-packed`）——自绘样式靠这个类做划线
   fireEvent.click(box)
   expect(box.closest('.shop__label')?.className).toContain('is-packed')
+})
+
+/**
+ * 与库存比对（M7 / F7-02「只买缺的」）。口径见 D-059。
+ *
+ * 要盯住的三件事：
+ * ① **两组分开说**：用户拿着手机在超市，第一眼要知道"现在该往车里放什么"——
+ *    家里有的一律收在下面那条线里，且**默认不展开**；
+ * ② **算不清的照实说**（"家里有 半盒，够不够看一眼"）：那是这一组里最需要人自己判断的，
+ *    所以不能收进默认折叠里装作它不存在（`unsureCount` 会写在线上的提示里）；
+ * ③ **勾选进度只算要买的**：把"家里有"的也算进分母，用户永远买不到 100%。
+ */
+const covered = (over: Partial<ShoppingItem> & { name: string }): ShoppingItem => ({
+  amount: '2个',
+  from: ['番茄炒蛋'],
+  stock: { verdict: 'enough', stockName: over.name, stockAmount: '6个', remaining: null },
+  needsBuy: false,
+  stockLabel: '家里有 6个，够了',
+  ...over,
+})
+
+it('家里够的从"要买的"里拿掉，收在「家里有 N 样」那条线里（默认不展开）', async () => {
+  mockGet({
+    list: board({
+      items: [
+        { name: '番茄', amount: '2个', from: ['番茄炒蛋'], ...noStock },
+        covered({ name: '鸡蛋' }),
+      ],
+      toBuyCount: 1,
+      coveredCount: 1,
+      stockEmpty: false,
+    }),
+  })
+  renderList()
+
+  expect(await screen.findByText('番茄')).toBeTruthy()
+  // 要买的那组里没有鸡蛋
+  expect(screen.queryByText('鸡蛋')).toBeNull()
+  // 那条线说清有几样不用买
+  expect(screen.getByText(/家里有 1 样，不用买/)).toBeTruthy()
+  // 默认收起：鸡蛋那一行不该在
+  expect(screen.queryByText('家里有 6个，够了')).toBeNull()
+})
+
+it('展开那条线才看到"家里有什么、有多少"（点开是有意的动作，不是默认噪音）', async () => {
+  mockGet({
+    list: board({
+      items: [covered({ name: '鸡蛋' })],
+      toBuyCount: 0,
+      coveredCount: 1,
+      stockEmpty: false,
+    }),
+  })
+  renderList()
+
+  // 全都不用买：这是一句好消息，直接铺开（没有"要买的"要让它位置）
+  expect(await screen.findByText(/这 1 样冰箱里都有，不用买了/)).toBeTruthy()
+  expect(screen.getByText('家里有 6个，够了')).toBeTruthy()
+})
+
+it('**"量算不清"的要明说，绝不写"够了"**（写"够了"是编的，藏起来用户会以为漏了）', async () => {
+  mockGet({
+    list: board({
+      items: [
+        covered({
+          name: '盐',
+          amount: '适量',
+          stock: { verdict: 'unknown', stockName: '盐', stockAmount: '一罐', remaining: null },
+          stockLabel: '家里有 一罐，够不够看一眼',
+        }),
+      ],
+      toBuyCount: 0,
+      coveredCount: 1,
+      unsureCount: 1,
+      stockEmpty: false,
+    }),
+  })
+  renderList()
+
+  expect(await screen.findByText('家里有 一罐，够不够看一眼')).toBeTruthy()
+  // 那句总结也要提醒（用户扫一眼就知道有几样得自己判断）
+  expect(screen.getByText(/1 样的量没法算清，下厨前看一眼/)).toBeTruthy()
+})
+
+it('家里不够的留在"要买的"里，并说出**还要买多少**', async () => {
+  mockGet({
+    list: board({
+      items: [
+        {
+          name: '鸡蛋',
+          amount: '5个',
+          from: ['番茄炒蛋'],
+          stock: { verdict: 'notEnough', stockName: '鸡蛋', stockAmount: '3个', remaining: '2个' },
+          needsBuy: true,
+          stockLabel: '家里有 3个，还要买 2个',
+        },
+      ],
+      toBuyCount: 1,
+      stockEmpty: false,
+    }),
+  })
+  renderList()
+
+  expect(await screen.findByText('鸡蛋')).toBeTruthy()
+  expect(screen.getByText('家里有 3个，还要买 2个')).toBeTruthy()
+})
+
+it('勾选进度的分母**只算要买的**（把"家里有"的算进去，用户永远买不到 100%）', async () => {
+  mockGet({
+    list: board({
+      items: [
+        { name: '番茄', amount: '2个', from: ['番茄炒蛋'], ...noStock },
+        covered({ name: '鸡蛋' }),
+      ],
+      toBuyCount: 1,
+      coveredCount: 1,
+      stockEmpty: false,
+    }),
+  })
+  renderList()
+
+  expect(await screen.findByText('买到 0/1')).toBeTruthy()
+  expect(screen.queryByText('买到 0/2')).toBeNull()
+})
+
+it('冰箱里没记东西时说清"没替你扣掉什么"并给出路（不说的话用户以为这功能没用）', async () => {
+  mockGet({ list: board({ stockEmpty: true }) })
+  renderList()
+
+  expect(await screen.findByText(/冰箱里还没记东西，所以这份清单没替你扣掉什么/)).toBeTruthy()
+  const link = screen.getByRole('link', { name: /记一下冰箱里有什么/ })
+  expect(link.getAttribute('href')).toBe('/fridge')
+})
+
+it('冰箱里有东西时不出现那句（它是给空冰箱的，不是常驻提示）', async () => {
+  mockGet({ list: board({ stockEmpty: false }) })
+  renderList()
+
+  await screen.findByText('鸡蛋')
+  expect(screen.queryByText(/没替你扣掉什么/)).toBeNull()
+})
+
+it('页脚说清匹配口径（"五花肉不算猪肉"这类保守判断要让用户知道）', async () => {
+  mockGet()
+  renderList()
+
+  expect(await screen.findByText(/名字对得上冰箱的才算"家里有"/)).toBeTruthy()
 })

@@ -2370,3 +2370,55 @@ pnpm --dir apps/mobile run dev                     # http://127.0.0.1:5173/fridg
 
 - **限流 60 次/分（按 IP）**：连跑两遍验收脚本会把自己打到 429（表现为页面「暂时算不出来」——**那是限流，不是功能坏了**；脚本里有 `settleThrottleWindow()` 会自动等窗口）。
 - 匹配规则**刻意不认品类**（五花肉≠猪肉），所以会有保守的"多说要买一样"，这是设计而非缺陷（见 R-44）。
+
+## R-048 采购清单与库存比对（D-059：F7-02）（✅ 已验证，2026-10-13）
+
+### 怎么跑
+
+```bash
+# 后端（改过代码要先重建镜像 —— 见 R-30）
+docker compose build api && docker compose up -d --force-recreate api
+docker compose exec -T api sh -c "grep -c 'stockLabel' dist/modules/shopping/shopping.rules.js \
+  && grep -c 'stockRows' dist/modules/shopping/shopping.service.js"   # 确认新代码进镜像
+
+# 单测与验收
+pnpm --dir services/api test                        # 364/364
+pnpm --dir services/api run test:http:stock-match    # 19/19
+pnpm --dir services/api run test:http:shopping       # 27/27（F7-01 回归）
+
+# 前端
+pnpm --dir apps/mobile run test                      # 456/456
+pnpm --dir apps/mobile run dev                       # http://127.0.0.1:5173/shopping
+```
+
+### 验收脚本覆盖什么
+
+`verify-stock-match-http.cjs` **自带一份菜单**（自己建家庭、加菜、确认那餐），从 401 起：冰箱空时清单**一条都不扣**（`stockEmpty=true`，这是"还没记冰箱"不是"没效果"）→ 记一样真有的（鸡蛋 99个）→ **从"要买的"里拿掉**（`needsBuy=false`、`verdict=enough`）且那句话里给出**家里有多少**（用户要能核对是不是他记的）→ **计数自洽**（`toBuy + covered === items.length`）→ 家里不够时给出**真减出来的**"还要买 1个" → **单位对不上就算不清**（`半盒` vs `2个` → `unknown`、`remaining=null`）→ 算不清的**单独计数**（`unsureCount`）→ 冰箱那侧没写量也算不清 → 别名认得出（记"西红柿"抵掉"番茄"）→ **反证：五花肉不算猪肉**（那道菜仍把"猪肉"列进要买的）→ **正对照：同一张清单里 `白菜` 确实被认出来了**（证明上一条不是因为比对整个没生效）→ 共享关掉后吃货的清单里**没有**妈妈记的库存（`scope=mine`、`covered=0`）、掌勺人仍看全量。
+
+**用法陷阱（脚本先撞上）**：一份菜单要**先把菜全加进去、再确认一次**（`POST /orders/meals/:mealKey/status`）。一菜一确认时第二次 `POST /orders/items` 会 409——**那是接口对的**（那餐已经"已安排"，不该再改），是脚本顺序错了。
+
+### 本轮实测的关键证据
+
+| 验的是什么 | 证据 |
+| --- | --- |
+| 算得清的真的扣掉了 | 真实清单 26 样 → 「买到 0/24」+「家里有 2 样，不用买」 |
+| 算不清的**没有**编号 | 豆腐（要 `600g`，家里记"两盒"）与胡萝卜（要 `1个`，家里记"一小把"）都显示「家里有 …，够不够看一眼」，**没有**"还要买" |
+| 算不清的单独提醒 | 那条线写「（2 样的量要自己看一眼）」，两行都带 `is-unsure` 样式 |
+| 名字与用量分得开 | 像素量过：`.shop__name` 与 `.shop__amount` 间距 8px，`stockLabel` 独占一行（见下"抓到的问题"） |
+
+### 本轮抓到的问题
+
+| 症状 | 根因 | 修法 |
+| --- | --- | --- |
+| **正对照是空的** | `五花肉` 那一组想同时验"不认品类"与"比对没失效"，但那张清单里**根本没有要五花肉的条目** | 换**同一张清单**里的 `白菜` 当正对照（先确认那道菜配料表里真有它） |
+| 编出了「家里有 半盒，还要买 2个」 | 没有"单位不一致就算不清"这道守卫 | 补守卫；**反证**：拿掉它 → 19/19 掉到 17/19 |
+| 注释说"后端拼句子"、实现却在前端拼 | 实现与注释相反 | 后端加 `stockLabel`，前端 `stockLine()` 只透传 |
+| **`豆腐600g` 贴在一起** | `.shop__covered-item` 是纯 block，两个 span 之间没有间距（"要买的"那些行有 flex+gap，这里漏了） | 补 `display:flex; gap:4px 8px; align-items:baseline`，与 `.shop__label` 对齐 |
+
+**回归测试**：后端 352 → **364**（`shopping.rules` 新增 12 条）；前端 447 → **456**。
+**反证**：拿掉"单位不一致即算不清" → 验收 19/19 → **17/19**，打印出被编出来的减法结果。
+
+### 注意
+
+- **限流 60 次/分（按 IP）**：连跑 `test:http:stock-match` 与 `test:http:shopping` 会互相挤到 429（表现为页面「暂时算不出来」——**那是限流，不是功能坏了**）。
+- 「家里有」的那组**默认收起来**：全部都不用买时改为正面摊开（`shop__covered-all`），冰箱空时另给一句解释 + 去 `/fridge` 的链接（`stockEmpty`）。

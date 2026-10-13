@@ -45,6 +45,12 @@ const FAMILY = {
   myRole: 'OWNER', myCapabilities: ['order.create'], members: [],
 }
 
+const noStock = {
+  stock: { verdict: 'missing' as const, stockName: null, stockAmount: null, remaining: null },
+  needsBuy: true,
+  stockLabel: null,
+}
+
 function board(overrides: Partial<ShoppingList> = {}): ShoppingList {
   return {
     scope: 'family',
@@ -52,11 +58,17 @@ function board(overrides: Partial<ShoppingList> = {}): ShoppingList {
     from: '2026-10-13',
     to: '2026-10-15',
     meals: [{ mealKey: '2026-10-13-DINNER', date: '2026-10-13', mealLabel: '晚餐', dishCount: 2 }],
+    // 冰箱页只借这份数据画"要去买什么"那一行的样数与"有菜没配料表"的记号，
+    // 所以这里给最简形状；F7-02 的库存比对不进这一页的断言
     items: [
-      { name: '花椒', amount: '3-4颗', from: ['【红烧排骨】'] },
-      { name: '白砂糖', amount: null, from: ['【红烧排骨】'] },
-      { name: '桂圆肉', amount: '6个', from: ['【桂圆银耳羹】'] },
+      { name: '花椒', amount: '3-4颗', from: ['【红烧排骨】'], ...noStock },
+      { name: '白砂糖', amount: null, from: ['【红烧排骨】'], ...noStock },
+      { name: '桂圆肉', amount: '6个', from: ['【桂圆银耳羹】'], ...noStock },
     ],
+    toBuyCount: 3,
+    coveredCount: 0,
+    unsureCount: 0,
+    stockEmpty: true,
     missing: [],
     dishCount: 3,
     ...overrides,

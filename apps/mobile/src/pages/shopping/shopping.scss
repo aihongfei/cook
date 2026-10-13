@@ -200,3 +200,103 @@
   line-height: 1.6;
   color: var(--color-ink-3);
 }
+
+/* ---- 与库存比对（M7 / F7-02）：家里有的收在一条可展开的线里 ---- */
+
+/* 那句话跟在用量与来源后面，压成次要色——它是解释，不是要用户做的事 */
+.shop__stock {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-ink-2);
+}
+
+/* "算不清"的那几条要显眼一点：这一整组里只有它们需要用户自己判断 */
+.shop__stock.is-unsure {
+  color: #a8542a;
+}
+
+/* 「家里有 N 样，不用买」那条线：整行可点，收起来时不占位置 */
+.shop__covered-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  width: auto;
+  margin: 10px var(--spacing-page) 0;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 12px;
+  color: #6e3a1c;
+  text-align: left;
+  cursor: pointer;
+  background: rgb(188 203 166 / 22%);
+  border: 1px solid rgb(188 203 166 / 55%);
+  border-radius: 12px;
+}
+
+.shop__covered-line:active {
+  background: rgb(188 203 166 / 34%);
+}
+
+.shop__covered-text {
+  min-width: 0;
+}
+
+.shop__covered-arrow {
+  flex: 0 0 auto;
+  color: var(--color-ink-3);
+}
+
+.shop__covered-list-card {
+  margin-top: 8px;
+}
+
+.shop__covered-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 家里有的一行：没有勾选框，所以比"要买的"那些行矮一档。
+ * 但**布局语汇与要买的那些行保持一致**（flex + gap）：第一版这里漏了，
+ * 于是名字与用量贴在一起显示成"豆腐600g"——看着像数据错了，
+ * 其实是两个 span 之间没有间距。 */
+.shop__covered-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  padding: 7px 4px;
+  font-size: 13px;
+  border-bottom: 1px dashed var(--color-line);
+}
+
+.shop__covered-item:last-child {
+  border-bottom: 0;
+}
+
+/* 全部都不用买时的那张卡：这是好消息，给它暖绿（调色板里那块 sage） */
+.shop__covered-all {
+  margin-top: 12px;
+  background: rgb(188 203 166 / 20%);
+}
+
+.shop__covered-all-text {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-ink);
+}
+
+.shop__stock-empty {
+  margin: 10px var(--spacing-page) 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.shop__stock-link {
+  color: var(--color-brand);
+}

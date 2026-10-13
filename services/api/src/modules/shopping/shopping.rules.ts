@@ -1,5 +1,5 @@
 /**
- * 采购清单的纯规则（M7 / F7-01）。口径见 D-039。
+ * 采购清单的纯规则（M7 / F7-01、F7-02）。口径见 D-039 与 D-059。
  *
  * 这块的全部难度在一件事上：**菜谱里的用量是自由文本**（"2朵"、"1袋"、"3-4颗"、"适量"、空串）。
  * 它来自各家菜谱的写法，我们不曾、也不该把它"归一"成数字——那需要一个人工维护的度量衡表，
@@ -7,7 +7,12 @@
  *
  * 所以这里的做法是：**能加的时候才加，不能加就照原样列出来**。
  * 宁可写成"2朵、1袋"，也不写成"3（朵+袋）"这种假数字。
+ *
+ * F7-02（与库存比对"只买缺的"）沿用同一条规矩：**算得清才算减法**，
+ * 算不清就照实说"家里有，够不够自己看"（见下方 `compareWithStock`）。
  */
+
+import { canonicalName } from '../fridge/pantry.rules'
 
 /** 一道菜（或一餐里的一组菜）的配料表：菜名 + 它的配料 */
 export interface DishIngredients {
@@ -124,4 +129,143 @@ export function aggregateIngredients(
   return [...byName]
     .map(([name, entry]) => ({ name, amount: mergeAmounts(entry.amounts), from: entry.from }))
     .sort((a, b) => a.name.localeCompare(b.name, locale))
+}
+
+/* ------------------------------------------------------------------ *
+ * 与库存比对（M7 / F7-02「只买缺的」）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 冰箱里的一样东西（比对用的最小形状）。
+ *
+ * 数量是**自由文本**（「一盒」「3个」「半颗」「若干」，也可以没写）——与菜谱那侧同一套口径。
+ */
+export interface StockRow {
+  name: string
+  amount: string | null
+}
+
+/**
+ * 比对结论。
+ *
+ * 四档而不是"要买/不用买"两档，是因为**有两件事我们真的不知道**：
+ * - 菜谱要多少（它可能写"适量"，或者压根没写）；
+ * - 家里有多少（他可能只记了"一盒"，而"一盒"是几个只有他知道）。
+ *
+ * 这两件事只要有一件不知道，就**不能算减法**——只能照实说"家里有，自己看一眼"。
+ * 这与 `parseAmount` 拒绝给区间求平均是同一个立场：不编一个看起来精确的假数字。
+ */
+export type StockVerdict =
+  /** 家里没有（或没对上）：照买 */
+  | 'missing'
+  /** 家里有，而且**算得清、确实够了**：不用买 */
+  | 'enough'
+  /** 家里有，**算得清但不够**：还要买一点（`remaining` 给了差多少） */
+  | 'notEnough'
+  /** 家里有，但**量算不清**（单位不同、有一边不是数字、或压根没写）：够不够自己看 */
+  | 'unknown'
+
+export interface StockComparison {
+  verdict: StockVerdict
+  /** 家里那一样**按他记的名字**回显（他说"西红柿"就不回"番茄"） */
+  stockName: string | null
+  /** 家里记的量原样回显（可能有几条：同一样东西放在两个区） */
+  stockAmount: string | null
+  /** 扣掉家里已有的之后还要买多少（**只有算得清时才给**，其余为 null） */
+  remaining: string | null
+}
+
+export interface ShoppingItemWithStock extends ShoppingItem {
+  stock: StockComparison
+  /** 还要不要买（`missing` 与 `notEnough` 要；`enough` 与 `unknown` 不要） */
+  needsBuy: boolean
+  /**
+   * 那一行的人话（**后端拼好**，与冰箱的 `expiryLabel` 同一条规矩：两边各拼一次
+   * 必然有一边先改，而"家里有/还差"这种话一旦不一致用户就不信它了）。
+   * `missing` 是 `null`——家里没有的东西不需要在清单上说一句话。
+   */
+  stockLabel: string | null
+}
+
+/**
+ * 拿一样要买的食材去冰箱里找。
+ *
+ * 匹配**复用 `pantry.rules` 的那一套**（等值 / 别名 / 切法，不做品类推断）：
+ * 那个文件是"这两个名字是不是同一样东西"的唯一权威定义，采购清单、手边食材选菜、
+ * 冰箱推荐三处都调它。各写一套的话，同一样东西在三个页面会给出三个答案
+ * （"辣椒算不算辣椒面"这种问题不该有三份回答）。
+ *
+ * 算减法**只在同单位且两边都是数字时**做：
+ * - 菜谱要 `2个`、冰箱有 `3个` → 够了；
+ * - 菜谱要 `5个`、冰箱有 `3个` → 还要买 `2个`；
+ * - 菜谱要 `2个`、冰箱有 `半盒` → **算不清**（"半盒"是几个？只有人知道）；
+ * - 菜谱写 `适量` / 没写 → **算不清**（连要多少都不知道，凭什么说够）。
+ */
+export function compareWithStock(
+  item: { name: string; amount: string | null },
+  stock: readonly StockRow[],
+): StockComparison {
+  const target = canonicalName(item.name)
+  const hits = target ? stock.filter((row) => canonicalName(row.name) === target) : []
+  if (hits.length === 0) {
+    return { verdict: 'missing', stockName: null, stockAmount: null, remaining: null }
+  }
+
+  const stockName = hits[0].name
+  const amounts = hits.map((row) => row.amount?.trim() ?? '').filter((text) => text !== '')
+  const stockAmount = amounts.length > 0 ? amounts.join('、') : null
+
+  const base = { stockName, stockAmount, remaining: null }
+  const need = item.amount ? parseAmount(item.amount) : null
+  const have = amounts.map((text) => parseAmount(text))
+
+  // 菜谱没说要多少（或"适量"），或者家里有一处不是数字/单位对不上：算不清就不算
+  if (!need) return { ...base, verdict: 'unknown' }
+  if (have.length === 0) return { ...base, verdict: 'unknown' }
+  if (have.some((entry) => entry === null)) return { ...base, verdict: 'unknown' }
+  if (have.some((entry) => entry?.unit !== need.unit)) return { ...base, verdict: 'unknown' }
+
+  const total = have.reduce((sum, entry) => sum + (entry?.value ?? 0), 0)
+  if (total >= need.value) return { ...base, verdict: 'enough' }
+  return { ...base, verdict: 'notEnough', remaining: `${formatNumber(need.value - total)}${need.unit}` }
+}
+
+/**
+ * 那一行的人话（后端算好给前端，不在前端重拼一遍——两边各拼一次必然有一边先改）。
+ *
+ * `missing` 返回 null（家里没有的东西不需要解释）；其余三档都要说清**家里有多少**，
+ * 因为用户接下来要判断的正是"这些够不够"：
+ * - `enough`：「家里有 3个，够了」
+ * - `notEnough`：「家里有 3个，还要买 2个」
+ * - `unknown`：「家里有 半盒，够不够看一眼」——**这句话的重点是"我们不知道"**，
+ *   不能写成"够了"（那是编的），也不能不显示（那用户会以为漏了）。
+ */
+export function stockLabel(comparison: StockComparison): string | null {
+  const { verdict, stockAmount } = comparison
+  if (verdict === 'missing') return null
+  if (verdict === 'enough') return `家里有 ${stockAmount ?? '一些'}，够了`
+  if (verdict === 'notEnough') return `家里有 ${stockAmount}，还要买 ${comparison.remaining}`
+  return `家里有${stockAmount ? ` ${stockAmount}` : ''}，够不够看一眼`
+}
+
+/**
+ * 把整张清单过一遍冰箱。
+ *
+ * **顺序不变**（仍是按名字排的）：买菜时清单的顺序要稳定，两件事分开看就够——
+ * 界面上"要买的"和"家里有的"分两组渲染，而不是把整张单子重排一遍
+ * （重排会让用户下次打开时找不到上次看到的位置）。
+ */
+export function applyStock(
+  items: readonly ShoppingItem[],
+  stock: readonly StockRow[],
+): ShoppingItemWithStock[] {
+  return items.map((item) => {
+    const comparison = compareWithStock(item, stock)
+    return {
+      ...item,
+      stock: comparison,
+      needsBuy: comparison.verdict === 'missing' || comparison.verdict === 'notEnough',
+      stockLabel: stockLabel(comparison),
+    }
+  })
 }
