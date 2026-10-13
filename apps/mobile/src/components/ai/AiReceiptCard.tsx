@@ -35,7 +35,13 @@ export default function AiReceiptCard({ items, undoing, onUndo }: AiReceiptCardP
         {items.map((item) => (
           <li className={['ai__receipt-row', item.undone && 'is-undone'].filter(Boolean).join(' ')} key={item.id}>
             <span className="ai__receipt-summary">{item.summary}</span>
-            {item.undone ? (
+            {/*
+              撤不了的那几笔（`label` 为空，如整餐状态流转）：**不画按钮**。
+              画一个点了只会被拒的按钮比没有按钮更糟——用户会以为界面坏了，
+              或者更坏：以为点了就撤了。后端用空 label 表达"这一步回不去"，
+              前端不必知道具体是哪种动作（将来加一种新的不可撤动作时只改后端一处）。
+            */}
+            {item.label === '' ? null : item.undone ? (
               <span className="ai__receipt-undone">已{undoWord(item.label)}</span>
             ) : (
               <button

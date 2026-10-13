@@ -10,6 +10,7 @@ import {
   undoLabel,
   type AiActionRecord,
   type FridgeSnapshot,
+  type UndoContext,
 } from '../src/modules/ai/ai-action.rules'
 import {
   FRIDGE_ADD_MAX,
@@ -39,9 +40,19 @@ function action(over: Partial<AiActionRecord> = {}): AiActionRecord {
   }
 }
 
-function snapshot(over: Partial<FridgeSnapshot> = {}): FridgeSnapshot {
-  return { id: 'i1', name: '鸡蛋', amount: '一盒', zone: '冷藏', expiresOn: null, note: null, ...over }
+/**
+ * 冰箱的"现状"上下文。
+ *
+ * `planUndo` 收的是一个**判别式联合**（冰箱/菜谱/收藏各一种），不是裸快照——
+ * 这样"撤回菜谱时误传冰箱的快照"是编译期错误，而不是运行期按错误的理解去改数据。
+ * 这些测试全都只关心冰箱那一支，所以这里包一层。
+ */
+function snapshot(over: Partial<FridgeSnapshot> = {}): UndoContext {
+  return { entity: 'fridge', item: { id: 'i1', name: '鸡蛋', amount: '一盒', zone: '冷藏', expiresOn: null, note: null, ...over } }
 }
+
+/** 冰箱里"那条已经不在了" */
+const gone: UndoContext = { entity: 'fridge', item: null }
 
 test('撤销"新建"：那条还在 → 删掉它', () => {
   const { plan, verdict } = planUndo(action(), snapshot())
@@ -50,7 +61,7 @@ test('撤销"新建"：那条还在 → 删掉它', () => {
 })
 
 test('撤销"新建"但那**已经不在了**：不算失败，如实说"这条已经不在了"', () => {
-  const { plan, verdict } = planUndo(action(), null)
+  const { plan, verdict } = planUndo(action(), gone)
   assert.equal(plan, undefined)
   assert.equal(verdict.type, 'already')
   assert.match(verdict.type === 'already' ? verdict.message : '', /不在了/)
@@ -102,7 +113,7 @@ test('撤销"删除"：照原样重建（它不在**正是该撤的时候**）',
     kind: AI_ACTION_FRIDGE_REMOVE,
     undoData: { item: { name: '鸡蛋', amount: '一盒', zone: '冷藏', expiresOn: '2026-10-20', note: '给奶奶' } },
   })
-  const { plan, verdict } = planUndo(record, null)
+  const { plan, verdict } = planUndo(record, gone)
   assert.equal(verdict.type, 'ok')
   assert.deepEqual(plan, {
     op: 'restore',
@@ -257,4 +268,129 @@ test('给模型看的冰箱现状：空就说空，有就带 id（它要拿 id �
   // 没写的字段不留空档（"盐 · null · 常温"会读起来像坏数据）
   assert.match(text, /盐 · 常温（id: i2）/)
   assert.doesNotMatch(text, /null/)
+})
+
+// ---------- 自建菜谱与菜单（F1-12 / 全应用 CRUD）----------
+
+/*
+ * 这一段用**service 实际写进库的那份形状**当夹具（逐字段抄自
+ * `ai-action.service` 的 `recipeComparable` / `recipeFields`，以及 `menuOrderSnapshot` 的形状）。
+ *
+ * 为什么要"抄形状"而不是自己编一个：撤"新建菜谱"那个 bug 正是**形状与读取端不匹配**——
+ * 类型里只声明了 `recipeId`，service 却多存了 `after`，读取端拿整份 `undoData` 去比，
+ * `recipeId` 在菜谱快照里找不到，于是每一次撤销都被误判成"用户自己改过"而拒绝。
+ * 单测当时全绿，是因为**没有一条测试用真实形状**（全是手编的假数据）。
+ * 真实请求一跑就露馅（详见 RUNBOOK 里那条验收）。
+ */
+const aiRecipe: {
+  name: string; category: string; cuisine: string; tags: string[]; aliases: string[]
+  ingredients: { name: string; amount: string }[]; steps: string[]; notes: string[]
+  calories: number | null
+} = {
+  name: '西红柿炒蛋',
+  category: '家常',
+  cuisine: '家常',
+  tags: ['快手'],
+  aliases: [],
+  ingredients: [{ name: '鸡蛋', amount: '' }, { name: '西红柿', amount: '' }],
+  steps: ['打散先炒出来', '再回锅翻匀'],
+  notes: [],
+  calories: null,
+}
+
+function recipeContext(over: Partial<typeof aiRecipe> = {}): UndoContext {
+  return { entity: 'recipe', recipe: { id: 'own-1', ...aiRecipe, ...over } }
+}
+
+test('撤「新建菜谱」：**service 真写的那种形状**能被接受（after 是快照，不是整份 undoData）', () => {
+  const { plan, verdict } = planUndo(
+    action({
+      kind: 'recipe.create',
+      // 与 service 存的逐字一致：recipeId + after（after 里没有 recipeId 这个键）
+      undoData: { recipeId: 'own-1', after: aiRecipe },
+      targetId: 'own-1',
+    }),
+    recipeContext(),
+  )
+  assert.equal(verdict.type, 'ok')
+  assert.deepEqual(plan, { op: 'deleteRecipe', recipeId: 'own-1' })
+})
+
+test('撤「新建菜谱」：用户后来自己改过（步骤变了）→ 拒绝，并说清为什么', () => {
+  const { plan, verdict } = planUndo(
+    action({
+      kind: 'recipe.create',
+      undoData: { recipeId: 'own-1', after: aiRecipe },
+      targetId: 'own-1',
+    }),
+    recipeContext({ steps: ['打散先炒出来', '再回锅翻匀', '（用户自己补的第三步）'] }),
+  )
+  assert.equal(verdict.type, 'refused')
+  assert.equal(plan, undefined)
+  assert.match((verdict as { reason: string }).reason, /你自己改过/)
+})
+
+test('撤「新建菜谱」：配料表在库里读回来是对象数组，深比较不该被顺序无关的差异绊倒', () => {
+  // 库里存的就是这个形状；同一份内容要判成"没改过"
+  const { verdict } = planUndo(
+    action({ kind: 'recipe.create', undoData: { recipeId: 'own-1', after: aiRecipe } }),
+    { entity: 'recipe', recipe: { id: 'own-1', ...aiRecipe } },
+  )
+  assert.equal(verdict.type, 'ok')
+})
+
+test('撤「改菜谱」：只比动过的字段——用户改了别的字段不挡这次撤销', () => {
+  const { plan, verdict } = planUndo(
+    action({
+      kind: 'recipe.update',
+      // AI 只动了 steps
+      undoData: { recipeId: 'own-1', before: { steps: ['旧的第一步'] }, after: { steps: ['新的第一步'] } },
+    }),
+    recipeContext({ steps: ['新的第一步'], notes: ['用户自己后来补的小贴士'] }),
+  )
+  assert.equal(verdict.type, 'ok')
+  assert.deepEqual(plan, { op: 'updateRecipe', recipeId: 'own-1', patch: { steps: ['旧的第一步'] } })
+})
+
+test('撤「改菜谱」：AI 动过的那个字段被用户又改了 → 拒绝', () => {
+  const { verdict } = planUndo(
+    action({
+      kind: 'recipe.update',
+      undoData: { recipeId: 'own-1', before: { steps: ['旧的第一步'] }, after: { steps: ['新的第一步'] } },
+    }),
+    recipeContext({ steps: ['用户又改了一遍的第一步'] }),
+  )
+  assert.equal(verdict.type, 'refused')
+})
+
+test('撤「删菜谱」：按原样重建（带 id 与原属家庭/上传人）', () => {
+  const stored = {
+    id: 'own-1', name: '西红柿炒蛋', category: '家常', cuisine: '家常', tags: [],
+    aliases: [], ingredients: [], steps: ['一步'], notes: [], calories: null,
+    familyId: 'f1', createdById: 'u1', searchText: '西红柿炒蛋',
+  }
+  const { plan, verdict } = planUndo(
+    action({ kind: 'recipe.remove', undoData: { recipe: stored }, targetId: 'own-1' }),
+    { entity: 'recipe', recipe: null },
+  )
+  assert.equal(verdict.type, 'ok')
+  assert.deepEqual(plan, { op: 'restoreRecipe', recipe: stored })
+})
+
+test('撤「收藏」：天然幂等——用户自己已经取消过，就说"已经取消收藏了"', () => {
+  const { plan, verdict } = planUndo(
+    action({ kind: 'favorite.add', undoData: { recipeId: 'r1', wasFavorited: false }, targetId: 'r1' }),
+    { entity: 'favorite', favorited: false },
+  )
+  assert.equal(verdict.type, 'already')
+  assert.equal(plan, undefined)
+})
+
+test('撤「收藏」：状态与目标相反时才真的反一下', () => {
+  const { plan, verdict } = planUndo(
+    action({ kind: 'favorite.remove', undoData: { recipeId: 'r1', wasFavorited: true }, targetId: 'r1' }),
+    { entity: 'favorite', favorited: false },
+  )
+  assert.equal(verdict.type, 'ok')
+  assert.deepEqual(plan, { op: 'setFavorite', recipeId: 'r1', favorited: true })
 })

@@ -1,5 +1,5 @@
-import { MealSlot } from '@prisma/client'
-import { MEAL_LABEL, ORDER_DAY_SPAN } from '../orders/orders.rules'
+import { MealSlot, OrderStatus } from '@prisma/client'
+import { MEAL_LABEL, ORDER_DAY_SPAN, ORDER_STATUSES } from '../orders/orders.rules'
 
 /**
  * AI 的**内置工具**（用户 2026-10-12 第③项需求）。口径见 D-026 第三次补充。
@@ -27,9 +27,36 @@ export const TOOL_READ_FRIDGE = 'read_fridge'
 export const TOOL_ADD_FRIDGE_ITEMS = 'add_fridge_items'
 export const TOOL_UPDATE_FRIDGE_ITEM = 'update_fridge_item'
 export const TOOL_REMOVE_FRIDGE_ITEM = 'remove_fridge_item'
+/** 自建菜谱与收藏（F1-11/F1-12/F1-09；用户 2026-10-13：「软件的 CRUD ai 都可以操作」） */
+export const TOOL_READ_RECIPES = 'read_recipes'
+export const TOOL_CREATE_RECIPE = 'create_recipe'
+export const TOOL_UPDATE_RECIPE = 'update_recipe'
+export const TOOL_DELETE_RECIPE = 'delete_recipe'
+export const TOOL_TOGGLE_FAVORITE = 'toggle_favorite'
+/**
+ * 菜单、餐次与组合（用户 2026-10-13 的「软件的 CRUD ai 都可以操作」）。
+ *
+ * 菜单为什么也放 A 档（真的写库）：它和冰箱是同一层——**自家这一餐的事**，
+ * 而且每笔都留了反向动作（撤菜 / 放回去 / 改回去），用户点一下就能回到原样。
+ * 状态流转是唯一的例外：状态机本身单向（见 orders.rules），撤销在数据上不成立，
+ * 所以那个工具的回执上没有「撤」，且提示词要求只在用户明说时才动它。
+ */
+export const TOOL_READ_MENU = 'read_menu'
+export const TOOL_ADD_MENU_ITEMS = 'add_menu_items'
+export const TOOL_REMOVE_MENU_ITEM = 'remove_menu_item'
+export const TOOL_SET_DINERS = 'set_diners'
+export const TOOL_SET_MEAL_STATUS = 'set_meal_status'
+export const TOOL_REPEAT_MEAL = 'repeat_meal'
+export const TOOL_READ_COMBOS = 'read_combos'
+export const TOOL_CREATE_COMBO = 'create_combo'
+export const TOOL_UPDATE_COMBO = 'update_combo'
+export const TOOL_DELETE_COMBO = 'delete_combo'
+export const TOOL_ADD_COMBO_TO_MEAL = 'add_combo_to_meal'
 
 /** 一次最多往冰箱里记几样（模型会一口气倒出十几条，见 D-052 的护栏） */
 export const FRIDGE_ADD_MAX = 8
+/** 一次最多往菜单里加几道（同上：模型偶尔会把整周菜单一口气倒出来） */
+export const MENU_ADD_MAX = 8
 
 /** 一轮里最多核几个提议（模型偶尔会把整周的菜一次性倒出来） */
 export const PROPOSALS_MAX = 6
@@ -172,6 +199,342 @@ export const AI_TOOLS = [
           itemId: { type: 'string', description: `${TOOL_READ_FRIDGE} 返回的 id` },
         },
         required: ['itemId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  /*
+   * ---------- 自建菜谱（F1-11 / F1-12；用户 2026-10-13：
+   *            「自己上传的…这块也可以用 ai 直接添加进去」）----------
+   *
+   * 与冰箱同一档（A 档：真的写库 + 回执卡 + 可撤），但有**一条独有的边界**：
+   * 只能动**这个家自己上传的**菜谱。库里的公共菜谱（极速/jumdata 那些）是外部数据的镜像，
+   * 谁都不许改——用户想调整就让他复制一份成自己的（写库服务会拒，并把这句话回给模型）。
+   * 这道边界**不靠提示词里让模型自觉**，而是硬拦在服务层（与"AI 走用户自己那套服务"同一原则）。
+   */
+  {
+    type: 'function',
+    function: {
+      name: TOOL_READ_RECIPES,
+      description: '按名字或关键词找菜谱，并给出它是不是**用户自己上传的**。'
+        + `要改或要删菜谱之前必须先调它拿到 id（与 ${TOOL_READ_FRIDGE} 同一条规矩：不许凭记忆操作）。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '菜名或关键词，如「番茄炒蛋」「番茄」' },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_CREATE_RECIPE,
+      description: '把一道菜谱存进「我家的菜谱」。**会真的写库**。'
+        + '用户口述自家做法（"我家的红烧肉是这么做的…"）时用它。'
+        + '**名字、品类、菜系、至少一步做法是必填的**；配料与用量用户没说的不要编'
+        + '（编了他会照着买错东西），宁可留空等他补。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '菜名' },
+          category: { type: 'string', description: '品类，如「荤菜」「汤」「主食」；拿不准用「家常」' },
+          cuisine: { type: 'string', description: '菜系，如「家常」「川菜」；拿不准用「家常」' },
+          ingredients: {
+            type: 'array',
+            description: '配料。用量不确定就留空，不要编一个数',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: '配料名，如「五花肉」' },
+                amount: { type: 'string', description: '用量，可空，如「500g」' },
+              },
+              required: ['name'],
+              additionalProperties: false,
+            },
+          },
+          steps: { type: 'array', items: { type: 'string' }, description: '做法步骤，一步一句，至少一步' },
+          notes: { type: 'array', items: { type: 'string' }, description: '小窍门/注意事项，可空' },
+          tags: { type: 'array', items: { type: 'string' }, description: '标签，可空，如「快手」「下饭」' },
+          calories: { type: 'number', description: '热量（千卡/份），可空；不确定就不要填' },
+        },
+        required: ['name', 'category', 'cuisine', 'steps'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_UPDATE_RECIPE,
+      description: '改一道**自己上传的**菜谱（做法、配料、名字等）。**会真的写库**。'
+        + `必须先调 ${TOOL_READ_RECIPES} 拿到 id；公共菜谱改不了（工具结果会说明原因）。`
+        + '**只传要改的那些字段**——没传的保持原样，不要把整份菜谱重写一遍。',
+      parameters: {
+        type: 'object',
+        properties: {
+          recipeId: { type: 'string', description: `${TOOL_READ_RECIPES} 返回的 id` },
+          name: { type: 'string', description: '新菜名（改名时才传）' },
+          category: { type: 'string' },
+          cuisine: { type: 'string' },
+          ingredients: {
+            type: 'array',
+            description: '新的完整配料表（改配料时才传；传了就是整表替换）',
+            items: {
+              type: 'object',
+              properties: { name: { type: 'string' }, amount: { type: 'string' } },
+              required: ['name'],
+              additionalProperties: false,
+            },
+          },
+          steps: { type: 'array', items: { type: 'string' }, description: '新的完整步骤（改步骤时才传）' },
+          notes: { type: 'array', items: { type: 'string' } },
+          tags: { type: 'array', items: { type: 'string' } },
+          calories: { type: 'number' },
+        },
+        required: ['recipeId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_DELETE_RECIPE,
+      description: '删掉一道**自己上传的**菜谱。**会真的写库**（删错了能撤回来）。'
+        + `必须先调 ${TOOL_READ_RECIPES} 拿到 id，且要能对上用户说的那道——`
+        + '用户没点名时先问清，不要替他挑一个。公共菜谱删不了。',
+      parameters: {
+        type: 'object',
+        properties: {
+          recipeId: { type: 'string', description: `${TOOL_READ_RECIPES} 返回的 id` },
+        },
+        required: ['recipeId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  /*
+   * ---------- 收藏（F1-09，A 档）----------
+   * 收藏**按人存**（"我爱吃这个"），只影响自己，所以与冰箱同档：直接改 + 回执可撤。
+   */
+  {
+    type: 'function',
+    function: {
+      name: TOOL_TOGGLE_FAVORITE,
+      description: '收藏或取消收藏一道菜（同一个开关：已经收藏了就取消）。**会真的写库**。'
+        + `必须先调 ${TOOL_SEARCH_DISHES} 或 ${TOOL_READ_RECIPES} 拿到真实 id。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          recipeId: { type: 'string', description: '菜谱 id' },
+        },
+        required: ['recipeId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  /*
+   * ---------- 菜单、餐次与组合（A 档）----------
+   * 与冰箱同一档：真的写库 + 回执可撤。**唯一的例外是状态流转**（没撤销，见上面说明）。
+   */
+  {
+    type: 'function',
+    function: {
+      name: TOOL_READ_MENU,
+      description: '读这个家最近的菜单安排：每一天午/晚餐的状态、就餐人数、已经点了哪些菜，'
+        + '每道带 **itemId**。要撤菜、改人数、改状态、或照抄某一餐之前**必须先调它**。',
+      parameters: {
+        type: 'object',
+        properties: { days: { type: 'integer', description: '往后看几天，默认 3，最多 7' } },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_ADD_MENU_ITEMS,
+      description: '把菜加进某一天某一餐。**会真的写库**（每道一张回执，可以撤）。'
+        + `用户明确说"加进去/点上/来一道"时用它；只是想要推荐、还没定的时候用 ${TOOL_PROPOSE_MENU_ITEMS}。`
+        + `菜谱里的菜传 recipeId（先 ${TOOL_SEARCH_DISHES} 拿真实 id），用户口述的菜传 dishName。`
+        + `一次最多 ${MENU_ADD_MAX} 道。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          mealDate: { type: 'string', description: 'YYYY-MM-DD，用户没说就用今天' },
+          meal: { type: 'string', enum: ['LUNCH', 'DINNER'], description: '午餐还是晚餐' },
+          items: {
+            type: 'array',
+            description: '要加的菜，每道传 recipeId 或 dishName 之一',
+            items: {
+              type: 'object',
+              properties: {
+                recipeId: { type: 'string', description: '菜谱 id（与 dishName 二选一）' },
+                dishName: { type: 'string', description: '用户口述的菜名，如「我妈教的糖醋排骨」（与 recipeId 二选一）' },
+                note: { type: 'string', description: '可选的备注，如「少放辣」' },
+              },
+              required: [],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['items'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_REMOVE_MENU_ITEM,
+      description: '从菜单里撤掉一道菜（吃不了了/不想吃了）。**会真的写库**（能放回去）。'
+        + `必须先调 ${TOOL_READ_MENU} 拿到 itemId，且要能对上用户说的那道——`
+        + '用户没点名时先问清，不要替他挑。**只能撤用户自己点的菜**（别人点的撤不了）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          itemId: { type: 'string', description: `${TOOL_READ_MENU} 返回的 itemId` },
+        },
+        required: ['itemId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_SET_DINERS,
+      description: '设定某一餐的就餐人数（掌勺人才有权限）。**会真的写库**（能改回去）。'
+        + `必须先调 ${TOOL_READ_MENU} 拿到 mealKey。用户说"今晚 4 个人吃"就是它。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          mealKey: { type: 'string', description: `${TOOL_READ_MENU} 返回的 mealKey，形如 2026-10-13-DINNER` },
+          count: { type: 'integer', description: '人数（1～30）；传 0 或 null = 清除设定' },
+        },
+        required: ['mealKey'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_SET_MEAL_STATUS,
+      description: '改一餐的状态：选好了(PLANNED) / 开始做(COOKING) / 做好了(DONE) / 取消这餐(CANCELED)。'
+        + '**会真的写库，而且没有撤销**（状态是往前走的，见应用里的状态机）。'
+        + '所以**只在用户明确说出要改到哪个状态时才调**（"今晚这餐就这么定了"/"做好了"/"晚餐取消"）。'
+        + `不确定就先问他。必须先调 ${TOOL_READ_MENU} 拿 mealKey 与当前状态。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          mealKey: { type: 'string', description: `${TOOL_READ_MENU} 返回的 mealKey` },
+          status: { type: 'string', enum: ['PENDING', 'PLANNED', 'COOKING', 'DONE', 'CANCELED'], description: '目标状态' },
+        },
+        required: ['mealKey', 'status'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_REPEAT_MEAL,
+      description: '再点一次：把某一餐整桌照抄到另一天某一餐（已有的菜跳过）。**会真的写库**（每道可撤）。'
+        + `只适用于**已经定局**的那一餐（做好了/已取消/日子已过），还在收集中的那一餐直接加菜就行。`
+        + `必须先调 ${TOOL_READ_MENU} 拿来源的 mealKey 与目标日期。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          mealKey: { type: 'string', description: '来源那一餐的 mealKey' },
+          mealDate: { type: 'string', description: '照到哪一天（YYYY-MM-DD）' },
+          meal: { type: 'string', enum: ['LUNCH', 'DINNER'], description: '照到哪一餐' },
+        },
+        required: ['mealKey', 'mealDate', 'meal'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_READ_COMBOS,
+      description: '读这个家存了哪些常用组合（每组里有哪些菜、菜 id 是多少）。'
+        + `要改组合、删组合、或用组合加菜之前必须先调它，也可以用来回答"我们家那组快手菜是啥"。`,
+      parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_CREATE_COMBO,
+      description: '把几道菜存成一个常用组合（"以后点这几道就省事了"）。**会真的写库**（能撤）。'
+        + `菜要传真实 id（先 ${TOOL_SEARCH_DISHES} 或 ${TOOL_READ_RECIPES}）；同一家不能重名。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '组合名，如「快手三菜一汤」（最多 24 字）' },
+          note: { type: 'string', description: '一句话说明，可空，如「工作日的晚上」' },
+          recipeIds: { type: 'array', items: { type: 'string' }, description: '组里的菜 id，至少一道（最多 12 道）' },
+        },
+        required: ['name', 'recipeIds'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_UPDATE_COMBO,
+      description: '改一个组合：改名、改说明，或**整组换菜**。**会真的写库**（能改回去）。'
+        + `必须先调 ${TOOL_READ_COMBOS} 拿 comboId。只传要改的部分——菜传了就是整组替换（要发完整列表）。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          comboId: { type: 'string', description: `${TOOL_READ_COMBOS} 返回的 id` },
+          name: { type: 'string', description: '新名字（改名时才传）' },
+          note: { type: 'string', description: '新说明（改说明时才传）' },
+          recipeIds: { type: 'array', items: { type: 'string' }, description: '新的完整菜列表（换菜时才传）' },
+        },
+        required: ['comboId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_DELETE_COMBO,
+      description: '删掉一个常用组合（只删组合，菜谱与已点的菜单都不受影响）。**会真的写库**（能放回来）。'
+        + `必须先调 ${TOOL_READ_COMBOS} 拿 comboId，且要能对上用户说的那个。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          comboId: { type: 'string', description: `${TOOL_READ_COMBOS} 返回的 id` },
+        },
+        required: ['comboId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_ADD_COMBO_TO_MEAL,
+      description: '一键把某个常用组合整组加进某一天某一餐（已有的菜跳过，不叠加）。**会真的写库**（每道可撤）。'
+        + `必须先调 ${TOOL_READ_COMBOS} 拿 comboId。用户说"把那组快手菜加进明天晚饭"就是它。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          comboId: { type: 'string', description: `${TOOL_READ_COMBOS} 返回的 id` },
+          mealDate: { type: 'string', description: 'YYYY-MM-DD，用户没说就用今天' },
+          meal: { type: 'string', enum: ['LUNCH', 'DINNER'], description: '午餐还是晚餐' },
+        },
+        required: ['comboId', 'mealDate', 'meal'],
         additionalProperties: false,
       },
     },
@@ -449,4 +812,256 @@ export function fridgeText(items: {
       return `${parts.join(' · ')}（id: ${item.id}）`
     })
     .join('\n')
+}
+
+// ---------- 自建菜谱与收藏（F1-11 / F1-12 / F1-09）----------
+
+/**
+ * 从参数里取一个 id 字段（`recipeId` 等）。
+ *
+ * 抽出来是因为这几个工具的"取 id"部分**必须完全一样**：任何一处取错
+ * （比如 trim 漏了、或把空串当有效）都是"操作了另一条"或者"操作了一条空的"。
+ */
+export function readIdArg(rawArguments: string, key: string): string | null {
+  try {
+    const parsed = JSON.parse(rawArguments) as Record<string, unknown>
+    const value = typeof parsed?.[key] === 'string' ? parsed[key].trim() : ''
+    return value || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 新建菜谱的参数整理。
+ *
+ * **只做"能不能当草稿用"的判断，不做业务校验**：名字长度、步骤条数上限、
+ * 配料名长度这些全在 `recipe.rules` 里（`parseRecipeCreate` 会再走一遍）。
+ * 两处各写一套必然分叉——那边放宽了这边还在拦，或者反过来，写进去一条超长的。
+ *
+ * 返回 `null` 表示"连草稿都拼不出来"（参数不是 JSON、或没有名字/步骤），
+ * 这时调用方回一句"没解析出来，请按字段重试"，而不是拿半份数据去写库。
+ */
+export function readRecipeDraft(rawArguments: string): Record<string, unknown> | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return null
+  }
+  const record = parsed as Record<string, unknown>
+  if (typeof record?.name !== 'string' || !record.name.trim()) return null
+  if (!Array.isArray(record.steps) || record.steps.length === 0) return null
+  /*
+   * 品类/菜系**给兜底值**（"家常"）：模型经常不填这两项，而它们是数据库里的必填列。
+   * 这里兜底而不是报错，是因为"用户就想记下自家做法"这件事不该被一个分类问题挡住——
+   * 兜底值是可辨的（不是编造信息），用户之后随手就能改。
+   */
+  return {
+    ...record,
+    category: typeof record.category === 'string' && record.category.trim() ? record.category.trim() : '家常',
+    cuisine: typeof record.cuisine === 'string' && record.cuisine.trim() ? record.cuisine.trim() : '家常',
+  }
+}
+
+/**
+ * 改菜谱的参数：**把 `recipeId` 摘出来，其余原样交给 `parseRecipePatch`**。
+ *
+ * 为什么不在这里挑字段：`parseRecipePatch` 已经是"只认出现过的字段"的实现
+ * （那是它与 `parseRecipeCreate` 的关键区别，也是"AI 改一句话不该清掉别的字段"的保证）。
+ * 在这里再挑一遍等于把那条规则复制一份，将来加字段时两边不同步就会出现"AI 说改了、其实没改"。
+ */
+export function readRecipePatch(rawArguments: string): { recipeId: string; patch: Record<string, unknown> } | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return null
+  }
+  const record = parsed as Record<string, unknown>
+  const recipeId = typeof record?.recipeId === 'string' ? record.recipeId.trim() : ''
+  if (!recipeId) return null
+  const { recipeId: _ignored, ...patch } = record
+  return { recipeId, patch }
+}
+
+/**
+ * 给模型看的菜谱搜索结果（紧凑文本）。
+ *
+ * **每一项都带"是不是自己传的"与能不能改**：模型要据此决定"这道能改/那道只能复制"，
+ * 少了这个它会对公共菜谱调 update，然后拿到一句拒绝、再跟用户解释一遍——
+ * 那一次往返是白花的（用户的额度）。
+ */
+export function recipeText(hits: {
+  id: string
+  name: string
+  category: string
+  cuisine: string
+  mine: boolean
+  sourceLabel: string
+}[]): { recipes: string; hint: string } {
+  if (hits.length === 0) return { recipes: '（没找到）', hint: '换个关键词再搜，或问用户菜名' }
+  return {
+    recipes: hits.map((hit) => {
+      // 「可改」/「公共」这两个词是给模型看的判据，它据此选工具
+      const flag = hit.mine ? '可改' : '公共，不可改'
+      return `${hit.name}（${hit.category}/${hit.cuisine}）[${hit.sourceLabel}，${flag}]（id: ${hit.id}）`
+    }).join('\n'),
+    hint: '只有标了「可改」的才是自己上传的；公共菜谱要改成自己的就新建一道',
+  }
+}
+
+// ---------- 菜单、餐次与组合 ----------
+
+/**
+ * 解析 `add_menu_items` 的参数。
+ *
+ * 日期用 `clampMealDate` 收敛到点菜窗口（与提议那条同一个手法：模型会写去年的日期，
+ * 收敛到最近的可选日比让它拿着一个必然 400 的日期去调接口好）。
+ * 每道菜要求 `recipeId` 或 `dishName` **至少有一个**——两个都没有的条目直接丢掉并告诉模型，
+ * 否则写库时会撞上一句它没法解释的校验错误。
+ */
+export function readMenuAdds(
+  rawArguments: string,
+  todayKey: string,
+  span = ORDER_DAY_SPAN,
+): { mealDate: string; meal: MealSlot; items: { recipeId?: string; dishName?: string; note?: string }[]; rejected: string[] } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return { mealDate: todayKey, meal: 'DINNER', items: [], rejected: ['（参数不是合法 JSON）'] }
+  }
+  const record = parsed as Record<string, unknown>
+  const mealRaw = record?.meal
+  const meal = MEAL_VALUES.includes(mealRaw as MealSlot) ? (mealRaw as MealSlot) : 'DINNER'
+  const mealDate = clampMealDate(record?.mealDate, todayKey, span)
+
+  const rawItems = Array.isArray(record?.items) ? record.items : []
+  const items: { recipeId?: string; dishName?: string; note?: string }[] = []
+  const rejected: string[] = []
+  for (const raw of rawItems) {
+    if (items.length >= MENU_ADD_MAX) {
+      rejected.push('（超过一次能加的上限，剩下的请分下一批）')
+      break
+    }
+    const item = raw as Record<string, unknown>
+    const recipeId = typeof item?.recipeId === 'string' ? item.recipeId.trim() : ''
+    const dishName = typeof item?.dishName === 'string' ? item.dishName.trim() : ''
+    if (!recipeId && !dishName) {
+      rejected.push('(既没有 recipeId 也没有 dishName)')
+      continue
+    }
+    const entry: { recipeId?: string; dishName?: string; note?: string } = {}
+    if (recipeId) entry.recipeId = recipeId
+    else entry.dishName = dishName
+    if (typeof item?.note === 'string' && item.note.trim()) entry.note = item.note.trim().slice(0, 120)
+    items.push(entry)
+  }
+  if (!Array.isArray(record?.items)) rejected.push('（缺少 items 数组）')
+  return { mealDate, meal, items, rejected }
+}
+
+/** 改人数：`{ mealKey, count }`。`count` 为 0/null/缺省都当作"清除设定"（与 parseDinerCount 同口径） */
+export function readDiners(rawArguments: string): { mealKey: string; count: number | null } | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return null
+  }
+  const record = parsed as Record<string, unknown>
+  const mealKey = typeof record?.mealKey === 'string' ? record.mealKey.trim() : ''
+  if (!mealKey) return null
+  const raw = record?.count
+  if (raw === null || raw === undefined || raw === '' || raw === 0) return { mealKey, count: null }
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(value)) return null
+  return { mealKey, count: Math.round(value) }
+}
+
+/** 改状态：`{ mealKey, status }`。状态不在枚举里就当"没解析出来"（不猜一个最像的） */
+export function readMealStatus(rawArguments: string): { mealKey: string; status: OrderStatus } | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return null
+  }
+  const record = parsed as Record<string, unknown>
+  const mealKey = typeof record?.mealKey === 'string' ? record.mealKey.trim() : ''
+  const status = typeof record?.status === 'string' ? record.status.trim().toUpperCase() : ''
+  if (!mealKey || !ORDER_STATUSES.includes(status as OrderStatus)) return null
+  return { mealKey, status: status as OrderStatus }
+}
+
+/** 再点一次 / 组合加菜要的"照到哪一天哪一餐" */
+export function readMealTarget(
+  rawArguments: string,
+  todayKey: string,
+  span = ORDER_DAY_SPAN,
+): { mealKey: string; mealDate: string; meal: MealSlot } | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return null
+  }
+  const record = parsed as Record<string, unknown>
+  const mealKey = typeof record?.mealKey === 'string' ? record.mealKey.trim() : ''
+  const mealRaw = record?.meal
+  if (!mealKey || !MEAL_VALUES.includes(mealRaw as MealSlot)) return null
+  return { mealKey, mealDate: clampMealDate(record?.mealDate, todayKey, span), meal: mealRaw as MealSlot }
+}
+
+/**
+ * 组合的新建/修改参数。
+ *
+ * `name`/`note`/`recipeIds` 都**原样交给 `CombosService`**（`combos.rules` 里的
+ * `parseComboName` 等是唯一的业务校验），这里只做"是不是一个对象"的形状判断。
+ * `keep` 让修改时可以只传一部分：没传的字段不进 patch（`undefined` = 保持原样）。
+ */
+export function readComboDraft(rawArguments: string): { name?: unknown; note?: unknown; recipeIds?: unknown } | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const record = parsed as Record<string, unknown>
+  return { name: record.name, note: record.note, recipeIds: record.recipeIds }
+}
+
+/** 给模型看的菜单现状。**每道菜带 itemId**——撤菜靠它，少了它模型只能凭菜名猜 */
+export function menuText(rows: {
+  mealKey: string
+  date: string
+  meal: MealSlot
+  statusLabel: string
+  dinerCount: number | null
+  dishes: { itemId: string; name: string; who: string; mine: boolean; note: string | null }[]
+}[]): string {
+  if (rows.length === 0) return '（这几天还没有安排）'
+  return rows.flatMap((row) => {
+    const head = `${row.date} ${MEAL_LABEL[row.meal]} · ${row.statusLabel}`
+      + (row.dinerCount ? ` · ${row.dinerCount} 人` : '')
+      + `（mealKey: ${row.mealKey}）`
+    if (row.dishes.length === 0) return [head, '  （还没点菜）']
+    return [head, ...row.dishes.map((dish) => {
+      const who = dish.mine ? '我点的' : `${dish.who}点的`
+      const note = dish.note ? `，备注：${dish.note}` : ''
+      return `  - ${dish.name}（${who}${note}）（itemId: ${dish.itemId}）`
+    })]
+  }).join('\n')
+}
+
+/** 给模型看的组合列表：每组带 id 与菜 id（改组合、用组合加菜都要这两样） */
+export function comboText(combos: { id: string; name: string; note: string | null; dishes: { recipeId: string; name: string }[] }[]): string {
+  if (combos.length === 0) return '（还没有存过常用组合）'
+  return combos.map((combo) => {
+    const note = combo.note ? `（${combo.note}）` : ''
+    const dishes = combo.dishes.map((dish) => `${dish.name}[${dish.recipeId}]`).join('、')
+    return `${combo.name}${note}（comboId: ${combo.id}）：${dishes}`
+  }).join('\n')
 }

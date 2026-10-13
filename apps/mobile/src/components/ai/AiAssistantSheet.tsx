@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
 import {
-  StreamError, streamAiChat, useAiStatus, useUndoAiAction, type AiReceipt,
+  StreamError, invalidateAfterAiWrite, streamAiChat, useAiStatus, useUndoAiAction, type AiReceipt,
 } from '@/api/ai'
 import { useAddOrderItem } from '@/api/orders'
 import { toast } from '@/components/ui/toast'
@@ -90,22 +90,24 @@ export default function AiAssistantSheet() {
     if (typeof thread?.scrollTo === 'function') thread.scrollTo({ top: thread.scrollHeight })
   }, [turns, pending])
 
-  /** 收到回执：挂到对话里，并让冰箱那页把缓存作废 */
+  /** 收到回执：挂到对话里，并让**它可能动过的那些页**把缓存作废 */
   const handleReceipts = useCallback((items: AiReceipt[]) => {
     addReceipts(items)
     /*
-     * **AI 写完之后要把冰箱页那份缓存作废**（用户 2026-10-13 的核心要求：
+     * **AI 写完之后要让相关页面看得见**（用户 2026-10-13 的核心要求：
      * "我说一句它真的把冰箱改了、并且我看得见"）。
      *
-     * 不这么做的话：写入是真的（库里有了、回执卡也在），但冰箱页那份 react-query 缓存
-     * （`staleTime: 30s`）还以为自己是最新的，用户收起抽屉看到的仍是写之前那份列表——
-     * 真去刷新一下会发现东西在，但那一瞬间他会以为"AI 说记好了，冰箱里却没有"。
-     * 这是**浏览器实证抓到的**：库里已经有苹果和豆腐，页面上还是那四样。
+     * 不这么做的话：写入是真的（库里有了、回执卡也在），但那一页的 react-query 缓存
+     * （`staleTime: 30s`）还以为自己是最新的，用户收起抽屉看到的仍是写之前那份——
+     * 真去刷新一下会发现东西在，但那一瞬间他会以为"AI 说记好了、页面上却没有"。
+     * 这个坑**先后抓到过两次**：第一次是冰箱（浏览器实证），第二次是「我的菜谱」
+     * （用户 2026-10-13 反馈："在我的菜谱页面使用 ai 添加菜谱后，背后的菜谱没有自动刷新"）——
+     * 第二次的根因是这里只作废了 `['fridge']`，而 AI 现在已经能写六块东西。
      *
-     * 只作废不动手改：手里没有新的板子（回执里只有一句摘要），硬拼一份缓存只会
-     * 拼出与后端不一致的东西。作废之后冰箱页会自己重新取一次。
+     * 清单收在 `invalidateAfterAiWrite` 里（api/ai.ts），撤销那条路共用同一份：
+     * 两处各写一份必然漏（第二次就是这么漏的）。
      */
-    void queryClient.invalidateQueries({ queryKey: ['fridge'] })
+    invalidateAfterAiWrite(queryClient)
   }, [addReceipts, queryClient])
 
   const send = useCallback(async (text: string) => {

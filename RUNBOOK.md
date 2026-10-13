@@ -2067,3 +2067,59 @@ pnpm --dir apps/mobile run dev                              # http://127.0.0.1:5
 **前端新增 26 条**：`ai-assistant.test.tsx` 20（回执卡是证据 / 没回执不画卡 / 撤对那一笔 / 划掉留着 / `undone:false` 照实说 / 409 透传 / 跨页 / 跨刷新 / 新对话留旧场 / 翻回旧场 / 剪空格 / 十条上限 / 删单场 / logout / 只发 id / 缓存作废 / B 档没被带跑 / 失败留住用户那句）+ `ai-assistant.rules.test.ts` 6。
 
 **反证**：后端 6 组、前端 6 组，逐组精确变红（清单见上表）。
+
+## R-043 AI 覆盖全应用 CRUD + 自建菜谱（D-054：F1-11 / F1-12 / F16-10 扩展）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：
+
+- **后端 · 自建菜谱（F1-11 / F1-12）**
+  - `prisma/schema.prisma`：`Recipe` 加 `familyId`（**null = 全局库**）与 `createdById`；迁移 `20261013063836_user_recipes`。
+  - 新增 `recipe.rules.ts`（**纯函数**：`canWriteRecipe` / `writeRefusal` / `parseRecipeCreate` / `parseRecipePatch` / `buildSearchText` / `sourceLabel`）、`recipe-write.service.ts`（create/update/remove/**restore**，只对自家自建放行）、`optional-auth.guard.ts`（带令牌就挂 userId、没带/过期当匿名**不抛错**——公共读不能因为没登录就挂）。
+  - `builtin-recipe.provider.ts`：`visibility`（匿名只看全局库；登录后全局库 + 自家）、`summary` 下发 `origin`/`sourceLabel`/`mine`、排序 `familyId desc`（自己家的排最前）、**详情也做可见性检查**（防越权）。
+  - `recipes.controller.ts`：读接口 `OptionalAuthGuard`，POST/PATCH/DELETE 走 `JwtAuthGuard` + `RecipeWriteService`。
+- **后端 · AI 十二个新工具（D-054 第一节那张表）**
+  - `ai.tools.ts` 加声明与解析器（`readMenuAdds` / `readDiners` / `readMealStatus` / `readMealTarget` / `readComboDraft` / `menuText` / `comboText`）。
+  - `ai-action.rules.ts` 加七个 kind、`MenuOrderSnapshot`/`ComboSnapshot` 等上下文、`planUndo` 的菜单与组合分支、`menuUndoTarget`（纯函数）、`undoLabel`（**状态流转回空串 = 不可撤**）、`actionKindLabel`。
+  - `ai-action.service.ts` 加 `addMenuItems` / `removeMenuItem` / `setDiners` / `setMealStatus` / `repeatMeal` / `createCombo` / `updateCombo` / `removeCombo` / `addComboToMeal`（**全走用户自己那套服务**，不另写写入逻辑）。
+  - `combos.service.ts` 加 `restore`（撤销"删组合"）；`combos.module.ts` 导出服务；`ai.module.ts` 引 `OrdersModule` / `CombosModule`；`ai.service.ts` 加 12 段工具执行 + `menuRows` + 提示词改写。
+- **前端**
+  - 新增 `pages/recipes/MyRecipesPage.tsx`（`mine=1` 列表 + 空态引导）、`RecipeFormPage.tsx`（新建/编辑共用；**只发改过的字段**；删除走 ConfirmDialog）、`components/RecipeOriginBadge.tsx`（来源徽标）；`RecipeDetailPage` 显示来源与上传人、`mine` 时才给编辑/删除；`DishCard` 带徽标；`MinePage` 加「我的菜谱」入口；路由加 `/recipes/mine`、`/recipes/new`、`/recipes/:id/edit`。
+  - `api/recipes.ts`：类型补 `origin`/`sourceLabel`/`mine`/`createdBy`，加 `create/update/delete` 与三个 mutation hook。
+  - `api/ai.ts` 加 **`invalidateAfterAiWrite`**（六个域的缓存作废，回执与撤销共用）；`AiAssistantSheet` 的回执处理改调它（**修掉用户报的"AI 加完菜谱列表不刷新"**）；`AiReceiptCard` 见 `label === ''` 不画「撤」。
+
+### 怎么验
+
+```bash
+# 后端
+cd services/api && pnpm run test; echo "exit=$?"            # 268/268
+cd services/api && npx tsc --noEmit; echo "exit=$?"         # exit 0
+docker compose build api && docker compose up -d --force-recreate api
+docker inspect --format '{{.Image}}' "$(docker compose ps -q api)"   # 与 cook-api:latest 相同
+docker compose exec -T api grep -c restoreMenuItem /app/dist/modules/ai/ai-action.service.js
+
+# HTTP 验收（真路：/ai/chat/stream + stub；先把 stub 起在 18990 并让容器指向它，见 R-042 的同一段）
+cd services/api && pnpm run test:http:ai-actions; echo "exit=$?"   # **55/55**
+# ⚠️ 做完照 R-042 的三步复原：容器重建回 .env 的上游、printenv 核对、pkill stub，并用真实请求确认一次
+
+# 自建菜谱的接口（可脱离 AI 单独验）
+# 登录后：POST /recipes（建）、PATCH /recipes/:id（只改传了的字段）、DELETE /recipes/:id
+#        GET /recipes?mine=1（只看自家）、GET /recipes/:id（别人家的自建 → 404）
+
+# 前端
+pnpm --dir apps/mobile run test; echo "exit=$?"             # 385/385
+pnpm --dir apps/mobile run typecheck; echo "exit=$?"        # 仅 2 条既有错误（CombosPage/PrepPage 测试，与本轮无关）
+```
+
+### 本轮抓到的三个真问题（都只有真机/真模型能撞出来）
+
+| 症状 | 根因 | 修法 |
+| --- | --- | --- |
+| **撤"AI 新建的菜谱"永远被拒**，提示"这道你自己改过了" | `recipeTouched` 拿**整份 `undoData`** 去比菜谱快照，而 `undoData` 里有个 `recipeId` 键——快照里当然找不到它，于是每次都判成"改过"。**单测全绿**（没有一条用 service 真写的形状当夹具） | 比 `undo.after`（那份快照）；`RecipeCreateUndo` 补上 `after` 字段把真相写进类型；补两条**用真实形状**当夹具的测试，并做了反证（改回去 → 恰好那两条红） |
+| **在我的菜谱页用 AI 加完菜谱，背后列表不刷新**（用户反馈） | 回执处理只作废了 `['fridge']`（D-053 时代只有冰箱）；AI 现在能写六块 | 作废清单收成 `invalidateAfterAiWrite` 一处、两条路共用；补一条带 `useRecipes` 探针的回归测试（**数它真取了几次**，不断言"调了 invalidate"） |
+| 验收里明说"今天午餐"却被加到**晚餐**；撤菜撤到了别的餐 | stub（扮演模型）把日期/餐次写死、并按正则第一个匹配取餐次 | stub 里补齐"从用户那句话里理解日期/餐次"的解析（`menuDateForStub` / `parseMenuForStub` / 目标餐次取句尾那个词）；**产品侧无改动**——这是验收脚手架不够真 |
+
+> 这一轮最有价值的一条经验：**单测用自编的假数据，是会把"形状不匹配"这类 bug 全放过去的**。凡涉及"写进去的东西要被另一段代码读回来"（`undoData`、工具结果文本、接口下发字段），夹具必须逐字段抄自真实写入点，或者干脆走真路验收。
+
+**回归测试**：后端由 218 → **268**（新增 `ai.menu.actions.test.ts` 42 条：菜单/餐次/组合的撤销判定、`menuUndoTarget`、`menuText`/`comboText`、五个解析器；`ai.actions.test.ts` 补 10 条：**用 service 真写的形状**验菜谱三件与收藏）。
+**前端由 347 → 385**（子代理交付 37 条 + 我补的缓存回归 1 条）。
+**反证**：后端本轮做了三组——四处撤销门槛（状态/归属/人数/定局）逐个失效 → 恰好 5 条红且不误伤；`recipeTouched` 改回旧写法 → 恰好 2 条红；前端缓存清单换回"只有冰箱" → 恰好 1 条红（新加那条）。

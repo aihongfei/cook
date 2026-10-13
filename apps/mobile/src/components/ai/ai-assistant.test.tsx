@@ -5,6 +5,7 @@ import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import { useFridge } from '@/api/fridge'
+import { useRecipes } from '@/api/recipes'
 import { logout } from '@/api/auth'
 import type { AiReceipt, ChatTurn } from '@/api/ai'
 import { Toaster } from '@/components/ui/toast'
@@ -242,6 +243,48 @@ it('AI 写完库之后，**冰箱页那份缓存要作废**（否则收起抽屉
 
   // 回执一到，冰箱那份就该被作废并重新取（次数从 1 变成 2）
   await waitFor(() => expect(fridgeFetches).toBeGreaterThan(1))
+})
+
+it('AI 写完之后**「我的菜谱」那份缓存也要作废**（用户 2026-10-13 反馈的那个 bug）', async () => {
+  /*
+   * 用户原话：「在我的菜谱页面使用 ai 添加菜谱后，背后的菜谱没有自动刷新，需要退出去重新进才行」。
+   *
+   * 根因与冰箱那次**一模一样**（见上一个用例），只是作废清单里只有 `['fridge']`，
+   * 而 AI 现在已经能写六块东西（冰箱/菜谱/收藏/组合/菜单/采购清单）——
+   * 于是"AI 回应了、回执卡也在，背后的列表却还是旧的"。
+   * 这条钉住菜谱那一路：用一个真订阅了 `['recipes','list']` 的探针数它取了几次。
+   *
+   * 为什么不能只测"调用了 invalidateQueries"：那是断言实现而不是断言结果
+   * （改个 key 名照样"通过"，而用户看到的还是旧列表）。探针数的是**真的又取了一次**。
+   */
+  const { get } = mockApi()
+  let recipeFetches = 0
+  get.mockImplementation((url: string) => {
+    if (url === '/ai/status') return Promise.resolve({ data: { configured: true, model: 'm' } } as never)
+    if (url === '/recipes') {
+      recipeFetches += 1
+      return Promise.resolve({ data: { items: [], total: 0, page: 1, pageSize: 12 } } as never)
+    }
+    throw new Error(`未预期的 GET：${url}`)
+  })
+  mockStream({ receipts: [receipt({ id: 'r1', kind: 'recipe.create', summary: '菜谱「西红柿炒蛋」' })] })
+
+  function RecipeProbe() {
+    useRecipes({ mine: true })
+    return <div>菜谱探针</div>
+  }
+  renderApp(
+    <>
+      <RecipeProbe />
+      <Shell />
+    </>,
+  )
+  await waitFor(() => expect(recipeFetches).toBe(1))
+
+  await say('帮我存一道自家菜谱')
+  expect(await screen.findByText('菜谱「西红柿炒蛋」')).toBeTruthy()
+
+  await waitFor(() => expect(recipeFetches).toBeGreaterThan(1))
 })
 
 it('模型嘴上说"记好了"但服务端没给回执：**不画卡**（界面不替它圆谎）', async () => {

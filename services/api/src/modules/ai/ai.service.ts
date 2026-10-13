@@ -10,13 +10,23 @@ import {
   type AiConfig, type AiPrompts, type CandidateDish, type ChatMessage, type SuggestedPick,
 } from './ai.rules'
 import {
-  AI_TOOLS, FRIDGE_ADD_MAX, PROPOSALS_MAX, SEARCH_RESULTS_MAX, TOOL_ADD_FRIDGE_ITEMS, TOOL_PROPOSE_MENU_ITEMS,
-  TOOL_READ_FRIDGE, TOOL_READ_PLAN, TOOL_REMOVE_FRIDGE_ITEM, TOOL_ROUNDS_MAX, TOOL_SEARCH_DISHES, TOOL_UPDATE_FRIDGE_ITEM,
-  fridgeText, readAddItems, readProposals, readRemoveItem, readUpdateItem, searchResult, todayKey, toolResult,
+  AI_TOOLS, FRIDGE_ADD_MAX, MENU_ADD_MAX, PROPOSALS_MAX, SEARCH_RESULTS_MAX, TOOL_ADD_COMBO_TO_MEAL,
+  TOOL_ADD_FRIDGE_ITEMS, TOOL_ADD_MENU_ITEMS, TOOL_CREATE_COMBO, TOOL_CREATE_RECIPE, TOOL_DELETE_COMBO,
+  TOOL_DELETE_RECIPE, TOOL_PROPOSE_MENU_ITEMS, TOOL_READ_COMBOS, TOOL_READ_FRIDGE, TOOL_READ_MENU,
+  TOOL_READ_PLAN, TOOL_READ_RECIPES, TOOL_REMOVE_FRIDGE_ITEM, TOOL_REMOVE_MENU_ITEM, TOOL_REPEAT_MEAL,
+  TOOL_ROUNDS_MAX, TOOL_SEARCH_DISHES, TOOL_SET_DINERS, TOOL_SET_MEAL_STATUS, TOOL_TOGGLE_FAVORITE,
+  TOOL_UPDATE_COMBO, TOOL_UPDATE_FRIDGE_ITEM, TOOL_UPDATE_RECIPE,
+  comboText, fridgeText, menuText, readAddItems, readComboDraft, readDiners, readIdArg, readMealStatus,
+  readMealTarget, readMenuAdds, readProposals, readRecipeDraft, readRecipePatch, readRemoveItem,
+  readUpdateItem, recipeText, searchResult, todayKey, toolResult,
   type MenuProposal, type ToolCall,
 } from './ai.tools'
-import { AiActionService, type AiReceipt } from './ai-action.service'
+import { AiActionService, humanError, type AiReceipt } from './ai-action.service'
+import { CombosService } from '../combos/combos.service'
 import { FridgeService } from '../fridge/fridge.service'
+import { OrdersService } from '../orders/orders.service'
+import { MEAL_LABEL, STATUS_LABEL } from '../orders/orders.rules'
+import { sourceLabel } from '../recipes/recipe.rules'
 
 /**
  * AI 推荐与问答（用户 2026-10-12 的新需求；口径见 D-026）。
@@ -35,6 +45,8 @@ export class AiService {
     private readonly prisma: PrismaService,
     private readonly actions: AiActionService,
     private readonly fridge: FridgeService,
+    // 组合的读走用户自己那套（`list` 里有"家庭内共用 + canEdit"的判定，AI 不该另写一份）
+    private readonly combosService: CombosService,
   ) {}
 
   /** 前端据此决定"显示 AI 入口"还是"提示去配置"（只回是否配置与模型名，不回密钥） */
@@ -78,7 +90,7 @@ export class AiService {
     const systemPrompt = [
       '你是家庭厨房的掌勺参谋。只能从下面这份候选菜清单里挑菜，不要编造清单之外的菜。',
       `按 picks 数组回：每条的 id 必须是候选清单里的 id，reason 是一句话说明为什么适合这一餐（20 字内）。`,
-      // 条数（用户 2026-10-13：「两个菜有点少了，可以多一些」）：原来没写清楚要几道，
+      // 条数（用户 2026-HttpException10-13：「两个菜有点少了，可以多一些」）：原来没写清楚要几道，
       // 模型常只给 2 道。写进提示词而不是加进解析器——给少了是"少一点"，不是"答错了"，
       // 为它整个丢弃、让用户重问一遍更糟（上限仍由 SUGGEST_PICKS_MAX 兜住）
       `挑 ${SUGGEST_PICKS_MIN}～${SUGGEST_PICKS_MAX} 道：用户要看着选，只给两道不够挑；也不要凑数，清单里确实不合适的就别选。`,
@@ -93,7 +105,9 @@ export class AiService {
       context.meal ? `要安排的这一餐：${context.meal}` : '',
       context.note ? `家里情况：${context.note}` : '',
       hint ? `用户说：${hint}` : '用户没有特别说明，按家常口味推荐。',
-    ].filter(Boolean).join('\n')
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     // 解析必须**在 ask 里面**做（用 parse 回调传入），不能放在调用之后——
     // 放外面的话"模型答非所问"这条错误就绕过了下面的分类，照样冒成 500。
@@ -291,8 +305,28 @@ export class AiService {
         + `用 ${TOOL_READ_FRIDGE} 看清楚现状，再调 ${TOOL_ADD_FRIDGE_ITEMS} / ${TOOL_UPDATE_FRIDGE_ITEM} / ${TOOL_REMOVE_FRIDGE_ITEM}。`
         + '这几件**会真的写库**，界面上会给用户一张可撤销的回执卡，所以你可以说"记好了"——'
         + '但**只说你真的记成的那些**（工具结果里会列出成没成），没记成的照实说原因。',
-      `要让用户明白哪些事你能直接做、哪些要他自己点：冰箱可以（有回执可撤）；菜单不行（只能提建议等他点）；`
-        + '家庭管理（改角色、转让、退家庭）你没有工具，用户问起就告诉他去"我的 → 家庭"里做。',
+      /*
+       * 全应用 CRUD（用户 2026-10-13：「软件的 CRUD ai 都可以操作」）。
+       * 菜单与冰箱**同档**（A 档），而"提建议等用户点"那条路仍然保留——
+       * 两者的分界是**用户有没有明确说要办**，不是模型自己判断哪样更合适。
+       */
+      `菜单、人数、状态、常用组合**也可以直接帮你办**（都是真的写库 + 回执卡，除了状态都能撤）：`
+        + `- 加菜：用户明确说"加进去/点上/来一道"→ ${TOOL_READ_MENU} 看清现状，再 ${TOOL_ADD_MENU_ITEMS}（不知道 id 先 ${TOOL_SEARCH_DISHES}）；`
+        + `只是想要个主意、还没定 → 用 ${TOOL_PROPOSE_MENU_ITEMS} 提建议等他点。`
+        + `- 撤菜：${TOOL_REMOVE_MENU_ITEM}（只能撤他自己点的，且那一餐还得在待确认阶段）；`
+        + `夹"这一餐吃几个"：${TOOL_SET_DINERS}；`
+        + `- 状态（选好了/开始做/做好了/取消）：${TOOL_SET_MEAL_STATUS}，**这一步没有撤销**，`
+        + '所以只能在他明确说出要改到哪个状态时调，不确定就先问他；'
+        + `- 常用组合：${TOOL_READ_COMBOS} 看、${TOOL_CREATE_COMBO} / ${TOOL_UPDATE_COMBO} / ${TOOL_DELETE_COMBO} / ${TOOL_ADD_COMBO_TO_MEAL} 改；`
+        + `- 再点一次（照抄某一餐到另一天）：${TOOL_REPEAT_MEAL}。`,
+      `自家菜谱也能直接改：用户口述自家做法就 ${TOOL_CREATE_RECIPE} 存进「我家的菜谱」；`
+        + `改/删之前先 ${TOOL_READ_RECIPES} 看清哪道是**自己上传的**（标了「可改」的）。`
+        + '库里的公共菜谱（极速数据那些）谁都改不了，用户想改就帮他新建一道自己的。'
+        + `收藏用 ${TOOL_TOGGLE_FAVORITE}。`,
+      `要让用户明白哪些事你能直接做、哪些要他自己点：冰箱、菜单、自家菜谱、常用组合、收藏都可以`
+        + '（有回执可撤；状态流转没有撤销）；家庭管理（改角色、转让、退家庭）你没有工具，'
+        + '用户问起就告诉他去"我的 → 家庭"里做。'
+        + '**绝不要说"已经加好了/记好了"如果你没真的调过工具**——没调就说"要我加进去吗"。',
       '如果被问到与下厨、食材、营养无关的事，礼貌地把话题带回来。',
     ].filter(Boolean).join('\n')
 
@@ -468,8 +502,257 @@ export class AiService {
       return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以撤。' })
     }
 
+    /*
+     * ---------- 自建菜谱与收藏（F1-11 / F1-12 / F1-09）----------
+     *
+     * 这几条与冰箱四件形状一致：真的写库 → 记一条可撤的记录 → 回执卡。
+     * **权限边界不在这里**：菜谱那条"只能改自家上传的"写在 `RecipeWriteService` 里，
+     * 这里只负责把服务端拒绝的原话回给模型（让它如实转述，而不是自己编一句）。
+     */
+
+    if (call.name === TOOL_READ_RECIPES) {
+      const query = readStringArg(call.arguments, 'query')
+      if (!query) return toolResult({ error: 'query 不能为空，请换个关键词再搜' })
+      const viewer = await this.viewerOf(userId)
+      const rows = await this.prisma.recipe.findMany({
+        // 与列表接口同一个可见范围：全局库 + 自己家的（别人家的自建菜谱看不见，更不能改）
+        where: {
+          searchText: { contains: query.toLowerCase() },
+          ...(viewer.familyId ? { OR: [{ familyId: null }, { familyId: viewer.familyId }] } : { familyId: null }),
+        },
+        take: SEARCH_RESULTS_MAX,
+        orderBy: [{ familyId: 'desc' }, { id: 'asc' }],
+      })
+      const text = recipeText(rows.map((row) => ({
+        id: row.id, name: row.name, category: row.category, cuisine: row.cuisine,
+        mine: row.familyId !== null && row.familyId === viewer.familyId,
+        sourceLabel: sourceLabel(row.origin),
+      })))
+      return toolResult({ query, recipes: text.recipes, hint: text.hint })
+    }
+
+    if (call.name === TOOL_CREATE_RECIPE) {
+      const draft = readRecipeDraft(call.arguments)
+      if (!draft) return toolResult({ error: '没解析出菜名或做法步骤，请按 name/category/cuisine/steps 再来一次（步骤至少一步）' })
+      try {
+        const result = await this.actions.createRecipe(userId, draft)
+        receipts.push(...result.actions)
+        return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以撤。记得跟他说存进了「我家的菜谱」。' })
+      } catch (error) {
+        // 校验不过（名字太长/没步骤…）：把服务端原话回给模型，让它说清该怎么改
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_UPDATE_RECIPE) {
+      const parsed = readRecipePatch(call.arguments)
+      if (!parsed) return toolResult({ error: '没解析出 recipeId，请先调 read_recipes 拿准确 id' })
+      try {
+        const result = await this.actions.updateRecipe(userId, parsed.recipeId, parsed.patch)
+        receipts.push(...result.actions)
+        return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以撤。' })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_DELETE_RECIPE) {
+      const recipeId = readIdArg(call.arguments, 'recipeId')
+      if (!recipeId) return toolResult({ error: '没解析出 recipeId，请先调 read_recipes 拿准确 id' })
+      const result = await this.actions.removeRecipe(userId, recipeId)
+      receipts.push(...result.actions)
+      return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以撤。' })
+    }
+
+    if (call.name === TOOL_TOGGLE_FAVORITE) {
+      const recipeId = readIdArg(call.arguments, 'recipeId')
+      if (!recipeId) return toolResult({ error: '没解析出 recipeId，请先搜一下拿到真实 id' })
+      try {
+        const result = await this.actions.toggleFavorite(userId, recipeId)
+        receipts.push(...result.actions)
+        return toolResult({ result: result.summary, favorited: result.favorited, hint: '回执卡已经给用户了，他随时可以撤。' })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    /*
+     * ---------- 菜单、餐次与组合（A 档）----------
+     *
+     * 与冰箱/菜谱同一形状：真的写库 → 记一条可撤的记录（状态流转那件除外，见下）→ 回执卡。
+     * 权限不在这里判：`OrdersService` / `CombosService` 里那几道门（这一餐收不收新菜、
+     * 只有自己点的能撤、`canEditCombo`）是唯一出口，这里只把服务端的话原样转给模型。
+     */
+
+    if (call.name === TOOL_READ_MENU) {
+      const days = readNumberArg(call.arguments, 'days') ?? 3
+      const rows = await this.menuRows(userId, Math.max(1, Math.min(7, Math.round(days))))
+      return toolResult({ menu: menuText(rows), today: todayKey() })
+    }
+
+    if (call.name === TOOL_ADD_MENU_ITEMS) {
+      const parsed = readMenuAdds(call.arguments, todayKey())
+      if (parsed.items.length === 0) {
+        return toolResult({ error: `没有可加的菜${parsed.rejected.length ? `（${parsed.rejected.join('、')}）` : ''}，请按 items 数组再试一次` })
+      }
+      const result = await this.actions.addMenuItems(userId, parsed)
+      receipts.push(...result.actions)
+      return toolResult({
+        result: result.summary,
+        rejected: parsed.rejected,
+        hint: '回执卡已经给用户了，他随时可以撤。**只说你真加成的那些**。',
+      })
+    }
+
+    if (call.name === TOOL_REMOVE_MENU_ITEM) {
+      const itemId = readIdArg(call.arguments, 'itemId')
+      if (!itemId) return toolResult({ error: '没解析出 itemId，请先调 read_menu 拿准确 id' })
+      const result = await this.actions.removeMenuItem(userId, itemId)
+      receipts.push(...result.actions)
+      return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以放回去。' })
+    }
+
+    if (call.name === TOOL_SET_DINERS) {
+      const parsed = readDiners(call.arguments)
+      if (!parsed) return toolResult({ error: '没解析出 mealKey 或人数，请先调 read_menu 拿 mealKey' })
+      try {
+        const result = await this.actions.setDiners(userId, parsed.mealKey, parsed.count)
+        receipts.push(...result.actions)
+        return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以改回去。' })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_SET_MEAL_STATUS) {
+      const parsed = readMealStatus(call.arguments)
+      if (!parsed) return toolResult({ error: '没解析出 mealKey 或目标状态（只能是 PENDING/PLANNED/COOKING/DONE/CANCELED）' })
+      try {
+        const result = await this.actions.setMealStatus(userId, parsed.mealKey, parsed.status)
+        receipts.push(...result.actions)
+        // 这一笔**撤不了**（状态机单向）：提示模型别说"可以撤"，也别说"我改回去了"
+        return toolResult({ result: result.summary, hint: '这一步没有撤销，如实告诉用户改成了什么、以及要改回来得去点单页重新安排。' })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_REPEAT_MEAL) {
+      const parsed = readMealTarget(call.arguments, todayKey())
+      if (!parsed) return toolResult({ error: '没解析出 mealKey 或目标日期/餐次，请先调 read_menu' })
+      try {
+        const result = await this.actions.repeatMeal(userId, parsed)
+        receipts.push(...result.actions)
+        return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以撤掉照抄过来的某一道。' })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_READ_COMBOS) {
+      const combos = await this.combosService.list(userId)
+      return toolResult({ combos: comboText(combos.combos.map((combo) => ({
+        id: combo.id,
+        name: combo.name,
+        note: combo.note,
+        dishes: combo.dishes.map((dish) => ({ recipeId: dish.recipeId, name: dish.name })),
+      }))) })
+    }
+
+    if (call.name === TOOL_CREATE_COMBO) {
+      const draft = readComboDraft(call.arguments)
+      if (!draft || draft.name === undefined || draft.recipeIds === undefined) {
+        return toolResult({ error: '要有组合名与至少一道菜（recipeIds），菜 id 请先搜出来' })
+      }
+      try {
+        const result = await this.actions.createCombo(userId, draft)
+        receipts.push(...result.actions)
+        return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以撤。' })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_UPDATE_COMBO) {
+      const comboId = readIdArg(call.arguments, 'comboId')
+      const draft = readComboDraft(call.arguments)
+      if (!comboId || !draft) return toolResult({ error: '没解析出 comboId，请先调 read_combos 拿准确 id' })
+      try {
+        const result = await this.actions.updateCombo(userId, comboId, draft)
+        receipts.push(...result.actions)
+        return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以改回去。' })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_DELETE_COMBO) {
+      const comboId = readIdArg(call.arguments, 'comboId')
+      if (!comboId) return toolResult({ error: '没解析出 comboId，请先调 read_combos 拿准确 id' })
+      const result = await this.actions.removeCombo(userId, comboId)
+      receipts.push(...result.actions)
+      return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以放回去。' })
+    }
+
+    if (call.name === TOOL_ADD_COMBO_TO_MEAL) {
+      const parsed = readMealTarget(call.arguments, todayKey())
+      if (!parsed) return toolResult({ error: '没解析出 comboId 或目标日期/餐次（comboId 传给 mealKey 字段）' })
+      try {
+        const result = await this.actions.addComboToMeal(userId, parsed.mealKey, parsed)
+        receipts.push(...result.actions)
+        return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以撤掉其中某一道。' })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
     // 模型偶尔会自己发明工具名：回一句"没有这个工具"让它换个说法，而不是崩掉整轮
     return toolResult({ error: `没有名为 ${call.name} 的工具` })
+  }
+
+  /**
+   * 给模型看的菜单现状（`read_menu` 与 `read_plan` 共用一份查询）。
+   *
+   * 比 `currentPlan` 多两样模型做决定要用的东西：**每道菜的 itemId**（撤菜靠它）
+   * 与**谁点的 / 是不是我点的**（它据此判断"这道我能不能撤"）。
+   */
+  private async menuRows(userId: string, days: number): Promise<Parameters<typeof menuText>[0]> {
+    const membership = await this.prisma.familyMember.findUnique({ where: { userId } })
+    if (!membership) return []
+    const now = new Date()
+    const from = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+    const to = new Date(from.getTime() + days * 86_400_000)
+    const meals = await this.prisma.mealOrder.findMany({
+      where: { familyId: membership.familyId, mealDate: { gte: from, lt: to } },
+      include: { items: { include: { user: { select: { nickname: true } } }, orderBy: { createdAt: 'asc' } } },
+      orderBy: [{ mealDate: 'asc' }, { meal: 'asc' }],
+    })
+    return meals.map((meal) => ({
+      mealKey: `${meal.mealDate.toISOString().slice(0, 10)}-${meal.meal}`,
+      date: meal.mealDate.toISOString().slice(0, 10),
+      meal: meal.meal,
+      statusLabel: STATUS_LABEL[meal.status],
+      dinerCount: meal.dinerCount,
+      dishes: meal.items.map((item) => ({
+        itemId: item.id,
+        name: item.recipeName,
+        who: item.user.nickname,
+        mine: item.userId === userId,
+        note: item.note,
+      })),
+    }))
+  }
+
+  /**
+   * 当前用户的家庭归属（读工具要用它算可见范围）。
+   * 没加入家庭时 `familyId` 为 null——那时只看得见全局库里的菜谱。
+   */
+  private async viewerOf(userId: string): Promise<{ userId: string; familyId: string | null }> {
+    const membership = await this.prisma.familyMember.findUnique({
+      where: { userId },
+      select: { familyId: true },
+    })
+    return { userId, familyId: membership?.familyId ?? null }
   }
 
   /** 读这个家往后几天的安排（给模型看的紧凑文本） */
@@ -653,6 +936,24 @@ function statusLabel(toolName: string): string {
   if (toolName === TOOL_UPDATE_FRIDGE_ITEM) return '正在改冰箱里那条…'
   if (toolName === TOOL_REMOVE_FRIDGE_ITEM) return '正在把那样拿出来…'
   if (toolName === TOOL_READ_PLAN) return '正在看家里这几天的安排…'
+  // 菜单与组合（每一句都要像家里人在做事的口气，不能出现工具名与字段名）
+  if (toolName === TOOL_READ_MENU) return '正在看菜单…'
+  if (toolName === TOOL_ADD_MENU_ITEMS) return '正在往菜单里加菜…'
+  if (toolName === TOOL_REMOVE_MENU_ITEM) return '正在把这道菜从菜单里撤掉…'
+  if (toolName === TOOL_SET_DINERS) return '正在改就餐人数…'
+  if (toolName === TOOL_SET_MEAL_STATUS) return '正在改这一餐的状态…'
+  if (toolName === TOOL_REPEAT_MEAL) return '正在照抄那一餐…'
+  if (toolName === TOOL_READ_COMBOS) return '正在看常用组合…'
+  if (toolName === TOOL_CREATE_COMBO) return '正在存这个组合…'
+  if (toolName === TOOL_UPDATE_COMBO) return '正在改这个组合…'
+  if (toolName === TOOL_DELETE_COMBO) return '正在删这个组合…'
+  if (toolName === TOOL_ADD_COMBO_TO_MEAL) return '正在把这一组加进菜单…'
+  // 菜谱与收藏（F1-11/F1-12/F1-09）
+  if (toolName === TOOL_READ_RECIPES) return '正在翻家里的菜谱…'
+  if (toolName === TOOL_CREATE_RECIPE) return '正在把这道菜记进你家的菜谱…'
+  if (toolName === TOOL_UPDATE_RECIPE) return '正在改这道菜谱…'
+  if (toolName === TOOL_DELETE_RECIPE) return '正在删这道菜谱…'
+  if (toolName === TOOL_TOGGLE_FAVORITE) return '正在改收藏…'
   return '正在处理…'
 }
 

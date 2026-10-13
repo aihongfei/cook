@@ -18,6 +18,80 @@ const received = []
 /** STUB_REJECT_SCHEMA_ONCE 已经拒过哪些 schema 名（每种只拒一次，好让重试能走通） */
 const rejectedSchemaNames = new Set()
 
+/** 今天的日期键（stub 自己算一份：它不 import 产品代码，只模仿模型的行为） */
+function todayKeyForStub() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+/** 用户那句话里可能提到的组合名（真实模型会照用户说的取，stub 取不到就给一个固定名） */
+function comboNameForStub(user) {
+  const named = /组合(?:叫|名)?[「"']?([^」"'\s]{2,12})/.exec(user)?.[1]
+  return named || '快手三菜'
+}
+
+/**
+ * 用户说的日期（`今天`/`明天`/`后天`/`YYYY-MM-DD`）。
+ *
+ * 真实模型是从"今天午餐"里理解出日期的，stub 也必须听懂——第一版这里写死"今天"，
+ * 于是验收里说"今天午餐"它加到了今天晚餐，断言看着像产品坏了。
+ */
+function menuDateForStub(user) {
+  const explicit = /(\d{4}-\d{2}-\d{2})/.exec(user)?.[1]
+  if (explicit) return explicit
+  const offset = /后天/.test(user) ? 2 : /明天/.test(user) ? 1 : 0
+  // 与产品同一口径：**按本地日历**算（容器 TZ=Asia/Shanghai，见 RUNBOOK R-18）。
+  // 用 toISOString 会是 UTC，在晚上 8 点之后（东八区）差一天，验收就会"读到别的那一餐"。
+  const now = new Date(Date.now() + offset * 86_400_000)
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * 把 `read_menu` 那段文字解回结构（每一天每一餐，每道菜的 itemId）。
+ *
+ * 为什么要解回结构而不是正则随手抓一个：菜单里有**好几餐**，抓第一个 itemId
+ * 就会撤错餐里的菜（第一版就是这样：明明说"撤掉午餐那道"，它拿的是别的餐的 id）。
+ * 形状是产品侧 `menuText()` 定的（`mealKey: xxx` + `- 菜名（…）（itemId: yyy）`），
+ * 这里照着解——stub 与产品共用这个约定，改形状时两边一起改。
+ */
+function parseMenuForStub(text) {
+  const rows = []
+  let current = null
+  for (const line of String(text).split('\n')) {
+    const head = /（mealKey: ([^）]+)）/.exec(line)
+    if (head) {
+      current = { mealKey: head[1], dishes: [] }
+      rows.push(current)
+      continue
+    }
+    const dish = /^\s*-\s*(.+?)（.*）（itemId: ([^）]+)）$/.exec(line)
+    if (dish && current) current.dishes.push({ name: dish[1], itemId: dish[2] })
+  }
+  return rows
+}
+
+/** 菜谱那一支的收尾话（工具都跑完之后） */
+function recipeTextForStub(recipeMode, wantsDelete, wantsUpdate, failLine) {
+  if (!recipeMode) return undefined
+  // 工具结果里有拒绝原话就照实转述（公共菜谱改不了那类）——**不许说"改好了"**
+  if (failLine) return failLine
+  if (wantsDelete) return '删掉了，回执上可以放回去。'
+  if (wantsUpdate) return '改好了，回执上能改回去。'
+  return '存好了，「我家的菜谱」里能看到了。'
+}
+
+/**
+ * 组合那一支的收尾话（工具都跑完之后）。
+ * 单独一个函数是因为它要按"这次做了哪件事"分岔，写在 finalContent 那一行里会看不出在说什么。
+ */
+function comboTextForStub(comboMode, mode) {
+  if (!comboMode) return undefined
+  if (mode === 'add') return '这一组加进去了，回执上一道一个「撤」。'
+  if (mode === 'delete') return '组合删掉了，回执上可以放回来。'
+  if (mode === 'update') return '改好了，回执上能改回去。'
+  return '存好了，回执上可以撤。'
+}
+
 const server = http.createServer((req, res) => {
   // 验收脚本用它取"服务端到底发了什么"（只读，仅本机验收用）
   if (req.url === '/__received' && req.method === 'GET') {
@@ -245,7 +319,355 @@ const server = http.createServer((req, res) => {
       return
     }
 
-    // ---------- 快问/示例问题（用户 2026-10-12：「内置的这些不够用」）----------
+    // ---------- 菜单、餐次与组合（用户 2026-10-13：「软件的 CRUD ai 都可以操作」）----------
+    /*
+     * 与冰箱那条同一个演法：真的走"先读现状 → 再动手"两轮，id 一律**从上一轮的读结果里现取**
+     * （真实模型也只能这么干）。产品侧那条"不许凭记忆操作"的规矩因此也被压住了。
+     *
+     * 覆盖四件事，正好是四个工具：
+     * ① 加菜（`add_menu_items`，先 `search_dishes` 拿真实菜谱 id）；
+     * ② 撤菜（`remove_menu_item`，id 来自 `read_menu` 的返回）；
+     * ③ 改人数（`set_diners`，数字从句子里取）；
+     * ④ 改状态（`set_meal_status`，目标状态从关键词取）。
+     * 组合那三件另有分支（create/update/delete + 一键加菜）。
+     *
+     * 判据写成 stub 内部约定（关键词），产品代码不依赖它们——真实模型是靠语义判断的。
+     */
+    /*
+     * 哪一轮"没有工具"= 服务端的**收尾轮**（`TOOL_ROUNDS_MAX` 用完时它会发一个不带 tools 的请求，
+     * 见 ai.service 里那段）。真实模型在这一轮也照样说话，所以 stub 必须按同一个"用户说了什么"
+     * 来判断该说哪句——第一版这里用"工具在不在"当判据，于是收尾轮掉进了通用兜底文案
+     * （验收里看着像"AI 答非所问"，其实是 stub 演错了）。
+     */
+    const closingRound = tools.length === 0
+    const menuToolsReady = closingRound || tools.some((t) => t.function?.name === 'read_menu')
+    const mentionsMenu = /加进|点上|加到菜单|加菜|撤掉|从菜单|人吃|几个人|做好了|选好了|取消这餐/.test(user)
+    const menuText = (() => {
+      const hit = toolResults.find((m) => /mealKey|还没点菜|还没有安排/.test(String(m.content)))
+      const raw = String(hit?.content ?? '')
+      try { return String(JSON.parse(raw).menu ?? '') } catch { return '' }
+    })()
+    const menuRead = menuText !== ''
+    const menuWrote = toolResults.some((m) => /已加进菜单|已从菜单里撤掉|已设定|已改：|没加成/.test(String(m.content)))
+    const menuWantsRemove = /撤掉|从菜单里拿掉|不要这道/.test(user)
+    const menuWantsDiners = /人吃|几个人|人数/.test(user)
+    const menuStatus = /做好了/.test(user) ? 'DONE'
+      : /选好了|就这么定/.test(user) ? 'PLANNED'
+        : /开始做/.test(user) ? 'COOKING'
+          : /取消这餐|这餐取消/.test(user) ? 'CANCELED' : ''
+    const dinerCount = Number(/(\d+)\s*个?人/.exec(user)?.[1] ?? '') || 4
+    const saidDish = /(番茄|鸡蛋|豆腐|黄瓜|白菜|排骨|西兰花|土豆)/.exec(user)?.[1] ?? '番茄'
+    /*
+     * 用户说的"哪一天哪一餐"——**真实模型是从这句话里理解的**，stub 也照做。
+     * 第一版这里写死了"今天晚餐"，于是验收里明说"今天午餐"却被加到晚餐，
+     * 断言看着像产品坏了（其实是 stub 没听懂话）。日期/餐次都不能写死。
+     */
+    const saidSlot = /午餐|午饭|中饭/.test(user) ? 'LUNCH' : /晚餐|晚饭|晚上/.test(user) ? 'DINNER' : ''
+    const saidDate = menuDateForStub(user)
+    /** 从"读菜单"的文字里挑出用户说的那一餐（mealKey 与它下面的菜） */
+    const namedDish = /(番茄|鸡蛋|豆腐|黄瓜|白菜|排骨|西兰花|土豆)/.exec(user)?.[1] ?? ''
+    const allMeals = parseMenuForStub(menuText)
+    /*
+     * 选哪一餐：说了餐次就按说的那一天那一餐找；**没点名餐次时按"哪一餐里有用户说的那道菜"找**
+     * （真实模型也是这么理解的——"把菜单里的豆腐撤掉"里的"豆腐"就在某一餐里）。
+     * 找不到再退回"说了的那一餐"，最后退回"第一顿有菜的"。
+     */
+    const pickMeal = () => {
+      if (saidSlot) {
+        const wanted = allMeals.find((row) => row.mealKey === `${saidDate}-${saidSlot}`)
+        if (wanted) return wanted
+      }
+      if (namedDish) {
+        const withDish = allMeals.find((row) => row.dishes.some((dish) => dish.name.includes(namedDish)))
+        if (withDish) return withDish
+      }
+      return allMeals.find((row) => row.dishes.length > 0) ?? null
+    }
+    const saidMeal = pickMeal()
+    /** 撤菜要点的那个 itemId：优先取用户点名的那道，没点名就取那一餐的第一道 */
+    const menuItemId = saidMeal
+      ? (saidMeal.dishes.find((dish) => !namedDish || dish.name.includes(namedDish)) ?? saidMeal.dishes[0])?.itemId ?? ''
+      : ''
+    /** 加菜/改人数时目标那一餐的 key：说了餐次就用说的，否则用挑出来的那一餐 */
+    const targetMealKey = saidSlot ? `${saidDate}-${saidSlot}` : (saidMeal?.mealKey ?? `${saidDate}-DINNER`)
+    /*
+     * stub 自己的"搜索结果"：`add_menu_items` 要的是真实菜谱 id，而 stub 造不出库里的 id——
+     * 所以加菜这一路先 `search_dishes`（真去库里搜，拿到真 id）再调 `add_menu_items`。
+     * 这条恰好也压住"不许自己编 id"的规矩。
+     */
+    const menuSearch = (() => {
+      const hit = toolResults.find((m) => /dishes/.test(String(m.content)))
+      const raw = String(hit?.content ?? '')
+      try { return String(JSON.parse(raw).dishes?.[0]?.recipeId ?? '') } catch { return '' }
+    })()
+    const menuMode = mentionsMenu && menuToolsReady
+    /*
+     * 加菜的收尾话**要照工具结果说**：写失败时（如"这一餐已经安排了"）必须如实转述那句原因，
+     * 不能一律说"加进去了"——那正是产品要求模型做到的事（只说你真做成的那些），
+     * stub 演反了的话，验收里就变成"AI 在骗用户"。这里从工具结果里捞出那句人话。
+     */
+    const menuFailLine = (() => {
+      const hit = toolResults.find((m) => /没加成/.test(String(m.content)))
+      if (!hit) return ''
+      try { return String(JSON.parse(String(hit.content)).result ?? '') } catch { return '' }
+    })()
+    const menuPlan = !menuMode ? null
+      // 要撤菜：先读菜单（id 只能从那里拿）
+      : menuWantsRemove ? (!menuRead ? { calls: [{ id: 'call_menu_0', name: 'read_menu', args: {} }] }
+        : !menuWrote ? { calls: [{ id: 'call_menu_1', name: 'remove_menu_item', args: { itemId: menuItemId } }] }
+          : { text: '已经从这餐里撤掉了，回执上可以放回去。' })
+        // 改人数 / 改状态：同样先读
+        : (menuWantsDiners || menuStatus) ? (!menuRead || !saidMeal ? { calls: [{ id: 'call_menu_2', name: 'read_menu', args: {} }] }
+          : !menuWrote ? {
+              calls: [menuWantsDiners
+                ? { id: 'call_menu_3', name: 'set_diners', args: { mealKey: targetMealKey, count: dinerCount } }
+                : { id: 'call_menu_4', name: 'set_meal_status', args: { mealKey: targetMealKey, status: menuStatus } }],
+            }
+            : { text: menuWantsDiners ? '改好了，回执上能改回去。' : '改好了，这一步是往前走的，要改回来得去点单页重新安排。' })
+          // 加菜：先搜菜（拿真 id）再读菜单，最后加
+          : (!menuSearch ? { calls: [{ id: 'call_menu_5', name: 'search_dishes', args: { query: saidDish } }] }
+            : !menuRead ? { calls: [{ id: 'call_menu_6', name: 'read_menu', args: {} }] }
+              : !menuWrote ? { calls: [{ id: 'call_menu_7', name: 'add_menu_items', args: {
+                  mealDate: saidDate,
+                  // 没点名餐次时用"挑出来的那一餐"（多半是用户刚在说的事），最后才落晚餐
+                  meal: saidSlot || (targetMealKey.endsWith('LUNCH') ? 'LUNCH' : 'DINNER'),
+                  items: [{ recipeId: menuSearch, note: '少放盐' }],
+                } }] }
+                : { text: menuFailLine || '加进去了，回执上一道一个「撤」。' })
+    if (menuMode) {
+      console.log(`[stub] 菜单分支：撤=${menuWantsRemove} 人数=${menuWantsDiners} 状态=${menuStatus || '-'} `
+        + `只吃${saidSlot}@${saidDate} 那一餐读到=${saidMeal ? saidMeal.mealKey : '(空)'} 菜谱 id=${menuSearch || '(空)'} itemId=${menuItemId || '(空)'} `
+        + `→ ${menuPlan?.calls?.map((c) => `${c.name}${JSON.stringify(c.args)}`).join(',') ?? '(收尾)'}`)
+    }
+    if (menuPlan?.calls) {
+      res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+      const frame = (delta, finish) => `data: ${JSON.stringify({
+        id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+        model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }],
+      })}\n\n`
+      res.write(frame({ role: 'assistant', content: '我看看菜单。' }, null))
+      menuPlan.calls.forEach((call, index) => {
+        const json = JSON.stringify(call.args)
+        res.write(frame({ tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.name, arguments: '' } }] }, null))
+        for (const piece of json.match(/.{1,8}/gs) ?? []) {
+          res.write(frame({ tool_calls: [{ index, function: { arguments: piece } }] }, null))
+        }
+      })
+      res.write(frame({}, 'tool_calls'))
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
+    }
+
+    // ---------- 自建菜谱（create_recipe / update_recipe / delete_recipe，F1-11/F1-12）----------
+    /*
+     * 这一支的存在理由很直接：**"撤 AI 新建的菜谱"曾经整条路都是坏的**
+     * （`recipeTouched` 拿整份 undoData 去比，`recipeId` 在快照里找不到，
+     * 于是每一次撤销都被误判成"用户自己改过"而拒绝）——而当时单测与 HTTP 验收
+     * **都没走过这条路**，是浏览器里用真模型验证时才暴露的。补上它，
+     * 让"撤销菜谱"这类问题在自动化里就能红。
+     *
+     * 演法与别处一致：要删/要改先 `read_recipes` 拿真实 id（模型也只能这么干）。
+     */
+    const recipeToolsReady = closingRound || tools.some((t) => t.function?.name === 'read_recipes')
+    const mentionsRecipe = /菜谱/.test(user)
+    const recipeMode = mentionsRecipe && recipeToolsReady
+    const recipeReadText = (() => {
+      const hit = toolResults.find((m) => /（id: |没找到/.test(String(m.content)))
+      const raw = String(hit?.content ?? '')
+      try { return String(JSON.parse(raw).recipes ?? '') } catch { return '' }
+    })()
+    const recipeRead = recipeReadText !== ''
+    /** 工具结果里的拒绝原话（"改不了""没找到"）——收尾时照实转述，不许说"改好了" */
+    const recipeFailLine = (() => {
+      const hit = toolResults.find((m) => /改不了|没找到|最多|不能为空|格式不认识/.test(String(m.content)))
+      if (!hit) return ''
+      try { return String(JSON.parse(String(hit.content)).error ?? JSON.parse(String(hit.content)).result ?? '') } catch { return '' }
+    })()
+    const recipeWrote = toolResults.some((m) => /已存进|已改：|已删：|没找到|改不了/.test(String(m.content)))
+    const recipeId = /（id: ([^）]+)）/.exec(recipeReadText)?.[1] ?? ''
+    /*
+     * 菜名从用户那句话里取：**"我家的X是这么做的" / "叫X" 两种最常见**（真实模型也是这么理解的）。
+     * 取不到才退回一个占位名——第一版只认「」括起来的名字，而自然说法里根本没有引号，
+     * 于是它把菜存成了"AI 写的菜"，验收断言找不到「凉拌黄瓜」而红（产品是好的，是 stub 没听懂）。
+     */
+    const recipeName = /「([^」]{1,40})」/.exec(user)?.[1]
+      ?? /我家的([^是，,。\s]{2,12}?)(?:是|的)/.exec(user)?.[1]
+      ?? /(?:叫|名字是)([^，,。\s]{2,12})/.exec(user)?.[1]
+      ?? 'AI 写的菜'
+    const recipeWantsDelete = /删掉|删了/.test(user) && /菜谱/.test(user)
+    const recipeWantsUpdate = /改成|改一下/.test(user) && /菜谱/.test(user)
+    const recipeCalls = (() => {
+      if (!recipeMode) return null
+      if (recipeWantsDelete) {
+        if (!recipeRead) return [{ id: 'call_recipe_1', name: 'read_recipes', args: { query: recipeName } }]
+        if (!recipeWrote) return [{ id: 'call_recipe_2', name: 'delete_recipe', args: { recipeId } }]
+        return []
+      }
+      if (recipeWantsUpdate) {
+        if (!recipeRead) return [{ id: 'call_recipe_3', name: 'read_recipes', args: { query: recipeName } }]
+        if (!recipeWrote) return [{ id: 'call_recipe_4', name: 'update_recipe', args: { recipeId, steps: ['改过的第一步'] } }]
+        return []
+      }
+      /*
+       * 新建：名字与步骤都从用户那句话里取（真实模型也是这么理解的）。
+       * 步骤至少一步——`readRecipeDraft` 就是这么卡的，stub 演错的话会撞在工具入口上。
+       */
+      if (!recipeWrote) {
+        return [{ id: 'call_recipe_5', name: 'create_recipe', args: {
+          name: recipeName,
+          category: '凉菜',
+          cuisine: '家常',
+          ingredients: [{ name: '黄瓜' }],
+          steps: ['黄瓜拍碎，加蒜末和盐拌匀。', '淋醋与香油，撒熟芝麻。'],
+        } }]
+      }
+      return []
+    })()
+    if (recipeMode) {
+      console.log(`[stub] 菜谱分支：名字=${recipeName} 删=${recipeWantsDelete} 改=${recipeWantsUpdate} `
+        + `读到 id=${recipeId || '(空)'} → ${recipeCalls?.map((c) => c.name).join(',') ?? '(收尾)'}`)
+    }
+    if (recipeCalls && recipeCalls.length > 0) {
+      res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+      const frame = (delta, finish) => `data: ${JSON.stringify({
+        id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+        model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }],
+      })}\n\n`
+      res.write(frame({ role: 'assistant', content: '我看看你家的菜谱。' }, null))
+      recipeCalls.forEach((call, index) => {
+        const json = JSON.stringify(call.args)
+        res.write(frame({ tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.name, arguments: '' } }] }, null))
+        for (const piece of json.match(/.{1,8}/gs) ?? []) {
+          res.write(frame({ tool_calls: [{ index, function: { arguments: piece } }] }, null))
+        }
+      })
+      res.write(frame({}, 'tool_calls'))
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
+    }
+
+    // ---------- 常用组合（create / 一键加菜）----------
+    /*
+     * 组合那两件单独一个分支：它们的 id 体系与菜单不同（comboId 来自 `read_combos`），
+     * 掺进上面那棵树会把"读菜单"与"读组合"两个前置状态搅在一起。
+     */
+    const comboMode = /组合/.test(user) && tools.some((t) => t.function?.name === 'read_combos')
+    const comboReadText = (() => {
+      const hit = toolResults.find((m) => /comboId|还没有存过常用组合/.test(String(m.content)))
+      const raw = String(hit?.content ?? '')
+      try { return String(JSON.parse(raw).combos ?? '') } catch { return '' }
+    })()
+    const comboMode_ = comboMode ? (/把这一组加进|用组合加|按组合点/.test(user) ? 'add' : /删掉这个组合|删组合/.test(user) ? 'delete' : /改|重命名/.test(user) ? 'update' : 'create') : ''
+    const comboId = /comboId: (\S+?)[）（]/.exec(comboReadText)?.[1] ?? ''
+    const comboWrote = toolResults.some((m) => /已存：组合|已改：组合|已删：组合|已把这一组加进去/.test(String(m.content)))
+    const comboCalls = (() => {
+      if (!comboMode) return null
+      if (comboMode_ === 'add') {
+        if (!comboId) return [{ id: 'call_combo_1', name: 'read_combos', args: {} }]
+        if (!comboWrote) return [{ id: 'call_combo_2', name: 'add_combo_to_meal', args: { comboId, mealDate: todayKeyForStub(), meal: 'DINNER' } }]
+        return []
+      }
+      if (comboMode_ === 'delete') {
+        if (!comboId) return [{ id: 'call_combo_3', name: 'read_combos', args: {} }]
+        if (!comboWrote) return [{ id: 'call_combo_4', name: 'delete_combo', args: { comboId } }]
+        return []
+      }
+      if (comboMode_ === 'update') {
+        if (!comboId) return [{ id: 'call_combo_5', name: 'read_combos', args: {} }]
+        if (!comboWrote) return [{ id: 'call_combo_6', name: 'update_combo', args: { comboId, name: '改过名的组合' } }]
+        return []
+      }
+      // 新建：菜 id 得先搜出来（真实模型也一样）
+      const ids = comboReadText.match(/\[([^\]]+)\]/g)?.map((piece) => piece.slice(1, -1)).filter(Boolean) ?? []
+      if (ids.length === 0) {
+        // 还没搜过菜：先搜一道，拿真 id
+        if (!menuSearch) return [{ id: 'call_combo_7', name: 'search_dishes', args: { query: '豆腐' } }]
+        return [{ id: 'call_combo_8', name: 'create_combo', args: { name: comboNameForStub(user), note: '工作日晚上', recipeIds: [menuSearch] } }]
+      }
+      return []
+    })()
+    if (comboMode && comboCalls) {
+      if (comboCalls.length === 0) {
+        // 收尾：落到下面的普通流式分支，用一句收尾话
+        console.log(`[stub] 组合分支收尾：mode=${comboMode_} comboId=${comboId || '-'}`)
+      } else {
+        console.log(`[stub] 组合分支：mode=${comboMode_} comboId=${comboId || '-'} → ${comboCalls.map((c) => c.name).join(',')}`)
+        res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+        const frame = (delta, finish) => `data: ${JSON.stringify({
+          id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+          model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }],
+        })}\n\n`
+        res.write(frame({ role: 'assistant', content: '我看下常用组合。' }, null))
+        comboCalls.forEach((call, index) => {
+          const json = JSON.stringify(call.args)
+          res.write(frame({ tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.name, arguments: '' } }] }, null))
+          for (const piece of json.match(/.{1,8}/gs) ?? []) {
+            res.write(frame({ tool_calls: [{ index, function: { arguments: piece } }] }, null))
+          }
+        })
+        res.write(frame({}, 'tool_calls'))
+        res.write('data: [DONE]\n\n')
+        res.end()
+        return
+      }
+    }
+
+    // ---------- 再点一次（照抄某一餐到另一天）----------
+    /*
+     * 前置条件是"来源那一餐已经定局"（做好了/已取消/日子已过）——产品里 `canRepeatFrom` 判这个。
+     * 所以这条路只演"读菜单 → 照抄"，来源餐次用用户那句话里的日期（今天/昨天）。
+     */
+    const repeatMode = /照抄|再点一次|复制到|照着点/.test(user)
+      && (closingRound || tools.some((t) => t.function?.name === 'repeat_meal'))
+    if (repeatMode) {
+      const repeatSource = parseMenuForStub(menuText).find((row) => row.dishes.length > 0)
+      const sourceDate = /昨天/.test(user)
+        ? `${menuDateForStub('昨天')}-LUNCH`
+        : `${menuDateForStub(user)}-LUNCH`
+      const target = /明天/.test(user) ? menuDateForStub('明天') : menuDateForStub('今天')
+      const source = parseMenuForStub(menuText).find((row) => row.mealKey === sourceDate) ?? repeatSource
+      /*
+       * 目标餐次要取**句子后半段**那个餐次词（"照抄今天午餐，明天晚餐再点一次"里要的是晚餐）。
+       * 按第一个匹配就会把来源那半句的"午餐"当成目标——第一版就是这么错的，
+       * 于是照抄到了明天午餐，而验收在查明天晚餐（看着像产品没写进去）。
+       */
+      const targetSlot = (() => {
+        const tail = user.split(/[，,。；;]/).slice(-1)[0] ?? user
+        const hit = /(午餐|午饭|中饭|晚餐|晚饭)/.exec(tail) ?? /(午餐|午饭|中饭|晚餐|晚饭)/.exec(user)
+        return hit && /午餐|午饭|中饭/.test(hit[1]) ? 'LUNCH' : 'DINNER'
+      })()
+      const repeatWrote = toolResults.some((m) => /已照|都有了|没找到/.test(String(m.content)))
+      const calls = !menuRead ? [{ id: 'call_repeat_1', name: 'read_menu', args: {} }]
+        : !repeatWrote ? [{ id: 'call_repeat_2', name: 'repeat_meal', args: {
+            mealKey: source?.mealKey ?? sourceDate,
+            mealDate: target,
+            meal: targetSlot,
+          } }]
+          : []
+      if (calls.length > 0) {
+        console.log(`[stub] 再点一次：来源=${source?.mealKey ?? '(没读到)'} → 目标=${target} ${targetSlot}`)
+        res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+        const frame = (delta, finish) => `data: ${JSON.stringify({
+          id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+          model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }],
+        })}\n\n`
+        res.write(frame({ role: 'assistant', content: '我看看那一餐点了什么。' }, null))
+        calls.forEach((call, index) => {
+          const json = JSON.stringify(call.args)
+          res.write(frame({ tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.name, arguments: '' } }] }, null))
+          for (const piece of json.match(/.{1,8}/gs) ?? []) {
+            res.write(frame({ tool_calls: [{ index, function: { arguments: piece } }] }, null))
+          }
+        })
+        res.write(frame({}, 'tool_calls'))
+        res.write('data: [DONE]\n\n')
+        res.end()
+        return
+      }
+      console.log(`[stub] 再点一次收尾：来源=${source?.mealKey ?? '(没读到)'}`)
+    }
     // 提示词要的是 {"hints":[...],"examples":[...]}。stub 故意回**一份脏数据**：
     // 一条重复的、一条超长的、一条非字符串的 —— 服务端必须清洗掉它们并且仍然凑够一屏，
     // 这样"模型的回包要核对"这条在本地就验到了（不然只能靠真额度碰运气）。
@@ -266,7 +688,13 @@ const server = http.createServer((req, res) => {
     //   第 2 轮：已有工具结果 → 回 tool_calls（提议加菜），参数里**带一条编造的 id**
     //   第 3 轮：再回喂一次 → 回正文收尾
     // 编造的 id 是故意的：服务端必须把它丢掉、只留真实那道（这条正是本次要验的核心）。
-    const toolMode = tools.some((t) => t.function?.name === 'search_dishes')
+    /*
+     * `!menuMode && !comboMode`：**菜单/组合那两路已经把 `search_dishes` 借去拿菜谱 id 了**
+     * （真实模型也会这么干），若这里不管一句就接管，它们会被这条"搜→提建议"的流程劫持——
+     * 症状是"让它加菜，它回一句'要我把这两道加进晚餐吗'"（提议而不是真加），
+     * 而产品本身是好的。判据要以"用户那句话在说哪件事"为准。
+     */
+    const toolMode = !fridgeMode && !menuMode && !comboMode && !recipeMode && tools.some((t) => t.function?.name === 'search_dishes')
     const searchHit = toolResults.find((m) => /dishes/.test(String(m.content)))
     // 真 id **从上一轮的工具结果里现取**（stub 自己编的搜索结果里放的什么，就提什么）
     const realId = /"recipeId":"([^"]+)"/.exec(String(searchHit?.content ?? ''))?.[1] ?? ''
@@ -315,7 +743,9 @@ const server = http.createServer((req, res) => {
     // 用来验客户端的"网关不听话照样回 SSE"降级路径
     // ⚠️ 冰箱那条的收尾话也要在这儿兜住：漏掉它的话走的是通用兜底文案
     // （第一版就漏了，症状是"工具都跑了、正文却在答非所问"，验收里看着像产品坏了）
-    const finalContent = toolPlan?.text ?? fridgePlan?.text ?? content
+    const finalContent = toolPlan?.text ?? fridgePlan?.text ?? menuPlan?.text
+      ?? comboTextForStub(comboMode, comboMode_)
+      ?? recipeTextForStub(recipeMode, recipeWantsDelete, recipeWantsUpdate, recipeFailLine) ?? content
     const useSse = parsed.stream === true || process.env.STUB_FORCE_STREAM === '1'
     if (!useSse) {
       res.writeHead(200, { 'content-type': 'application/json' })

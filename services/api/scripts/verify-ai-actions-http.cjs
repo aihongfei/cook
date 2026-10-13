@@ -104,6 +104,18 @@ function soonKey() {
 }
 
 /**
+ * 今天往后第 N 天的日期键（**按本地日历**算，与产品同一口径：容器 TZ=Asia/Shanghai）。
+ *
+ * 不能用 `toISOString()`：那是 UTC，晚上 8 点之后（东八区）会比本地日期早一天，
+ * 于是"明天晚餐"在脚本里指向了今天——验收就会去查一个根本不存在的餐次，
+ * 断言看着像产品坏了（这类时区坑见 RISKS R-18）。
+ */
+function menuDateForVerify(offsetDays = 0) {
+  const now = new Date(Date.now() + offsetDays * 86_400_000)
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+/**
  * 打一次流式问答，把 SSE 三种事件收下来。
  *
  * 这里**必须自己读流**（不能用 /ai/chat 那个非流式接口）：回执是 `event: receipts`，
@@ -382,7 +394,278 @@ async function main() {
     `note=${JSON.stringify(reverted?.note)}`,
   )
 
-  // ---------- ⑦ 越权 ----------
+  // ---------- ⑦ 菜单、餐次与组合：全应用 CRUD（用户 2026-10-13 的扩展）----------
+
+  /*
+   * 这一段与上面冰箱那几段**同一套路**：走真路（stub 决定调工具 → 服务端真写库 →
+   * 回执 → 撤），且每一步都回到接口去核实"库里真的变了"。
+   *
+   * 为什么不能只验"回执卡出来了"：回执是**服务端自己拼的**，它说"加进去了"而库里
+   * 什么都没有，单看回执完全看不出来（第一版冰箱撤销那个 bug 就是这种形状——
+   * 界面一片正常，用户点「撤」才发现撤的是别的东西）。
+   */
+  const plan = await callWithRetry('GET', '/orders/plan?days=3', { token: mama.token })
+  const today = plan.body?.days?.[0]?.date ?? soonKey()
+  const todayLunch = `${today}-LUNCH`
+
+  const added = await chatStream(mama.token, say('帮我加进菜单，今天午餐来一道番茄，少放盐'))
+  const card = await callWithRetry('GET', '/orders?family=true', { token: mama.token })
+  const cardOf = (body) => (body?.cards ?? []).find((row) => row.mealKey === todayLunch)
+  const todayCard = cardOf(card.body)
+  check(
+    '**一句"加进菜单"真的往那一餐里加了菜**（不是只给建议）',
+    (todayCard?.items ?? []).length > 0 && added.receipts.length > 0,
+    `items=${(todayCard?.items ?? []).map((item) => item.name).join(',')} receipts=${added.receipts.length}`,
+  )
+  check(
+    '加菜的回执是"撤掉"，且一道一行（不是整批一个按钮）',
+    added.receipts.every((item) => item.label === '撤掉') && added.receipts.length === (todayCard?.items ?? []).length,
+    `labels=${JSON.stringify(added.receipts.map((item) => item.label))} items=${(todayCard?.items ?? []).length}`,
+  )
+
+  /*
+   * 顺序是刻意的：**先改人数与状态，最后再撤菜**。
+   * 撤掉最后一道菜时那一餐会被删掉（`orders.removeItem` 的行为），
+   * 之后再想"改人数/改状态"就没有那一餐可改了——第一版就是这么红的，
+   * 看着像 AI 坏了，其实是验收顺序把前提交没了。
+   */
+  const diners = await chatStream(mama.token, say('今天午餐改成 5 个人吃'))
+  const dinerCard = cardOf((await callWithRetry('GET', '/orders?family=true', { token: mama.token })).body)
+  check(
+    '**"5 个人吃"真的写进了那一餐**（dinerCount=5，回执上是"改回去"）',
+    dinerCard?.dinerCount === 5 && diners.receipts.some((item) => item.label === '改回去'),
+    `dinerCount=${dinerCard?.dinerCount} receipts=${JSON.stringify(diners.receipts.map((item) => item.label))}`,
+  )
+  const dinerReceipt = diners.receipts.find((item) => item.label === '改回去')
+  if (dinerReceipt) {
+    const dinerUndo = await callWithRetry('POST', `/ai/actions/${dinerReceipt.id}/undo`, { token: mama.token })
+    const backCard = cardOf((await callWithRetry('GET', '/orders?family=true', { token: mama.token })).body)
+    check(
+      '撤"改人数"：写回改之前的那个值（原来没定，撤完就是没定）',
+      dinerUndo.status === 200 && backCard?.dinerCount === null,
+      `status=${dinerUndo.status} dinerCount=${JSON.stringify(backCard?.dinerCount)}`,
+    )
+  }
+
+  const status = await chatStream(mama.token, say('今天午餐选好了，就这么定'))
+  const statusCard = cardOf((await callWithRetry('GET', '/orders?family=true', { token: mama.token })).body)
+  check(
+    '**"选好了"真的把那一餐改成已安排**',
+    statusCard?.status === 'PLANNED',
+    `status=${statusCard?.status}`,
+  )
+  check(
+    '状态流转的回执**没有撤销按钮**（label 是空串：画一个点了只会被拒的按钮比没有更糟）',
+    status.receipts.length > 0 && status.receipts.every((item) => item.label === ''),
+    `labels=${JSON.stringify(status.receipts.map((item) => item.label))}`,
+  )
+  const statusUndo = status.receipts[0]
+    ? await callWithRetry('POST', `/ai/actions/${status.receipts[0].id}/undo`, { token: mama.token })
+    : null
+  check(
+    '真去撤状态那笔：409 且给一句"回不去"的人话（不是 500，也不是"不支持撤销"）',
+    statusUndo === null || (statusUndo.status === 409 && /回不去/.test(JSON.stringify(statusUndo.body))),
+    `status=${statusUndo?.status} body=${JSON.stringify(statusUndo?.body)?.slice(0, 60)}`,
+  )
+
+  /*
+   * 撤菜：这一餐现在是「已安排」，**加不进新菜**——这条本身就是产品该有的行为（D-022），
+   * 顺手在这里验它：AI 该如实说清原因，而不是静默失败或硬写进去。
+   */
+  const blocked = await chatStream(mama.token, say('帮我加进菜单，今天午餐再来一道豆腐'))
+  check(
+    '已经「已安排」的那一餐**加不进新菜**，且 AI 如实说清了原因（不是静默失败）',
+    blocked.receipts.length === 0 && /安排|取消/.test(blocked.text),
+    `text=${blocked.text.slice(0, 50)} receipts=${blocked.receipts.length}`,
+  )
+
+  /*
+   * 撤菜那一路要先让那一餐回到"能加菜"的状态：直接用接口取消这一餐
+   * （不走 AI——这一步是"用户自己去点单页操作"，验收里造这个前提最直接），
+   * 再让 AI 加一道、然后撤掉它。
+   */
+  await callWithRetry('POST', `/orders/meals/${todayLunch}/status`, { token: mama.token, body: { status: 'CANCELED' } })
+  const readded = await chatStream(mama.token, say('帮我加进菜单，今天午餐来一道豆腐'))
+  const readdedCard = cardOf((await callWithRetry('GET', '/orders?family=true', { token: mama.token })).body)
+  check(
+    '取消过的餐**能重新点菜**（AI 加的菜把这一餐救回来了，状态回到待确认）',
+    (readdedCard?.items ?? []).length > 0 && readdedCard?.status === 'PENDING',
+    `items=${(readdedCard?.items ?? []).map((item) => item.name).join(',')} status=${readdedCard?.status}`,
+  )
+
+  /*
+   * **撤「撤菜」**：让 AI **删**一道（那一道很可能就是那一餐唯一的一道，
+   * 整餐会跟着消失——这正是最难的边界：撤销时那一餐已经不存在了，得按需重建）。
+   */
+  const dishRemoved = await chatStream(mama.token, say('帮我从菜单里撤掉这道豆腐'))
+  const afterRemoved = cardOf((await callWithRetry('GET', '/orders?family=true', { token: mama.token })).body)
+  check(
+    '**AI 撤菜是真的撤**（那道从菜单里没了），回执上给的是"放回去"',
+    dishRemoved.receipts.length > 0
+      && dishRemoved.receipts.every((item) => item.label === '放回去')
+      && !(afterRemoved?.items ?? []).some((item) => item.name.includes('豆腐')),
+    `receipts=${JSON.stringify(dishRemoved.receipts.map((item) => `${item.label}:${item.summary}`))} items=${(afterRemoved?.items ?? []).map((item) => item.name).join(',') || '(空了)'}`,
+  )
+  const menuRemoveReceipt = dishRemoved.receipts[0]
+  const menuRestoreUndo = await callWithRetry('POST', `/ai/actions/${menuRemoveReceipt.id}/undo`, { token: mama.token })
+  const afterMenuRestore = cardOf((await callWithRetry('GET', '/orders?family=true', { token: mama.token })).body)
+  check(
+    '**撤"撤菜"：那道照原样回到菜单里**（那一餐要能按需重建）',
+    menuRestoreUndo.status === 200 && (afterMenuRestore?.items ?? []).some((item) => item.name.includes('豆腐')),
+    `status=${menuRestoreUndo.status} items=${(afterMenuRestore?.items ?? []).map((item) => item.name).join(',')}`,
+  )
+  const twiceUndo = await callWithRetry('POST', `/ai/actions/${menuRemoveReceipt.id}/undo`, { token: mama.token })
+  check(
+    '同一笔不能撤两次：409',
+    twiceUndo.status === 409 && /已经撤过/.test(JSON.stringify(twiceUndo.body)),
+    `status=${twiceUndo.status}`,
+  )
+
+  /*
+   * 再点回去（那一餐可能已经被删光了——撤掉最后一道菜时整餐会消失，
+   * 这正是"撤销要能按需重建那一餐"的边界）。
+   */
+  const restoreOne = await chatStream(mama.token, say('帮我加进菜单，今天午餐来一道白菜'))
+  const restoredCard = cardOf((await callWithRetry('GET', '/orders?family=true', { token: mama.token })).body)
+  check(
+    '那一餐被撤空之后还能重新点进去（撤销/再点都不该被"这一餐不存在"挡住）',
+    restoreOne.receipts.length > 0 && (restoredCard?.items ?? []).length > 0,
+    `receipts=${restoreOne.receipts.length} items=${(restoredCard?.items ?? []).map((item) => item.name).join(',')}`,
+  )
+
+  // ---------- 组合 ----------
+
+  const combo = await chatStream(mama.token, say('把这道豆腐存成一个组合叫快手三菜'))
+  const combos = await callWithRetry('GET', '/combos', { token: mama.token })
+  const created = (combos.body?.combos ?? []).find((item) => item.name === '快手三菜')
+  check(
+    '**"存成一个组合"真的建出来了**（带菜、带创建人）',
+    Boolean(created) && created.dishCount >= 1 && combo.receipts.length > 0,
+    `name=${created?.name} dishes=${created?.dishCount} receipts=${combo.receipts.length}`,
+  )
+  const comboReceipt = combo.receipts[0]
+  check(
+    '建组合的回执是"撤掉"（新建这一类都能撤回）',
+    comboReceipt?.label === '撤掉',
+    `label=${comboReceipt?.label}`,
+  )
+
+  /*
+   * 再点一次（F3-06）：前提是**来源那一餐已经定局**。今天午餐这时是「待确认」，
+   * 所以先用接口把它推到"已做好"（用户自己收尾那一步，不走 AI），再让 AI 照抄到明天晚餐。
+   */
+  await callWithRetry('POST', `/orders/meals/${todayLunch}/status`, { token: mama.token, body: { status: 'PLANNED' } })
+  await callWithRetry('POST', `/orders/meals/${todayLunch}/status`, { token: mama.token, body: { status: 'COOKING' } })
+  await callWithRetry('POST', `/orders/meals/${todayLunch}/status`, { token: mama.token, body: { status: 'DONE' } })
+  const repeatTarget = `${menuDateForVerify(1)}-DINNER`
+  const repeated = await chatStream(mama.token, say('照抄今天午餐，明天晚餐再点一次'))
+  const allCards = (await callWithRetry('GET', '/orders?family=true', { token: mama.token })).body?.cards ?? []
+  const tomorrowCard = allCards.find((row) => row.mealKey === repeatTarget)
+  check(
+    '**"再点一次"真的把那一桌照抄到明天晚餐**（每道一张可撤的回执）',
+    (tomorrowCard?.items ?? []).length > 0 && repeated.receipts.length > 0,
+    `items=${(tomorrowCard?.items ?? []).map((item) => item.name).join(',')} receipts=${repeated.receipts.length}`,
+  )
+  const repeatReceipt = repeated.receipts[0]
+  if (repeatReceipt) {
+    const repeatUndo = await callWithRetry('POST', `/ai/actions/${repeatReceipt.id}/undo`, { token: mama.token })
+    const afterRepeat = (await callWithRetry('GET', '/orders?family=true', { token: mama.token })).body?.cards
+      ?.find((row) => row.mealKey === repeatTarget)
+    check(
+      '撤"照抄过来的一道"：只撤那一道（目标那一餐里别的菜不受影响）',
+      repeatUndo.status === 200 && (afterRepeat?.items ?? []).length < (tomorrowCard?.items ?? []).length,
+      `status=${repeatUndo.status} before=${(tomorrowCard?.items ?? []).length} after=${(afterRepeat?.items ?? []).length}`,
+    )
+  }
+
+  /*
+   * 用组合加菜（`add_combo_to_meal`）：组合这会儿还在（上面只验了回执文案，没撤它），
+   * 把它整组加进明天午餐，再撤掉其中一道（逐道可撤，不是整组绑一起）。
+   */
+  const comboAdd = await chatStream(mama.token, say('用这个组合加菜，明天午餐'))
+  const comboMeal = (await callWithRetry('GET', '/orders?family=true', { token: mama.token })).body?.cards
+    ?.find((row) => row.mealKey === `${menuDateForVerify(1)}-LUNCH`)
+  check(
+    '**"用这个组合加菜"真的把整组加了进去**（每道一张回执）',
+    (comboMeal?.items ?? []).length > 0 && comboAdd.receipts.length > 0,
+    `items=${(comboMeal?.items ?? []).map((item) => item.name).join(',')} receipts=${comboAdd.receipts.length}`,
+  )
+  const comboAddReceipt = comboAdd.receipts[0]
+  if (comboAddReceipt) {
+    const comboAddUndo = await callWithRetry('POST', `/ai/actions/${comboAddReceipt.id}/undo`, { token: mama.token })
+    check(
+      '撤"组合加进来的某一道"：200（逐道可撤）',
+      comboAddUndo.status === 200,
+      `status=${comboAddUndo.status}`,
+    )
+  }
+
+  // 最后删组合（`delete_combo`）→ 撤回 → 组合带着菜一起回来
+  const comboDel = await chatStream(mama.token, say('删掉这个组合'))
+  const afterDelete = await callWithRetry('GET', '/combos', { token: mama.token })
+  const delReceipt = comboDel.receipts.find((item) => item.label === '放回去')
+  check(
+    '**AI 删组合是真的删**（列表里没了），回执上给的是"放回去"',
+    Boolean(delReceipt) && !(afterDelete.body?.combos ?? []).some((item) => item.name === '快手三菜'),
+    `receipts=${JSON.stringify(comboDel.receipts.map((item) => item.label))} remaining=${(afterDelete.body?.combos ?? []).map((item) => item.name).join(',')}`,
+  )
+  if (delReceipt) {
+    const delUndo = await callWithRetry('POST', `/ai/actions/${delReceipt.id}/undo`, { token: mama.token })
+    const afterDelUndo = await callWithRetry('GET', '/combos', { token: mama.token })
+    const restoredCombo = (afterDelUndo.body?.combos ?? []).find((item) => item.name === '快手三菜')
+    check(
+      '**撤"删组合"：组合带着组里的菜一起回来了**（少一道就是少一道）',
+      delUndo.status === 200 && Boolean(restoredCombo) && restoredCombo.dishCount === created?.dishCount,
+      `status=${delUndo.status} dishes=${restoredCombo?.dishCount} 原来是=${created?.dishCount}`,
+    )
+  }
+
+  // ---------- ⑧ 自建菜谱（F1-11 / F1-12）：AI 存一道 → **撤得掉** ----------
+
+  /*
+   * 这一段是**补上来的**：在此之前，验收与单测都没走过"AI 写菜谱 → 撤销"这条路，
+   * 而它当时整条是坏的（`recipeTouched` 拿整份 undoData 去比快照，`recipeId` 找不到 →
+   * 每一次撤销都被误判成"用户自己改过"而拒绝）。**只有浏览器里用真模型才撞出来**。
+   * 从此以后这条只要坏，这里就红。
+   */
+  const saved = await chatStream(mama.token, say('我家的凉拌黄瓜是这么做的：黄瓜拍碎加蒜末，放盐、醋和一点香油拌匀。帮我存进我家的菜谱'))
+  const mineAfterSave = await callWithRetry('GET', '/recipes?mine=1', { token: mama.token })
+  const selfBuilt = (mineAfterSave.body?.items ?? []).find((item) => item.name === '凉拌黄瓜')
+  check(
+    '**AI 口述的做法真的存进了「我家的菜谱」**（`mine=1` 查得到，且标着自己上传）',
+    Boolean(selfBuilt) && selfBuilt.origin === 'user' && selfBuilt.mine === true,
+    `name=${selfBuilt?.name} origin=${selfBuilt?.origin} mine=${selfBuilt?.mine} receipts=${saved.receipts.length}`,
+  )
+  check(
+    '自建菜谱的列表项带**来源区分**（`sourceLabel` 是"自己上传"，不是空串或英文 origin）',
+    selfBuilt?.sourceLabel === '自己上传',
+    `sourceLabel=${selfBuilt?.sourceLabel}`,
+  )
+
+  const saveReceipt = saved.receipts.find((item) => /菜谱/.test(item.summary))
+  const recipeUndo = saveReceipt
+    ? await callWithRetry('POST', `/ai/actions/${saveReceipt.id}/undo`, { token: mama.token })
+    : null
+  const mineAfterUndo = await callWithRetry('GET', '/recipes?mine=1', { token: mama.token })
+  check(
+    '**撤"新建菜谱"：那道真的从「我家的菜谱」里没了**（这是之前整条坏掉的那一步）',
+    recipeUndo?.status === 200 && !(mineAfterUndo.body?.items ?? []).some((item) => item.name === '凉拌黄瓜'),
+    `status=${recipeUndo?.status} body=${JSON.stringify(recipeUndo?.body)?.slice(0, 70)} 还剩=${(mineAfterUndo.body?.items ?? []).map((item) => item.name).join(',')}`,
+  )
+
+  // 公共菜谱改不了：让 AI 去改库里导入的那道，必须被拒且给出人话
+  const imported = (await callWithRetry('GET', '/recipes?pageSize=1', { token: mama.token })).body?.items?.[0]
+  if (imported && imported.origin !== 'user') {
+    const publicEdit = await chatStream(mama.token, say(`把菜谱「${imported.name}」改成我家的做法`))
+    const stillThere = await callWithRetry('GET', `/recipes/${imported.id}`, { token: mama.token })
+    check(
+      '**公共菜谱 AI 改不了**（改不动就如实说，不能偷偷写一份自己的）',
+      Boolean(stillThere.body) && publicEdit.receipts.length === 0,
+      `receipts=${publicEdit.receipts.length} text=${publicEdit.text.slice(0, 40)}`,
+    )
+  }
+
+  // ---------- ⑨ 越权 ----------
 
   const papa = await newUser('AI 助手爸')
   await callWithRetry('POST', '/family/join', { token: papa.token, body: { inviteCode: family.inviteCode } })

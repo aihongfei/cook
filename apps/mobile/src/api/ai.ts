@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/stores/auth'
 import { apiClient } from './client'
 
@@ -269,15 +269,31 @@ export class StreamError extends Error {
 }
 
 /**
+ * AI 写过库之后，把**它可能动过的那些域**的缓存全部作废。
+ *
+ * 为什么是一张固定的清单而不是按回执的 `kind` 分派：回执里只有一个 `kind` 字符串，
+ * 让前端拿它去查"该作废哪个 key"等于把后端的动作枚举复制一份到前端——
+ * 后端加一种新动作时前端必然漏掉一处（而漏掉的后果就是**页面上看不见刚发生的事**，
+ * 用户会以为 AI 在骗他）。宁可多作废一个没动过的域（它本来就没被取过，不会发请求）。
+ *
+ * 这份清单与 AI 现在能写的六块一一对应（D-052/D-053 + 2026-10-13 的全应用 CRUD）：
+ * 冰箱、菜谱（含「我的菜谱」）、收藏、常用组合、菜单/餐次、采购清单（由菜单推导）。
+ *
+ * 只作废不自己拼缓存：回执里只有一句摘要，硬 set 一份"猜的"数据比不动更糟。
+ */
+export function invalidateAfterAiWrite(queryClient: QueryClient): void {
+  for (const key of ['fridge', 'recipes', 'favorites', 'combos', 'orders', 'shopping']) {
+    void queryClient.invalidateQueries({ queryKey: [key] })
+  }
+}
+
+/**
  * 撤一笔 AI 写库。
  *
- * **成功之后必须让冰箱那页也跟着变**：用户撤完很可能就是回冰箱页看结果
- * （那正是他会点「撤」的场景），如果那页还显示着他刚撤掉的那条，
- * 他会以为撤销坏了——真去再看一次接口就会自己发现，但那一瞬间的困惑是白搭的。
- * 所以这里 `invalidateQueries(['fridge'])`：它会让冰箱页重新取一次。
- *
- * 不用 `setQueryData` 直接改（写接口才那么干）：撤销接口回的是"一句话"，
- * 手里没有新的板子，硬拼一个只会拼出与后端不一致的缓存。
+ * **成功之后必须让相关页面跟着变**（用户 2026-10-13：「在我的菜谱页面使用 ai 添加菜谱后，
+ * 背后的菜谱没有自动刷新」——那正是这里只作废了冰箱导致的）。
+ * 用户撤完/写完很可能就是回那一页看结果，如果那页还显示着旧内容，
+ * 他会以为 AI 没生效或撤销坏了——真去再进一次就能发现，但那一瞬间的困惑是白搭的。
  */
 export function useUndoAiAction() {
   const queryClient = useQueryClient()
@@ -286,8 +302,6 @@ export function useUndoAiAction() {
       const { data } = await apiClient.post<{ message: string; undone: boolean }>(`/ai/actions/${id}/undo`)
       return data
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['fridge'] })
-    },
+    onSuccess: () => invalidateAfterAiWrite(queryClient),
   })
 }

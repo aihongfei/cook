@@ -23,5 +23,7 @@ import { CombosService } from './combos.service'
   ],
   controllers: [CombosController],
   providers: [PrismaService, CombosService, JwtAuthGuard],
+  // AI 的组合四件要走这套服务（"谁能改哪个组合"只写在 canEditCombo 里，AI 不该另写一份）
+  exports: [CombosService],
 })
 export class CombosModule {}

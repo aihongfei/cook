@@ -55,7 +55,7 @@ export class CombosService {
   /** 新建：从"把这一餐存下来"或从菜谱库里挑几道都走这里 */
   async create(
     userId: string,
-    input: { name?: string; note?: string; recipeIds?: unknown },
+    input: { name?: unknown; note?: unknown; recipeIds?: unknown },
   ) {
     const { familyId } = await this.requireMember(userId)
     const name = parseComboName(input?.name)
@@ -83,7 +83,7 @@ export class CombosService {
   async update(
     userId: string,
     comboId: string,
-    input: { name?: string; note?: string; recipeIds?: unknown },
+    input: { name?: unknown; note?: unknown; recipeIds?: unknown },
   ) {
     const { familyId, role } = await this.requireMember(userId)
     const combo = await this.prisma.combo.findUnique({ where: { id: comboId } })
@@ -123,6 +123,38 @@ export class CombosService {
     }
     await this.prisma.combo.delete({ where: { id: comboId } })
     return this.list(userId)
+  }
+
+  /**
+   * 照原样重建一个被删掉的组合（撤「AI 删了组合」那笔）。
+   *
+   * **直接走 prisma.create 而不是 `create()`**，且用 `combo.familyId` 而不是
+   * "调用者现在属于哪个家"：撤销要还原的是**当时那一个**（包括 id、原属家庭、谁组的）。
+   * 走 `create()` 会重新生成 id 并把 createdById 记成现在这个人——而那个字段决定
+   * 谁能改它（`canEditCombo`），一次撤销不该悄悄换掉组合的主人；用户换了家庭时
+   * 也不该把旧家的组合搬进新家（同菜谱 `restore` 那条说明）。
+   *
+   * **不做业务校验**（名字长度、菜 id 是否存在）：这一行本来就是从这个库里删出去的，
+   * 形状库是认的。同家重名那个边界交给调用方——撞上唯一约束时它把库的话如实转给用户。
+   */
+  async restore(combo: {
+    id: string
+    name: string
+    note: string | null
+    createdById: string
+    familyId: string
+    recipeIds: string[]
+  }) {
+    return this.prisma.combo.create({
+      data: {
+        id: combo.id,
+        familyId: combo.familyId,
+        createdById: combo.createdById,
+        name: combo.name,
+        note: combo.note,
+        items: { create: combo.recipeIds.map((recipeId, position) => ({ recipeId, position })) },
+      },
+    })
   }
 
   /**
