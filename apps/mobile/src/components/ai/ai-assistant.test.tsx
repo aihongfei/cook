@@ -116,12 +116,32 @@ function mockStream({
   return { sent }
 }
 
+/**
+ * **被掐断**的流：给了半句话就直接关掉，**不发 `[DONE]`**。
+ *
+ * 这是"会话没返回"那种故障在测试里的形状——真实成因是移动网络下连接半死
+ * （不报错、也不 EOF，或者服务端进程中途没了）。客户端必须把这种"没见到 [DONE]"
+ * 判成失败，而不是当成"回答说完了"（原来就是当成功收的，于是半句话被完整落下）。
+ */
+function mockTruncatedStream(half: string) {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: half })}\n\n`))
+        // 没有 [DONE]，直接收尾
+        controller.close()
+      },
+    })
+    return { ok: true, status: 200, body: stream } as unknown as Response
+  })
+}
+
 function mockApi({ configured = true, undoResult }: {
   configured?: boolean
   /** 撤销接口的回复。不传 = 成功撤销 */
   undoResult?: { status?: number; data?: unknown }
-} = {}) {
-  const get = vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
+} = {}) {  const get = vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
     if (url === '/ai/status') return Promise.resolve({ data: { configured, model: configured ? 'm' : null } } as never)
     if (url === '/ai/actions') return Promise.resolve({ data: { items: [] } } as never)
     if (url === '/fridge') return Promise.resolve({ data: { zones: [], summary: {}, soon: [] } } as never)
@@ -641,6 +661,50 @@ it('失败时保留用户问的那句（重问一遍还得重新打字最气人�
 
   await say('记一下冰箱里有酸奶')
 
+  // 失败原因**写在对话里**（对话流里那条虚线便条），不是只在几秒就消失的 toast 里
   expect(await screen.findByText(/开小差/)).toBeTruthy()
   expect(screen.getByText('记一下冰箱里有酸奶')).toBeTruthy()
+})
+
+/*
+ * 用户 2026-10-14：「还有刚才出现了会话没返回，最后一条显示的是用户的消息」。
+ *
+ * 三条都在这里钉住——它们是同一个毛病的三种表现：
+ * ① 失败要**留在对话里**（原来只弹 toast 然后删掉空气泡，刷新后连痕迹都没有）；
+ * ② 半截回答要**说明没说完**（原来流断开被当成"答完了"，半句话就那样落下了）；
+ * ③ 失败那条要能**一键重试**（不必重新打字）。
+ */
+it('会话没答上来时，对话里留一条带「再试一次」的说明', async () => {
+  const { sent } = mockStream({ failWith: 'AI 服务开小差了，过会儿再试' })
+  mockApi()
+  renderApp(<Shell />)
+
+  await say('记一下冰箱里有酸奶')
+  await screen.findByText('再试一次')
+
+  // 刷新页面（重新挂载 + 从 localStorage 恢复）：那条说明**还在**——这是"有据可查"的判据
+  cleanup()
+  renderApp(<Shell />)
+  expect(await screen.findByText(/开小差/)).toBeTruthy()
+
+  // 点「再试一次」：不必重新打字，原样把刚才那句再发一遍
+  fireEvent.click(screen.getByText('再试一次'))
+  await waitFor(() => expect(sent.length).toBeGreaterThan(1))
+  const again = sent[sent.length - 1].messages
+  expect(again[again.length - 1].content).toBe('记一下冰箱里有酸奶')
+  // 而且**不会**多出一条重复的提问（重试用的是同一份历史，不是"再问一遍"）
+  expect(again.filter((turn) => turn.content === '记一下冰箱里有酸奶')).toHaveLength(1)
+})
+
+it('半截回答要说明"没说完"，不能当成答完了', async () => {
+  // 流里给了半句话就直接结束（没有 [DONE]）——模拟连接被掐断
+  mockTruncatedStream('我先说一半')
+  mockApi()
+  renderApp(<Shell />)
+
+  await say('记一下冰箱里有酸奶')
+
+  // 半句留着（用户看得见它说到哪儿停了），并明确说这次没说完
+  expect(await screen.findByText(/我先说一半/)).toBeTruthy()
+  expect(await screen.findByText(/没说完/)).toBeTruthy()
 })

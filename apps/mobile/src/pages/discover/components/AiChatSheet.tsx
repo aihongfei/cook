@@ -144,7 +144,7 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
   }
 
   return (
-    <BottomSheet visible={visible} title="问 AI" onClose={onClose}>
+    <BottomSheet visible={visible} title="问 AI" bodyClassName="sheet__body--chat" onClose={onClose}>
       {status.data && !status.data.configured ? (
         <p className="ai__tip">
           还没接上 AI。在根目录 .env（本机直跑则 services/api/.env）里填 AI_API_BASE / AI_API_KEY / AI_MODEL，

@@ -20,16 +20,24 @@ import {
   TOOL_READ_PLAN, TOOL_READ_RECIPES, TOOL_REMOVE_FRIDGE_ITEM, TOOL_REMOVE_MENU_ITEM, TOOL_REPEAT_MEAL,
   TOOL_READ_TASTE, TOOL_ROUNDS_MAX, TOOL_SEARCH_DISHES, TOOL_SET_DINERS, TOOL_SET_MEAL_STATUS,
   TOOL_TOGGLE_FAVORITE, TOOL_UPDATE_COMBO, TOOL_UPDATE_FRIDGE_ITEM, TOOL_UPDATE_RECIPE, TOOL_UPDATE_TASTE,
+  TOOL_READ_SHOPPING, TOOL_ADD_SHOPPING_ITEMS, TOOL_CHECK_SHOPPING_ITEM, TOOL_REMOVE_SHOPPING_ITEM, TOOL_RESTOCK_SHOPPING,
+  SHOPPING_ADD_MAX, SHOPPING_CHECK_MAX, SHOPPING_RESTOCK_MAX,
+  TOOL_WHAT_TO_COOK, TOOL_READ_FAMILY_PICKS, TOOL_READ_CHECKINS,
+  FAVORITES_LIST_MAX, CHECKIN_LIST_MAX,
   comboText, fridgeText, menuText, readAddItems, readComboDraft, readDiners, readIdArg, readMealStatus,
   readMealTarget, readMenuAdds, readProposals, readRecipeDraft, readRecipePatch, readRemoveItem,
+  readNameList, readShoppingAdds, shoppingText,
   readTastePatch, readUpdateItem, recipeText, searchResult, todayKey, toolResult,
   type MenuProposal, type ToolCall,
 } from './ai.tools'
 import { AiActionService, humanError, type AiReceipt } from './ai-action.service'
+import { CheckInsService } from '../checkins/checkins.service'
 import { CombosService } from '../combos/combos.service'
+import { DiscoverService } from '../discover/discover.service'
 import { FridgeService } from '../fridge/fridge.service'
 import { TasteService } from '../taste/taste.service'
 import { OrdersService } from '../orders/orders.service'
+import { ShoppingService } from '../shopping/shopping.service'
 import { MEAL_LABEL, STATUS_LABEL } from '../orders/orders.rules'
 import { sourceLabel } from '../recipes/recipe.rules'
 import { SPICY_LEVELS, judgeDish, type TasteProfile } from '../taste/taste.rules'
@@ -54,6 +62,14 @@ export class AiService {
     private readonly taste: TasteService,
     // 组合的读走用户自己那套（`list` 里有"家庭内共用 + canEdit"的判定，AI 不该另写一份）
     private readonly combosService: CombosService,
+    // 采购清单（M7，用户 2026-10-14 要求接入）：清单是算出来的（按菜单配料 + 自加条目），
+    // 所以"缺什么"必须走它自己的 `list`——AI 另算一份必然与界面上的清单对不上
+    private readonly shopping: ShoppingService,
+    // 只读的三件（帮我决定 / 家人最爱 / 打卡，用户 2026-10-14 的"等所有没接入 ai 的功能"）：
+    // 「帮我决定」的答案要同时看冰箱临期、口味过滤与家里的做过/收藏——那三条口径全在
+    // `DiscoverService.decide` 里（与"发现页那个按钮"**同一个方法**），AI 另算一份必然分叉
+    private readonly discover: DiscoverService,
+    private readonly checkins: CheckInsService,
     // 对话里的图片（F16-05）：字节在服务端，消息里只传 id
     private readonly attachments: AiAttachmentService,
   ) {}
@@ -382,25 +398,75 @@ export class AiService {
         + `改/删之前先 ${TOOL_READ_RECIPES} 看清哪道是**自己上传的**（标了「可改」的）。`
         + '库里的公共菜谱（极速数据那些）谁都改不了，用户想改就帮他新建一道自己的。'
         + `收藏用 ${TOOL_TOGGLE_FAVORITE}。`,
-      `要让用户明白哪些事你能直接做、哪些要他自己点：冰箱、菜单、自家菜谱、常用组合、收藏都可以`
+      /*
+       * 采购清单（M7，用户 2026-10-14：「还需要 ai 能够处理采购清单…等现在所有没接入 ai 的功能」）。
+       *
+       * 这一段必须把"清单"与"菜单"的界线说明白：两者都叫"要吃什么/要买什么"，
+       * 但清单是**按菜单配料算出来的**（外加用户自加的东西），所以
+       * "把某道菜要用的食材加进采购单"这件事**不用手写清单**——
+       * 把那道菜加进菜单，清单自己就会算出来。这是模型最容易做错的一处。
+       */
+      `采购清单（要去买什么）也能直接帮你办：`
+        + `看现在缺什么 → ${TOOL_READ_SHOPPING}（它已按货架分好组、标出了家里已有的和已勾掉的）；`
+        + `加想去买的 → ${TOOL_ADD_SHOPPING_ITEMS}（**这个也会真的写库**，有回执可撤）；`
+        + `买到就勾上 → ${TOOL_CHECK_SHOPPING_ITEM}；`
+        + `不想买那条自加的 → ${TOOL_REMOVE_SHOPPING_ITEM}；`
+        + `买回来的收进冰箱 → ${TOOL_RESTOCK_SHOPPING}（**只补已经勾掉的**，没勾的一律不动）。`
+        + '**分清清单与菜单**：菜单是"这一餐吃什么"（读它用 read_menu、加菜用 add_menu_items），'
+        + '清单是"要去买什么"。用户说"把某道菜需要的食材加进采购单"时，'
+        + '正确的做法是**把那道菜加进菜单**（清单会照它的配料自己算出来），'
+        + '而不是把一堆食材名一条条手写进清单——手写的那些在菜单变了之后不会跟着变。'
+        + '只有"清单上没有、也不是哪道菜要的"（垃圾袋、洗洁精）才用 add_shopping_items。',
+      `要让用户明白哪些事你能直接做、哪些要他自己点：冰箱、菜单、自家菜谱、常用组合、收藏、采购清单都可以`
         + '（有回执可撤；状态流转没有撤销）；家庭管理（改角色、转让、退家庭）你没有工具，'
         + '用户问起就告诉他去"我的 → 家庭"里做。'
         + '**绝不要说"已经加好了/记好了"如果你没真的调过工具**——没调就说"要我加进去吗"。',
+      /*
+       * 只读三件（用户 2026-10-14 的"等现在所有没接入 ai 的功能"）。
+       *
+       * 它们的共同点是**答案不在你印象里**：该做哪道菜、家里最爱吃什么、打了多少天卡，
+       * 都得从库与规则里算。所以这一段的要求是"先问再答"，而不是"尽量答得像"。
+       */
+      `还有三件事**你要先去问服务端再开口**，不要凭印象答：`
+        + `① 用户说"不知道吃什么""帮我决定""随便来一道" → ${TOOL_WHAT_TO_COOK}。`
+        + '**它只给一道**（这条出口的全部意思就是不让人挑），而且会附一句为什么是它——'
+        + '把那句理由照搬出来。用户说"换一道"时，把上一次给的那个 id 放进 exclude 再调一次。'
+        + '算不出菜时它会说原因（菜谱库是空的 / 冰箱还没记东西 / 口味档案把人排掉了），'
+        + '照实转达并说下一步去哪，**不要自己编一道顶上去**。'
+        + `② 用户问"我们家常做什么""家里最爱吃哪几道" → ${TOOL_READ_FAMILY_PICKS}；`
+        + `③ 用户问"我连续打卡多少天""最近做了几次""家里人最近下厨了吗" → ${TOOL_READ_CHECKINS}。`
+        + '这三件都**只看不写**，所以不用问用户"要不要办"——直接查、直接答。'
+        + '它们在没有家庭时会回一句"先加入家庭"，那是**有用的信息**，照实说给用户听。',
       '如果被问到与下厨、食材、营养无关的事，礼貌地把话题带回来。',
     ].filter(Boolean).join('\n')
 
     /*
      * 消息 → 上游线格式。**带了图的要先把字节取回来**（前端只给 id，字节在私有桶里）。
      *
-     * 图取不回来就抛（见 `AiAttachmentService.loadForModel`）：静默少给模型一张，
-     * 它会拿着剩下的回答一个需要全部图的问题，而用户完全不知道少了哪张。
+     * **"读不到"分两种**（见 `AiAttachmentService.loadForModel` 的 `tolerant`）：
+     * - 用户正要发的这一条（最后一轮）读不到就抛——静默少给一张，模型会拿着剩下的
+     *   回答一个需要全部图的问题，而用户完全不知道少了哪张；
+     * - 对话历史里那几条读不到就跳过，并在文本里标一句"这里原本有图"。
+     *   历史里的图会被清理（每家只留最近 200 张），按前一条办的话这场对话就**永远答不出来**了：
+     *   每一次追问都带着同一个死 id 重发、每次都 403，用户看到的是"会话没返回"。
      */
     const wire: WireMessage[] = []
-    for (const message of messages) {
-      const images = message.attachments?.length
-        ? await this.attachments.loadForModel(context.familyId ?? '__none__', message.attachments)
-        : []
-      wire.push({ role: message.role, content: toModelContent(message.content, images) })
+    for (const [index, message] of messages.entries()) {
+      const isLast = index === messages.length - 1
+      let images: { data: string; mimeType: string }[] = []
+      let text = message.content
+      if (message.attachments?.length) {
+        const loaded = await this.attachments.loadForModel(
+          context.familyId ?? '__none__',
+          message.attachments,
+          { tolerant: !isLast },
+        )
+        images = loaded.images
+        if (loaded.missing.length > 0) {
+          text = [text, `（这条消息里的 ${loaded.missing.length} 张图片已经被清理了，看不到）`].filter(Boolean).join('\n')
+        }
+      }
+      wire.push({ role: message.role, content: toModelContent(text, images) })
     }
     const proposals: MenuProposal[] = []
     const proposed = new Set<string>()
@@ -607,6 +673,231 @@ export class AiService {
          * 校验失败（比如辣度给了 4）要**把服务端那句人话回给模型**，
          * 而不是让它编一句"我记好了"——那会让用户以为写进去了。
          */
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    /*
+     * ---------- 自建菜谱与收藏（F1-11 / F1-12 / F1-09）----------
+     *
+     * 这几条与冰箱四件形状一致：真的写库 → 记一条可撤的记录 → 回执卡。
+     * **权限边界不在这里**：菜谱那条"只能改自家上传的"写在 `RecipeWriteService` 里，
+     * 这里只负责把服务端拒绝的原话回给模型（让它如实转述，而不是自己编一句）。
+     */
+
+    /*
+     * ---------- 采购清单（M7 / F7-01~F7-05，用户 2026-10-14 要求接入）----------
+     *
+     * 接入前模型的原话是「我这边没有『采购单』这个功能，做不了它」——它确实没有。
+     * 现在五件：读清单（F7-02 的"缺什么"）、加自加条目（F7-03）、勾选（F7-03 持久化）、
+     * 删自加条目（F7-03）、一键补货进冰箱（F7-05，写进冰箱那几条按冰箱的 kind 记回执）。
+     *
+     * **清单不是菜单**：菜单是"这一餐吃什么"（`read_menu`），清单是"要去买什么"
+     * （由菜单按配料算出来 + 用户自加的）。提示词里明说这一条，
+     * 否则模型会把"要买的东西"加到菜单里去。
+     */
+    if (call.name === TOOL_READ_SHOPPING) {
+      const days = readNumberArg(call.arguments, 'days')
+      /*
+       * 读清单也会失败（没加入家庭 → 404「先加入家庭，才能和家里一起列采购清单」）。
+       * **失败要变成工具结果，不能抛出去**：抛出去会把整轮问答变成一条 error 事件，
+       * 用户看到的是"AI 开小差了"，而真实原因是**他自己还没建家庭**——
+       * 那句话说给他听才是有用的（模型拿着这条结果会如实转述）。
+       */
+      try {
+        const board = await this.shopping.list(userId, days ?? undefined)
+        return shoppingText({
+          days: board.days,
+          aisles: board.aisles.map((group) => ({
+            aisle: group.aisle,
+            items: group.items.map((item) => ({
+              name: item.name,
+              amount: item.amount,
+              needsBuy: item.needsBuy,
+              extra: item.extra === true,
+            })),
+          })),
+          checkedNames: board.checkedNames,
+          toBuyCount: board.toBuyCount,
+          coveredCount: board.coveredCount,
+          missing: board.missing,
+          meals: board.meals.map((meal) => ({ mealLabel: meal.mealLabel, date: meal.date })),
+        })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_ADD_SHOPPING_ITEMS) {
+      const wanted = readShoppingAdds(call.arguments)
+      if (!wanted) return toolResult({ error: '没解析出要加的东西，请按 items[{name, amount}] 的格式再试一次' })
+      if (wanted.length === 0) return toolResult({ error: 'items 是空的，告诉我要买什么' })
+      try {
+        const result = await this.actions.addShoppingItems(userId, wanted)
+        receipts.push(...result.actions)
+        return toolResult({
+          result: result.summary,
+          hint: '清单更新了，回执卡已经给用户。已经有的那几条会被拒——照实说"还在清单上、不用再加"，不要说"加好了"。',
+        })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_CHECK_SHOPPING_ITEM) {
+      const names = readNameList(call.arguments, 'names', SHOPPING_CHECK_MAX)
+      if (!names || names.length === 0) return toolResult({ error: '没解析出要勾哪几样，请先用 read_shopping_list 拿准确名字' })
+      const checked = readBooleanArg(call.arguments, 'checked', true)
+      try {
+        const result = await this.actions.checkShoppingItems(userId, names, checked)
+        receipts.push(...result.actions)
+        return toolResult({ result: result.summary, hint: '勾的状态已经落库。照实说哪几样勾上了、哪几样清单上没有。' })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_REMOVE_SHOPPING_ITEM) {
+      const name = readStringArg(call.arguments, 'name')
+      if (!name) return toolResult({ error: '没解析出要删哪一样，请先用 read_shopping_list 拿准确名字' })
+      try {
+        const result = await this.actions.removeShoppingItem(userId, name)
+        receipts.push(...result.actions)
+        return toolResult({ result: result.summary, hint: '菜单推出来的条目删不掉——那种情况告诉用户勾掉它就行。' })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_RESTOCK_SHOPPING) {
+      const names = readNameList(call.arguments, 'names', SHOPPING_RESTOCK_MAX)
+      if (!names || names.length === 0) return toolResult({ error: '没解析出要收哪几样，请先用 read_shopping_list 看清单' })
+      try {
+        const result = await this.actions.restockShopping(userId, names)
+        receipts.push(...result.actions)
+        return toolResult({
+          result: result.summary,
+          hint: '这些东西已经**真的进了冰箱**（回执卡上每条都能撤）。'
+            + '没勾的那几样**一样都没动**——不要说你收了，先把它们勾上再说。',
+        })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    /*
+     * ---------- 只读三件（用户 2026-10-14 的"等所有没接入 ai 的功能"）----------
+     *
+     * 这三条**一个字节都不写库**，所以没有回执、也不需要撤销。它们存在的理由是
+     * **答案在服务端手里、不在模型印象里**：
+     * - 「帮我决定」要同时看冰箱里快过期的（F6-05）、谁吃不了什么（F8-03）、
+     *   家里做过几回与几个人收藏（F5-02）——三个判据都在 `DiscoverService.decide` 里，
+     *   与发现页那个按钮**同一个方法**（另算一份必然分叉：界面上给的是 A，AI 说是 B）；
+     * - 「家人最爱」与那一页共用 `familyPicks`（"做过 3 次"那个数字必须同源）；
+     * - 「打卡」的连续天数与全家累计在 `CheckInsService.stats` 里（热力图同一套算法）。
+     *
+     * 失败都变成工具结果、**不往外抛**：这三条在没有家庭时都会 404，
+     * 而"你还没加入家庭"那句话对用户是有用的一条信息——抛出去就只剩"AI 开小差了"。
+     */
+
+    if (call.name === TOOL_WHAT_TO_COOK) {
+      const exclude = readNameList(call.arguments, 'exclude', 30) ?? []
+      try {
+        const result = await this.discover.decide(userId, exclude.join(','))
+        if (!result.recipe) {
+          // 算不出菜时明说原因（库是空的 / 冰箱还没记 / 口味档案排掉了全部），去路完全不同
+          return toolResult({ result: null, reason: result.reason ?? '这会儿算不出一道合适的菜', hint: '照实说原因，并告诉用户下一步该去哪；不要自己编一道菜顶上去。' })
+        }
+        return toolResult({
+          recipe: {
+            id: result.recipe.id,
+            name: result.recipe.name,
+            category: result.recipe.category,
+            cuisine: result.recipe.cuisine,
+            calories: result.recipe.calories,
+            have: result.recipe.have,
+            missing: result.recipe.missing,
+            cooked: result.recipe.cooked,
+            favorites: result.recipe.favorites,
+          },
+          /** 服务端拼好的那句话（为什么是这道）——**照搬它**，别自己另编一个理由 */
+          reason: result.reason,
+          canSwap: result.canSwap,
+          hint: '就报这一道。理由用上面 `reason` 里那句（那是按冰箱、口味、家里习惯算出来的）。'
+            + '用户说"换一道"时，把这次的 id 放进 exclude 再调一次。'
+            + '要说加进菜单就先用 propose_menu_items 提议（那道菜 id 就是这里给的，不必再搜）。',
+        })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_READ_FAMILY_PICKS) {
+      const raw = readNumberArg(call.arguments, 'limit')
+      const limit = raw === null ? 8 : Math.max(1, Math.min(FAVORITES_LIST_MAX, Math.round(raw)))
+      try {
+        const result = await this.discover.familyPicks(userId, limit)
+        if (result.items.length === 0) {
+          return toolResult({
+            result: '（这一家人还没有做过或收藏过任何菜）',
+            hint: '照实说"还没有"，并建议他去做一次或收藏几道——不要拿菜谱库里的菜顶上来充数。',
+          })
+        }
+        return toolResult({
+          picks: result.items.map((item) => ({
+            id: item.id,
+            name: item.name,
+            category: item.category,
+            cooked: item.cooked,
+            favorites: item.favorites,
+            lastCookedOn: item.lastCookedOn,
+          })),
+          total: result.total,
+          hint: '`cooked` 是做过几次、`favorites` 是几个人收藏着。说"你家最爱"时就按这两个数字说，别凭印象。',
+        })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    if (call.name === TOOL_READ_CHECKINS) {
+      const raw = readNumberArg(call.arguments, 'limit')
+      const limit = raw === null ? 8 : Math.max(1, Math.min(CHECKIN_LIST_MAX, Math.round(raw)))
+      const wantStats = readBooleanArg(call.arguments, 'stats', true)
+      try {
+        const wall = await this.checkins.wall(userId, { limit })
+        const stats = wantStats ? await this.checkins.stats(userId) : null
+        /*
+         * 照片地址**不给模型**（`photoUrl` 是签名短链）：它用不上，而一段带签名的
+         * URL 进了对话上下文就跟着会话落盘（localStorage 里那份历史），
+         * 有效期内谁翻到那串字符串都能取到图。模型只需要"谁在什么时候做了什么"。
+         */
+        return toolResult({
+          count: wall.items.length,
+          scope: wall.scope,
+          hasMore: wall.hasMore,
+          entries: wall.items.map((item) => ({
+            nickname: item.nickname,
+            isMe: item.isMe,
+            checkDate: item.checkDate,
+            note: item.note,
+            mealLabel: item.mealLabel,
+            at: item.createdAt,
+          })),
+          stats: stats
+            ? {
+                mineTotal: stats.mineTotal,
+                familyTotal: stats.familyTotal,
+                /** 连续打卡天数：**用热力图里那个数**（`buildHeatmap` 算好的，与"我的"页同一个来源） */
+                myStreak: stats.mine.streak,
+                familyStreak: stats.family.streak,
+                attachableMeals: stats.attachableMeals.slice(0, 5).map((meal) => meal.label),
+              }
+            : undefined,
+          hint: '照着这些数字说：张数、连续天数、谁最近下厨了。'
+            + '用户要传照片得去打卡页（对话里的图片是给 AI 看的，不会进打卡墙）。',
+        })
+      } catch (error) {
         return toolResult({ error: humanError(error) })
       }
     }
@@ -1105,6 +1396,16 @@ function statusLabel(toolName: string): string {
   if (toolName === TOOL_UPDATE_RECIPE) return '正在改这道菜谱…'
   if (toolName === TOOL_DELETE_RECIPE) return '正在删这道菜谱…'
   if (toolName === TOOL_TOGGLE_FAVORITE) return '正在改收藏…'
+  // 采购清单（M7）：口气与别的工具一致——像家里人在做家务，不出现字段名
+  if (toolName === TOOL_READ_SHOPPING) return '正在看要买什么…'
+  if (toolName === TOOL_ADD_SHOPPING_ITEMS) return '正在把这几样加进采购清单…'
+  if (toolName === TOOL_CHECK_SHOPPING_ITEM) return '正在清单上勾一下…'
+  if (toolName === TOOL_REMOVE_SHOPPING_ITEM) return '正在从清单上划掉那一样…'
+  if (toolName === TOOL_RESTOCK_SHOPPING) return '正在把买到的东西收进冰箱…'
+  // 只读三件（用户 2026-10-14）：口气要像家里人在拿主意，不能出现工具名
+  if (toolName === TOOL_WHAT_TO_COOK) return '正在帮你拿个主意…'
+  if (toolName === TOOL_READ_FAMILY_PICKS) return '正在看家里最爱吃哪几道…'
+  if (toolName === TOOL_READ_CHECKINS) return '正在翻打卡墙…'
   return '正在处理…'
 }
 
@@ -1124,6 +1425,25 @@ function readNumberArg(rawArguments: string, key: string): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null
   } catch {
     return null
+  }
+}
+
+/**
+ * 读一个布尔参数。
+ *
+ * 宽容一点（`'true'` / `1` 也算真）：有的网关把 JSON 里的布尔发成字符串，
+ * 而"勾上"与"取消勾"判错的后果正好相反——用户说"买到了"结果清单被取消了勾。
+ * 解析不出来时用调用方给的默认值，不抛。
+ */
+function readBooleanArg(rawArguments: string, key: string, fallback: boolean): boolean {
+  try {
+    const value = (JSON.parse(rawArguments) as Record<string, unknown>)?.[key]
+    if (typeof value === 'boolean') return value
+    if (typeof value === 'string') return value.trim().toLowerCase() !== 'false'
+    if (typeof value === 'number') return value !== 0
+    return fallback
+  } catch {
+    return fallback
   }
 }
 

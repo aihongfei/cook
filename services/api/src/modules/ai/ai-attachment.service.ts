@@ -90,29 +90,51 @@ export class AiAttachmentService {
    * 把一串 id 读成"能发给模型的图"（base64 + 类型），**只认这个家庭的**。
    *
    * 校验在这里做而不是在 rules 里：rules 是纯函数、不碰数据库，而"这个 id 能不能用"
-   * 必须查库。**拿不到的一律抛错而不是静默跳过**——用户发了三张图、只给模型看两张，
-   * 它会拿着两张回答一个需要三张的问题，而用户完全不知道少了哪张。
+   * 必须查库。
+   *
+   * **`tolerant` 决定"读不到"是抛错还是跳过**，这是两件不同的事：
+   * - **用户正要发的这一条**（最后一轮，`tolerant: false`）：拿不到就抛。用户发了三张图、
+   *   只给模型看两张，它会拿着两张回答一个需要三张的问题，而用户完全不知道少了哪张——
+   *   这种情况必须让他重发（前端会显示一句"有一张图片不在了，重新发一次吧"）。
+   * - **对话历史里的那几条**（`tolerant: true`）：拿不到就跳过，并把"这里原本有图"告诉模型。
+   *   历史里的图**会被清理**（`prune` 每个家只留最近 200 张），清理之后如果还按前一条办，
+   *   这场对话就**永远答不出来了**：每一次追问都带着同一个死 id 重发，每次都 403，
+   *   连"重新发一次"都救不回来（那个 id 已经不存在了，重发的是同一串历史）。
+   *   浏览器验收现场就是这么撞上的：一张早先发的图被清理后，此后每一句都失败。
    */
-  async loadForModel(familyId: string, ids: string[]): Promise<{ data: string; mimeType: string }[]> {
-    if (ids.length === 0) return []
+  async loadForModel(
+    familyId: string,
+    ids: string[],
+    options: { tolerant?: boolean } = {},
+  ): Promise<{ images: { data: string; mimeType: string }[]; missing: string[] }> {
+    if (ids.length === 0) return { images: [], missing: [] }
     const rows = await this.prisma.aiAttachment.findMany({
       where: { id: { in: ids }, familyId },
       select: { id: true, imageKey: true, mimeType: true },
     })
     const found = new Map(rows.map((row) => [row.id, row]))
     const missing = ids.filter((id) => !found.has(id))
-    if (missing.length > 0) throw new ForbiddenException('有一张图片不在了，重新发一次吧')
+    if (missing.length > 0 && !options.tolerant) {
+      throw new ForbiddenException('有一张图片不在了，重新发一次吧')
+    }
 
     const client = s3Client(mediaS3Config())
     const bucket = privateBucketName()
-    const out: { data: string; mimeType: string }[] = []
+    const images: { data: string; mimeType: string }[] = []
+    /** 字节还在对象存储里、只是行没了（或反过来）的那些也算"读不到" */
+    const unreadable = [...missing]
     for (const id of ids) {
-      const row = found.get(id)!
+      const row = found.get(id)
+      if (!row) continue
       const image = await getPrivateImage(client, bucket, row.imageKey)
-      if (!image) throw new ForbiddenException('有一张图片不在了，重新发一次吧')
-      out.push({ data: image.body.toString('base64'), mimeType: image.contentType || row.mimeType })
+      if (!image) {
+        if (!options.tolerant) throw new ForbiddenException('有一张图片不在了，重新发一次吧')
+        unreadable.push(id)
+        continue
+      }
+      images.push({ data: image.body.toString('base64'), mimeType: image.contentType || row.mimeType })
     }
-    return out
+    return { images, missing: unreadable }
   }
 
   /**
@@ -124,7 +146,8 @@ export class AiAttachmentService {
    */
   async loadOne(userId: string, id: string): Promise<{ data: string; mimeType: string }> {
     const familyId = await this.familyOf(userId)
-    const [image] = await this.loadForModel(familyId, [id])
+    const { images } = await this.loadForModel(familyId, [id])
+    const [image] = images
     if (!image) throw new NotFoundException('这张图片不在了')
     return image
   }

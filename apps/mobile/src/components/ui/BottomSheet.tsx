@@ -15,6 +15,13 @@ interface BottomSheetProps {
   title?: string
   /** 高度，默认自适应内容 */
   height?: string
+  /**
+   * 内容区（`.sheet__body`）上的附加类名。
+   *
+   * 给**对话型**抽屉用（AI 助手 / 问 AI）：它们要"上面那段对话滚、底部输入行钉住"，
+   * 否则键盘起来时输入框会被裁掉（见 ui.scss 的 `.sheet__body--chat` 与用户 2026-10-14 的反馈）。
+   */
+  bodyClassName?: string
   onClose: () => void
 }
 
@@ -63,7 +70,7 @@ const DRAG_SETTLE_MS = 200
  *    `preventDefault()` 叫不停原生滚动（抽屉会被页面滚动一起带歪）。
  */
 const BottomSheet = forwardRef<BottomSheetHandle, PropsWithChildren<BottomSheetProps>>(
-  function BottomSheet({ visible, title, height, onClose, children }, ref) {
+  function BottomSheet({ visible, title, height, bodyClassName, onClose, children }, ref) {
     const [epoch, setEpoch] = useState(0)
     const [shown, setShown] = useState(false)
     // 记下"这次关闭是我发起的"：调用方自己把 visible 置 false 时不该再回调 onClose（会关两次）
@@ -395,7 +402,7 @@ const BottomSheet = forwardRef<BottomSheetHandle, PropsWithChildren<BottomSheetP
       >
         <div className="sheet__shell" ref={setShell}>
           {title && <div className="sheet__title">{title}</div>}
-          <div className="sheet__body" ref={contentRef}>{children}</div>
+          <div className={['sheet__body', bodyClassName].filter(Boolean).join(' ')} ref={contentRef}>{children}</div>
         </div>
       </Popup>
     )

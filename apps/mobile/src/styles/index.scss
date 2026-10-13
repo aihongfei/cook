@@ -67,6 +67,43 @@ button {
   display: none;
 }
 
+/*
+ * 禁止长按选中文字（用户 2026-10-14：「禁止方向选中」「也要禁止选中文字」）。
+ *
+ * 这是一个 App 而不是网页：手指按住某段文案拖一下，系统会拉起蓝色的选择手柄与
+ * 「复制/搜索」菜单——那是浏览器的行为，在一本菜谱里毫无用处，而且它会**抢走**
+ * 本该属于它的手势（长按卡片、上下划、抽屉下拖都会被打断）。
+ *
+ * 做法是**在根上关掉、只在需要的地方开回来**（比 `*:not(input)` 这种写法稳：
+ * 后者在安卓 WebView 上对 `<input>` 的判定会被 UA 样式绕过去）：
+ * - 输入框与文本域：不能选就没法改里面的字（用户自己写的菜名、备注、数量）；
+ * - `.selectable`：将来真有"要复制的东西"（邀请码、分享文案）时给它加这个类，
+ *   而不是把全站的 `user-select` 又放开。
+ *
+ * `-webkit-user-select` 与标准属性各写一次：安卓 WebView 认前者，
+ * 只写标准属性在真机上会失效（本项目在抽屉拖拽里踩过同一个坑）。
+ */
+html {
+  -webkit-user-select: none;
+  user-select: none;
+  /* 长按弹菜单与"选中文字"是同一类东西：一并关掉 */
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+  /* 输入框里长按要能弹"粘贴"，这里不能关 */
+  -webkit-touch-callout: default;
+}
+
+/* 触屏高亮：默认那层半透明灰蓝与本项目的暖色系不搭，按钮反馈由各自的 :active 负责 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
 :root {
   /* 供组件使用的安全区（刘海屏 / 手势条） */
   --safe-top: env(safe-area-inset-top, 0px);

@@ -3206,3 +3206,132 @@ cd apps/mobile/android && ./gradlew assembleRelease
 2. **验证启动图别用 `adb shell screenrecord`**：模拟器上录出来是**全黑 5 秒**（这段画面录不到）。要用 `adb exec-out screencap -p` 连拍，但要连拍十几帧才抓得到中间那几帧——而且**启动窗口只显示一瞬**，连拍窗口不好对齐。更可靠的是把 `splashBackground` 临时改成 `#FF00FF` 重新出包，一眼就能看出系统到底画了什么（**验证完必须改回来**——本次就是这么确认"米色已经生效、只是中间夹了个白帧"的）。
 3. **`@capacitor/assets` 会顺手改 `AndroidManifest.xml`**：它把 `android:icon`/`roundIcon` 设成 `@mipmap/ic_launcher`（好在这与本项目原值一致），但它是**直接改源文件**的，所以 `git status` 里会多出这个文件的修改，提交时注意别把它当成无关改动。
 4. **png 会带进 ldpi 一整套新目录**：本次新增 `mipmap-ldpi/`（旧版模板没有这档）。不影响运行（`minSdk 24` 的机器几乎不会是 ldpi），但会让 diff 变长。
+
+## R-061 AI 接上采购清单/口味忌口/只读三件 + 对话失败要留在界面上（用户报的四件事，✅ 已验证，2026-10-14）
+
+配套：`DECISIONS.md` **D-070**（为什么这么定）、`RISKS.md` **R-59**（对话历史里的图会被清理这条约束的后果）、脚本 `verify-ai-shopping-http.cjs` / `verify-ai-taste-http.cjs` / `verify-ai-readonly-http.cjs`；上游内容见 R-059（413）与 R-043（AI 全应用 CRUD）。
+
+用户 2026-10-14 报四件事（附 AI 助手截图）：
+
+1. 「还有刚才出现了会话没返回，最后一条显示的是用户的消息」
+2. 「还需要 ai 能够处理采购清单、口味忌口等现在所有没接入 ai 的功能」
+3. 「这个输入框聚焦被裁切了」
+4. 「禁止方向旋转」（先写成「禁止方向选中」）+ 「也要禁止选中文字」
+
+### 一、三个新脚本怎么跑（都要 stub 上游）
+
+```bash
+# ① 起 stub（**它自己不带额度**，本地验收不花用户的钱）
+node services/api/scripts/ai-stub-upstream.cjs 18990 > /tmp/stub.log 2>&1 &
+
+# ② 让容器把 AI 指向 stub，并**重建**（改了 src 就必须 build，不是 restart）
+AI_API_BASE=http://host.docker.internal:18990/v1 AI_API_KEY=stub-key AI_MODEL=stub-model \
+  docker compose build api && \
+AI_API_BASE=http://host.docker.internal:18990/v1 AI_API_KEY=stub-key AI_MODEL=stub-model \
+  docker compose up -d --force-recreate api
+sleep 12 && curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/api/health
+
+# ③ 三条验收
+pnpm --dir services/api run test:http:ai-shopping   # 24/24
+pnpm --dir services/api run test:http:ai-taste      # 15/15
+pnpm --dir services/api run test:http:ai-readonly   # 20/20
+
+# ④ ⚠️ 收工必须复原，并把 stub 停掉（R-042 的教训：容器还指着 stub，
+#    用户点开「问 AI」拿到的永远是那两句写死的台词）
+pkill -f ai-stub-upstream.cjs
+cd /Users/aihf/Downloads/work/cook && docker compose up -d --force-recreate api
+docker exec cook-api-1 printenv AI_API_BASE   # 必须是真网关，不是 18990
+```
+
+### 二、这三组验收在验什么（不是"函数返回了字符串"）
+
+三组都走**真路**：`/ai/chat/stream` + stub 上游——**模型真的决定调工具、服务端真的执行、真的落库**，然后**回查库/接口**确认。
+
+**采购清单 24 条**（`verify-ai-shopping-http.cjs`），核心几条：
+
+| 断言 | 为什么它是关键 |
+|---|---|
+| 读清单**一条回执都没有** | 读不写库；漏了它会把"只问了一句"演成"顺手加了两样" |
+| 一句"清单上加一样垃圾袋"真的进去了 | **这就是用户截图里被拒的那件事** |
+| 再加一样同名的：**被拒且如实说"已经有了"** | 服务端拒了模型不能谎报"加好了" |
+| 被拒那一次**不该给"撤"的卡** | 没发生的事不能给撤销 |
+| "收进冰箱"真的把勾掉的那样写进冰箱 | F7-05；且**没勾的一律没动**（用"冰箱条数 ≤ 勾选条数"卡） |
+| 补货回执按 `fridge.create` 记 | 撤的必须是冰箱那一条，不是另一套口径 |
+| **撤补货：一条一条都对得上**（撤前在那条在、撤后那条没了） | 见下面那条坑 |
+| 撤"加条目"：清单上真的没了 | 回执不只是把按钮变灰 |
+| 菜单推出来的「冰糖」**删不掉**时要说明 | 服务端会拒，模型不许静默失败 |
+| 没家庭的人：接口 404 且 AI 说"先加入家庭" | 那是**有用的信息**，不该变成"AI 开小差了" |
+
+**踩到的坑（写进脚本注释了）**：第一版断言写的是"拿 `checkedNames` 里的第一个名字去看冰箱"——**红的**，但其实产品是对的。回执的顺序与勾选顺序不是一回事（回执按补货结果给），撤掉的是另一样，于是"撤了它怎么还在"。**断言指错了对象**。改成**按回执自己的 `target`（冰箱那条的 id）**逐条核。
+
+**另一个坑**：第一版清单是空的（`toBuyCount=0`），而后面几条"照样过"。原因：清单只算**定了的**那一餐（`PLANNED`/`COOKING`），刚点完的餐是 `PENDING`。前置步骤里补上"把这餐定成已安排"之后才是真的在验。**在空数据上"过"掉的断言等于没验**。
+
+**口味忌口 15 条**（`verify-ai-taste-http.cjs`）：这组是**补欠账**——工具 2026-10-13 就接上了，但 stub 里没有这一支，也就是说本地**从没走过一次**。补上就发现 `invalidateAfterAiWrite` 少了 `'taste'`（AI 写进口味档案后前端缓存不失效，用户看到的还是旧值）。
+
+**只读三件 20 条**（`verify-ai-readonly-http.cjs`）：
+
+| 断言 | 为什么这么写 |
+|---|---|
+| 报的那道菜**在 `/recipes?q=` 里查得到** | 挡住"模型自己编一道菜" |
+| 理由的词句来自 `decideReason` | 挡住"模型自己编一个理由" |
+| **空信号家庭时理由逐字**是「库里挑的，今天换换口味」 | 那个句只出现在服务端代码里——这一条是**确定性**的 |
+| 引用了几道菜 = 1 | "只给一道"是这条出口的全部意思 |
+| 家人最爱的次数/收藏人数与 `/discover/family-picks` 同源 | 同一道菜不能有两个次数 |
+| 打卡连续天数 = `/checkins/stats` 的 `mine.streak` | 不能自己数 |
+| **签名照片地址不出现在回复里** | 那串 URL 进了上下文就跟着会话落盘 |
+| 没家庭的人：三条都说"先加入家庭" | 三件在没有家庭时都会 404，必须变成人话 |
+
+⚠️ **「帮我决定」不能拿第二次调接口的结果去比**：它是**故意随机**的（在前几名里抽一道，见 `PICK_WINDOW`），两次调用本来就该不一样。第一版就是这么写的，红得有道理——**随机的东西不能用"两次相等"来验**，要验的是**出处**（菜名在不在库里、理由是不是服务端那几种措辞）。
+
+### 三、`① 会话没返回` 的第二个真身（浏览器验收才撞到）
+
+带图的对话里，**历史里那张图被清理之后，这场对话永远答不出来**——每次追问都把整场历史连图一起重发，那个死 id 每次都 403，而"重试"救不回来（重发的还是同一串历史）。表现与用户报的第一件事**一模一样**。
+
+修法是按**位置**区分两种"读不到"（`AiAttachmentService.loadForModel` 的 `tolerant`）：
+
+```bash
+# 历史里的死图 → 200 且有正文（跳过它、并告诉模型"这里原本有张图"）
+curl -s -X POST http://127.0.0.1:3000/api/ai/chat/stream -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"messages":[{"role":"user","content":"这张图是什么样的？","attachments":["no-such-image"]},
+       {"role":"assistant","content":"是棋盘格。"},{"role":"user","content":"什么颜色？"}]}' | head -c 200
+# 实测：event: text 正常出现
+
+# 用户正要发的这一条带死图 → 403（**这一条不能松**：静默少给一张，
+# 模型会拿着缺了一张的图回答一个需要全部图的问题，用户完全不知道少了哪张）
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:3000/api/ai/chat/stream \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"messages":[{"role":"user","content":"这张呢？","attachments":["no-such-image"]}]}'
+# 实测：403
+```
+
+同一条已加进 `verify-ai-vision-http.cjs`（第 ④ 组）——**两个方向一起卡住**，只验一边就会把另一边改坏。
+
+### 四、界面三件事（③ 输入框裁切 / ④ 锁竖屏 + 禁止选中）
+
+**输入框裁切**：面板 `max-height: 88vh`，键盘弹出后视口减半、面板变矮，而对话区是写死的 `max-height: 46vh`——对话区 + 输入行 + 底部按钮超出了剩余高度，输入行被挤出底边。改成 flex 列：对话区 `flex: 1 1 auto`（可滚），输入行/待发照片/来源/底部 `flex: 0 0 auto`。
+
+**浏览器验证法**（不用真机也能验，键盘弹出就是"视口变矮"这一件事）：
+
+```js
+// Playwright：把视口从 844 压到 420，量输入行还在不在面板内
+await tab.setViewportSize({ width: 391, height: 420 })
+// 实测：面板 68→400，输入行 310→356 —— 在里面
+```
+
+**锁竖屏**：`apps/mobile/android/app/src/main/AndroidManifest.xml` 的 `<activity>` 加 `android:screenOrientation="portrait"`。网页侧做不到这件事（`screen.orientation.lock()` 要全屏才可用），所以是原生声明。**实测 `npx cap sync android` 不覆盖它**（同步后那行还在）。
+
+**禁止选中**：`index.scss` 里 `html` 关 `user-select` + `-webkit-touch-callout`，`input/textarea/.selectable` 开回来。浏览器实测（在页面里临时插元素量 computed style）：
+
+| 元素 | `user-select` |
+|---|---|
+| `html` / `body` / `<p>` | `none` |
+| `input` / `textarea` / `.selectable` | `text` |
+
+**注意用户的原话**：他先写「禁止方向选中」，我按"禁止选中文字"做了，他澄清是「**禁止方向旋转**」，紧接着又说「**也要禁止选中文字**」——**两样都要**，别只做一半。
+
+### 五、这一轮改到的文件
+
+- **后端**：`ai.tools.ts`（8 个新工具常量 + 声明）、`ai.service.ts`（8 条执行分支 + 提示词三段 + 状态行 + 附件加载的 tolerant）、`ai.module.ts`（引 `DiscoverModule`/`CheckInsModule`/`ShoppingModule`）、`ai-attachment.service.ts`（`loadForModel` 改成返回 `{images, missing}` + `tolerant`）；
+- **前端**：`api/ai.ts`（`invalidateAfterAiWrite` 补 `'taste'`；流式那段的失败处理见 R-059）、`AiAssistantSheet.tsx`（失败留在对话里 + 「再试一次」）、`stores/ai-assistant-session.ts`（`rewindTo`）、`ai-assistant.rules.ts`（`failed`/`aborted` 不算空）、`BottomSheet.tsx`（`bodyClassName`）、`ui.scss`/`discover.scss`/`index.scss`、`AndroidManifest.xml`；
+- **脚本**：`ai-stub-upstream.cjs`（采购/口味/只读三支 + **改成取最后一条 user 消息**）、三个新验收脚本、`verify-ai-vision-http.cjs` 加第 ④ 组。

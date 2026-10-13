@@ -122,6 +122,35 @@ async function main() {
   })
   check('引用一张不存在的图：**明确报错**，不静默当没事', ghost.status >= 400, `status=${ghost.status} body=${JSON.stringify(ghost.body)?.slice(0, 60)}`)
 
+  /*
+   * ---------- ④ 历史里那张图没了（被清理）之后，这场对话还得能接着问 ----------
+   *
+   * 这张图**跟上面那一条走的是同一条代码路径**（都是"这个 id 查不到"），区别只在位置：
+   * 它在**历史**里，不是用户正要发的那一条。这个区别决定了两件完全相反的事：
+   * - 正要发的读不到 → **必须报错**，否则模型拿着缺了一张的图回答问题，
+   *   用户完全不知道少了哪张（上面那条断言）；
+   * - 历史里的读不到 → **必须跳过并继续**。按前一条办的话这场对话就**永远答不出来**了：
+   *   每次追问都带着同一个死 id 重发、每次都失败，而"重发"救不回来
+   *   （重发的还是同一串历史）。浏览器验收现场就是这么撞上的——
+   *   一张早先发的图被 `prune` 清掉之后，此后每一句都失败，用户看到的是"会话没返回"。
+   */
+  const staleHistory = await call('POST', '/ai/chat/stream', {
+    token,
+    body: {
+      messages: [
+        { role: 'user', content: '这张图是什么样的？', attachments: ['no-such-image'] },
+        { role: 'assistant', content: '是一张棋盘格。' },
+        { role: 'user', content: '那它大概是什么颜色？' },
+      ],
+    },
+  })
+  const staleText = String(staleHistory.bytes?.toString('utf8') ?? '')
+  check(
+    '**历史里那张图没了，这场对话仍然答得出来**（否则每一句都失败，还救不回来）',
+    staleHistory.status === 200 && staleText.includes('event: text') && !staleText.includes('"type":"error"'),
+    `status=${staleHistory.status} 有正文=${staleText.includes('event: text')} 有错误事件=${staleText.includes('"type":"error"')}`,
+  )
+
   for (const r of results) console.log(`${r.ok ? '✅' : '❌'} ${r.n}${r.d ? `  — ${r.d}` : ''}`)
   console.log(`\n${results.length - failed}/${results.length} 通过`)
   if (failed) process.exitCode = 1

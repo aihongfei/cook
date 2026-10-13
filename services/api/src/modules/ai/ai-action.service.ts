@@ -5,6 +5,8 @@ import { CombosService } from '../combos/combos.service'
 import { FavoritesService } from '../favorites/favorites.service'
 import { FridgeService } from '../fridge/fridge.service'
 import { OrdersService } from '../orders/orders.service'
+import { ShoppingService } from '../shopping/shopping.service'
+import { checkFresh } from '../shopping/shopping.rules'
 import { TasteService } from '../taste/taste.service'
 import { SPICY_LEVELS } from '../taste/taste.rules'
 import { RecipeWriteService } from '../recipes/recipe-write.service'
@@ -28,6 +30,9 @@ import {
   AI_ACTION_RECIPE_REMOVE,
   AI_ACTION_RECIPE_UPDATE,
   AI_ACTION_TASTE_UPDATE,
+  AI_ACTION_SHOPPING_ADD,
+  AI_ACTION_SHOPPING_CHECK,
+  AI_ACTION_SHOPPING_REMOVE,
   describeFridgeItem,
   menuUndoTarget,
   planUndo,
@@ -37,6 +42,9 @@ import {
   type FridgeSnapshot,
   type MenuOrderSnapshot,
   type RecipeSnapshot,
+  type ShoppingAddUndo,
+  type ShoppingCheckUndo,
+  type ShoppingRemoveUndo,
   type TasteSnapshot,
   type UndoContext,
   type UndoPlan,
@@ -75,6 +83,9 @@ export class AiActionService {
     private readonly orders: OrdersService,
     private readonly taste: TasteService,
     private readonly combos: CombosService,
+    // 采购清单（M7）：勾选/自加条目/补货**都走用户自己那套**——同名只留一条、
+    // "菜单推出来的加不了"这些判定只写在那里，AI 不该复制一份
+    private readonly shopping: ShoppingService,
   ) {}
 
   /** AI 往冰箱里记东西。返回给模型看的短句（成功与失败都要说人话） */
@@ -231,7 +242,7 @@ export class AiActionService {
       return { message: verdict.message, undone: false }
     }
 
-    await this.runPlan(userId, plan as UndoPlan)
+    await this.runPlan(userId, action.familyId, plan as UndoPlan)
     await this.prisma.aiAction.update({ where: { id: action.id }, data: { undoneAt: new Date() } })
     return { message: `已撤销：${action.summary}`, undone: true }
   }
@@ -291,8 +302,7 @@ export class AiActionService {
     if (action.kind === AI_ACTION_MENU_REMOVE || action.kind === AI_ACTION_MEAL_DINERS) {
       return { entity: 'menuOrder', order: await this.menuOrderSnapshot(action.familyId, action.undoData) }
     }
-    if (action.kind === AI_ACTION_TASTE_UPDATE) {
-      // 这份档案一人一条（`userId` 唯一），按**行为人**查——不是按 targetId：
+    if (action.kind === AI_ACTION_TASTE_UPDATE) {      // 这份档案一人一条（`userId` 唯一），按**行为人**查——不是按 targetId：
       // 那个字段存的是 userId，但撤销要认的是"谁的档案"，直接以 actor 为准更不容易错
       const row = await this.prisma.tasteProfile.findUnique({ where: { userId: action.actorId } })
       return {
@@ -321,6 +331,32 @@ export class AiActionService {
         combo: row
           ? { id: row.id, name: row.name, note: row.note, recipeIds: row.items.map((item) => item.recipeId) }
           : null,
+      }
+    }
+    /*
+     * 采购清单三件：一次查清两样（**一次查**而不是分两次：它们是同一时刻的现状，
+     * 分开查可能互相矛盾——并发下"条目还在、勾已经变了"这种组合会让撤销做出错误判断）。
+     * - 那个自加条目还在不在（撤「加」要删它、撤「删」要重建它，判法相反）；
+     * - 这个名字现在勾着没有（撤「勾」要判用户有没有自己又点过）。
+     */
+    if (action.kind.startsWith('shopping.')) {
+      const name = shoppingTargetName(action.undoData)
+      const extra = name
+        ? await this.prisma.shoppingExtra.findUnique({
+          where: { familyId_name: { familyId: action.familyId, name } },
+          select: { id: true, name: true, amount: true },
+        })
+        : null
+      const checkedRow = name
+        ? await this.prisma.shoppingCheck.findUnique({
+          where: { familyId_name: { familyId: action.familyId, name } },
+          select: { id: true, checkedAt: true },
+        })
+        : null
+      return {
+        entity: 'shopping',
+        // 过期（7 天）的勾不算勾着——与 `shopping.list` 里 `checkFresh` 同一判据
+        board: { extra, checked: checkedRow ? checkFresh(checkedRow.checkedAt) : false },
       }
     }
     return { entity: 'fridge', item: await this.currentSnapshot(action.targetId) }
@@ -537,8 +573,196 @@ export class AiActionService {
     }
   }
 
-  async toggleFavorite(userId: string, recipeId: string): Promise<{ summary: string; actions: AiReceipt[]; favorited: boolean }> {
-    const { familyId } = await this.requireMember(userId, '先加入家庭，才能收藏')
+  /*
+   * ---------- 采购清单（M7 / F7-01~F7-05，用户 2026-10-14 要求接入）----------
+   *
+   * 三件都走**用户自己那套 `ShoppingService`**（与冰箱/菜单同一条规矩）：
+   * 家庭归属、名字长度上限、同名只留一条、"菜单推出来的条目加不了"这些判定
+   * 只写在那个服务里，AI 不该绕开，也不该复制一份。
+   *
+   * 补货（F7-05）也是：它写进冰箱的每一条都走 `restock`，而回执按**冰箱那条 kind** 记
+   * （`addFridgeItems`）——这样"AI 补的货"与"AI 记的货"在撤销上完全是同一件事，
+   * 不需要第二套口径。这里只负责调用与转述。
+   */
+
+  /** AI 往采购清单上加几样（走用户自己那条 `addExtra`：同名会被它拒掉） */
+  async addShoppingItems(userId: string, items: { name: string; amount?: string }[]): Promise<{ summary: string; actions: AiReceipt[] }> {
+    const { familyId } = await this.requireMember(userId, '先加入家庭，才能和家里一起列采购清单')
+    const done: AiReceipt[] = []
+    const failed: string[] = []
+
+    for (const item of items) {
+      try {
+        await this.shopping.addExtra(userId, { name: item.name, amount: item.amount })
+        const row = await this.prisma.shoppingExtra.findUnique({
+          where: { familyId_name: { familyId, name: item.name } },
+        })
+        if (!row) continue
+        const summary = row.amount ? `买：${row.name}（${row.amount}）` : `买：${row.name}`
+        const action = await this.prisma.aiAction.create({
+          data: {
+            familyId,
+            actorId: userId,
+            kind: AI_ACTION_SHOPPING_ADD,
+            summary,
+            undoData: { extraId: row.id, name: row.name } as unknown as Prisma.InputJsonValue,
+            targetId: row.id,
+          },
+        })
+        done.push({ id: action.id, kind: action.kind, summary, label: undoLabel(action.kind), target: row.id })
+      } catch (error) {
+        // 一样失败不该带走整批（与"记冰箱"同一个取舍）；话术由那条服务给（"已经有一条了"）
+        failed.push(`${item.name}：${humanError(error)}`)
+      }
+    }
+
+    const lines = [
+      done.length ? `已加进采购清单：${done.map((item) => item.summary.replace(/^买：/, '')).join('、')}` : '',
+      failed.length ? `没加成：${failed.join('；')}` : '',
+    ].filter(Boolean)
+    return { summary: lines.join('\n') || '（没有要加的东西）', actions: done }
+  }
+
+  /**
+   * AI 勾掉 / 取消勾掉清单上的某几样。
+   *
+   * 记 `before` 与 `after` 两个状态（见 `ShoppingCheckUndo`）：撤销要回到**原来那个状态**，
+   * 而不是"一律取消勾"。名字必须在清单上真实存在——清单是算出来的，
+   * 凭记忆勾一个不存在的名字会凭空造出一条 7 天有效的勾（它还会一直躺在库里）。
+   */
+  async checkShoppingItems(
+    userId: string,
+    names: string[],
+    checked: boolean,
+  ): Promise<{ summary: string; actions: AiReceipt[] }> {
+    const { familyId } = await this.requireMember(userId, '先加入家庭，才能动采购清单')
+    const board = await this.shopping.list(userId)
+    const known = new Set(board.items.map((item) => item.name))
+    const done: AiReceipt[] = []
+    const unknown: string[] = []
+
+    for (const name of names) {
+      if (!known.has(name)) {
+        unknown.push(name)
+        continue
+      }
+      const before = board.checkedNames.includes(name)
+      // 已经是目标状态就不写：白记一笔动作，回执上还会多一条根本没发生的"已勾掉"
+      if (before === checked) {
+        done.push({ id: '', kind: AI_ACTION_SHOPPING_CHECK, summary: `${name}（${checked ? '本来就勾着' : '本来就没勾'}）`, label: '', target: name })
+        continue
+      }
+      await this.shopping.check(userId, name, checked)
+      const summary = checked ? `买到了：${name}` : `又不买了：${name}`
+      const action = await this.prisma.aiAction.create({
+        data: {
+          familyId,
+          actorId: userId,
+          kind: AI_ACTION_SHOPPING_CHECK,
+          summary,
+          undoData: { name, before, after: checked } as unknown as Prisma.InputJsonValue,
+          targetId: name,
+        },
+      })
+      done.push({ id: action.id, kind: action.kind, summary, label: undoLabel(action.kind), target: name })
+    }
+
+    const lines = [
+      done.length ? `已更新：${done.map((item) => item.summary).join('、')}` : '',
+      unknown.length ? `清单上没有这几样，先用 read_shopping_list 看清名字：${unknown.join('、')}` : '',
+    ].filter(Boolean)
+    return { summary: lines.join('\n') || '（没有要改的）', actions: done.filter((item) => item.id) }
+  }
+
+  /** AI 删掉清单上的一条**自加**条目（菜单推出来的那种删不掉，那条服务会拒） */
+  async removeShoppingItem(userId: string, name: string): Promise<{ summary: string; actions: AiReceipt[] }> {
+    const { familyId } = await this.requireMember(userId, '先加入家庭，才能动采购清单')
+    const row = await this.prisma.shoppingExtra.findUnique({
+      where: { familyId_name: { familyId, name } },
+    })
+    if (!row) {
+      return { summary: `清单上没有「${name}」这条自加的条目（菜单推出来的那些删不掉，勾掉就行）`, actions: [] }
+    }
+
+    await this.shopping.removeExtra(userId, row.id)
+    const summary = `从清单去掉：${row.name}`
+    const action = await this.prisma.aiAction.create({
+      data: {
+        familyId,
+        actorId: userId,
+        kind: AI_ACTION_SHOPPING_REMOVE,
+        summary,
+        undoData: {
+          extra: { name: row.name, amount: row.amount, familyId: row.familyId, addedById: row.addedById },
+        } as unknown as Prisma.InputJsonValue,
+        targetId: row.id,
+      },
+    })
+    return {
+      summary: `已去掉：${summary}`,
+      actions: [{ id: action.id, kind: action.kind, summary, label: undoLabel(action.kind), target: row.id }],
+    }
+  }
+
+  /**
+   * 一键补货：把已勾掉的几样写进冰箱（F7-05）。
+   *
+   * **回执按冰箱那条 kind 记**（每条一笔 `fridge.create`，与"记一下冰箱里有酸奶"
+   * 完全同档）：用户撤的时候撤的就是冰箱里那一条，不必理解"这是补货来的"。
+   *
+   * 服务端**自己再核一遍"这条真的勾着"**（不只看模型说什么）：补货的前提是"买到了"，
+   * 而"买没买到"只有那个勾知道。模型说"都买回来了"就照做，会把没买的东西记进冰箱——
+   * 下次比对就会得出"家里够做两道菜"的假结论。
+   */
+  async restockShopping(userId: string, names: string[]): Promise<{ summary: string; actions: AiReceipt[] }> {
+    await this.requireMember(userId, '先加入家庭，才能把买到的东西收进冰箱')
+    const board = await this.shopping.list(userId)
+    const toFill = names.filter((name) => board.checkedNames.includes(name))
+    const notChecked = names.filter((name) => !board.checkedNames.includes(name))
+
+    if (toFill.length === 0) {
+      return {
+        summary: notChecked.length
+          ? `这几样还没勾（没勾表示还没买到）：${notChecked.join('、')}——先勾上再补货，或者告诉我它们已经买到了`
+          : '没有要补的东西',
+        actions: [],
+      }
+    }
+
+    const result = await this.shopping.restock(userId, toFill)
+    const summary = [
+      result.added.length ? `已收进冰箱：${result.added.map((item) => `${item.name}（${item.zone}）`).join('、')}` : '',
+      result.skipped.length ? `跳过了：${result.skipped.map((item) => `${item.name}（${item.why}）`).join('、')}` : '',
+      notChecked.length ? `这几样还没勾、没动：${notChecked.join('、')}` : '',
+    ].filter(Boolean).join('\n')
+
+    // 回执逐条按冰箱那笔记（撤的也是冰箱那一条）。**补货已写库**，这里只是补上撤销记录
+    const { familyId } = await this.requireMember(userId)
+    const actions: AiReceipt[] = []
+    for (const item of result.added) {
+      const action = await this.prisma.aiAction.create({
+        data: {
+          familyId,
+          actorId: userId,
+          kind: AI_ACTION_FRIDGE_CREATE,
+          summary: describeFridgeItem({ name: item.name, amount: item.amount, zone: item.zone }),
+          undoData: { itemId: item.id },
+          targetId: item.id,
+        },
+      })
+      actions.push({
+        id: action.id,
+        kind: action.kind,
+        summary: action.summary,
+        label: undoLabel(action.kind),
+        target: item.id,
+      })
+    }
+
+    return { summary, actions }
+  }
+
+  async toggleFavorite(userId: string, recipeId: string): Promise<{ summary: string; actions: AiReceipt[]; favorited: boolean }> {    const { familyId } = await this.requireMember(userId, '先加入家庭，才能收藏')
     /*
      * 先查当前状态：`toggle` 是"反一下"，而撤销要知道"反之前是什么"。
      * 查完再 toggle 之间理论上可能被用户自己点一下（双端并发），那种情况下
@@ -993,7 +1217,14 @@ export class AiActionService {
 
   // ---------- 内部 ----------
 
-  private async runPlan(userId: string, plan: UndoPlan) {
+  /**
+   * 执行撤销计划。
+   *
+   * `familyId` 由调用方从**那条动作记录**取（不是"调用者现在属于哪个家"）：
+   * 用户换了家庭之后撤销，要动的是**当初那个家**的东西——
+   * 按当前家庭去查会找不到，或者更糟，动到新家里同名的那一条。
+   */
+  private async runPlan(userId: string, familyId: string, plan: UndoPlan) {
     if (plan.op === 'delete') {
       await this.fridge.remove(userId, plan.itemId)
       return
@@ -1076,6 +1307,42 @@ export class AiActionService {
       return
     }
     /*
+     * 采购清单三件（走用户自己那套 `ShoppingService`——与"AI 直接写库"同一条规矩：
+     * 唯一约束、名字长度、"菜单推出来的加不了"都在那里，绕过它就会插进一条不合规的数据）。
+     *
+     * ⚠️ 勾选那条**不能走 `shopping.check`**：那个方法的入参是"checked 是什么"，
+     * 而这里要的是"设成 `plan.checked`"——语义一样，但它还会顺手返回整张清单
+     * （撤销这条路不需要）。直接用同一条 Prisma 写入（upsert / deleteMany），
+     * 判据与它逐字一致（`checked` 为真就 upsert 并刷新时间戳，为假就删）。
+     */
+    if (plan.op === 'deleteShoppingExtra') {
+      await this.prisma.shoppingExtra.deleteMany({ where: { id: plan.extraId } })
+      return
+    }
+    if (plan.op === 'setShoppingCheck') {
+      if (plan.checked) {
+        await this.prisma.shoppingCheck.upsert({
+          where: { familyId_name: { familyId, name: plan.name } },
+          create: { familyId, name: plan.name, checkedById: userId },
+          update: { checkedById: userId, checkedAt: new Date() },
+        })
+      } else {
+        await this.prisma.shoppingCheck.deleteMany({ where: { familyId, name: plan.name } })
+      }
+      return
+    }
+    if (plan.op === 'restoreShoppingExtra') {
+      await this.prisma.shoppingExtra.create({
+        data: {
+          name: plan.extra.name,
+          amount: plan.extra.amount,
+          // **归原来那个家、原来那个人**（见 ShoppingRemoveUndo 的说明）
+          familyId: plan.extra.familyId,
+          addedById: plan.extra.addedById,
+        },
+      })
+      return
+    }    /*
      * 撤"删除"（冰箱）：照原样重建。走 `fridge.add` 而不是 `prisma.create`——
      * 唯一约束（同名同区只一条）与各种校验都在那条路上，绕过它就可能插进一条
      * 与现有记录冲突的、或者校验不通过的数据。
@@ -1218,6 +1485,20 @@ function favoriteRecipeId(raw: unknown): string | null {
   if (raw === null || typeof raw !== 'object') return null
   const value = (raw as { recipeId?: unknown }).recipeId
   return typeof value === 'string' && value ? value : null
+}
+
+/**
+ * 从清单那三笔的 undoData 里取"动的是哪一样"。
+ *
+ * 三种记录的形状不同（加/勾存 `name`，删存 `extra.name`），但**要找的都是名字**：
+ * 撤销判定问的是"这个名字现在是什么状态"。抽出来是为了让三处读法一致——
+ * 一处读错就是"撤的时候动了另一个名字的东西"。
+ */
+function shoppingTargetName(raw: unknown): string | null {
+  if (raw === null || typeof raw !== 'object') return null
+  const body = raw as { name?: unknown; extra?: { name?: unknown } }
+  const value = typeof body.name === 'string' ? body.name : body.extra?.name
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 /**

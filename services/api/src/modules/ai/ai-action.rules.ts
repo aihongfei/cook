@@ -56,6 +56,24 @@ export const AI_ACTION_COMBO_REMOVE = 'combo.remove'
  */
 export const AI_ACTION_TASTE_UPDATE = 'taste.update'
 
+/**
+ * 采购清单（M7 / F7-01~F7-05，用户 2026-10-14：「还需要 ai 能够处理采购清单…等
+ * 现在所有没接入 ai 的功能」——此前模型只能回"我这边没有『采购单』这个功能"）。
+ *
+ * 三件都**可撤**，但它们撤销的形态与前几档不同，各自记法都不同：
+ * - 加条目：撤 = 删掉那一条（要记住 extraId 与名字）；
+ * - 勾选：撤 = 把勾恢复成原来的状态（**可能要新建、也可能要删掉**——
+ *   `before` 记的就是"原来勾着没有"）；
+ * - 删除条目：撤 = 照原样重建（带 familyId/addedById）。
+ *
+ * **补货进冰箱不是单独的 kind**：它写进冰箱的每一条都按 `fridge.create` 记，
+ * 与手记一条完全同档（撤的也是冰箱那一条）。这样"AI 补的货"与"AI 记的货"
+ * 在撤销这件事上没有两套口径。
+ */
+export const AI_ACTION_SHOPPING_ADD = 'shopping.add'
+export const AI_ACTION_SHOPPING_CHECK = 'shopping.check'
+export const AI_ACTION_SHOPPING_REMOVE = 'shopping.remove'
+
 export type AiActionKind =
   | typeof AI_ACTION_FRIDGE_CREATE
   | typeof AI_ACTION_FRIDGE_UPDATE
@@ -73,6 +91,9 @@ export type AiActionKind =
   | typeof AI_ACTION_COMBO_UPDATE
   | typeof AI_ACTION_COMBO_REMOVE
   | typeof AI_ACTION_TASTE_UPDATE
+  | typeof AI_ACTION_SHOPPING_ADD
+  | typeof AI_ACTION_SHOPPING_CHECK
+  | typeof AI_ACTION_SHOPPING_REMOVE
 
 /**
  * 存进 `undoData` 的形状（按 kind 区分）。
@@ -356,6 +377,50 @@ export interface ComboSnapshot {
   recipeIds: string[]
 }
 
+// ---------- 采购清单（M7 / F7-01~F7-05）----------
+
+/** 撤「往清单上加一样」= 删掉它 */
+export interface ShoppingAddUndo {
+  extraId: string
+  name: string
+}
+
+/**
+ * 撤「勾选」= 把勾恢复成**原来那个状态**。
+ *
+ * 为什么记 `before`、而不是"一律取消勾"：AI 也可能被要求**取消**勾选，
+ * 而"取消"的撤销是**勾回去**。一律按"取消"撤会把用户原来勾好的东西抹掉。
+ */
+export interface ShoppingCheckUndo {
+  name: string
+  /** 这条原来勾着没有 */
+  before: boolean
+  /** AI 改成什么——用来核对"用户在这之后有没有自己又点过一下" */
+  after: boolean
+}
+
+/** 撤「删掉一条自加条目」= 照原样重建（带 familyId / addedById） */
+export interface ShoppingRemoveUndo {
+  extra: {
+    name: string
+    amount: string | null
+    /**
+     * 原属哪个家。**必须带上**：重建时若去查"调用者现在属于哪个家"，
+     * 用户换了家庭之后撤销会把一条旧家的东西搬进新家（与菜谱/组合的 restore 同一条说明）。
+     */
+    familyId: string
+    addedById: string
+  }
+}
+
+/** 清单那三笔撤销时要看的现状 */
+export interface ShoppingSnapshot {
+  /** 那个自加条目还在不在（撤「加」要删它、撤「删」要重建它——判法相反） */
+  extra: { id: string; name: string; amount: string | null } | null
+  /** 这个名字现在勾着没有 */
+  checked: boolean
+}
+
 /**
  * 撤销时的"现状"。**按动作指向的实体分类**（F1-12 与"全应用 CRUD"之后不止冰箱了）。
  *
@@ -374,6 +439,8 @@ export type UndoContext =
   | { entity: 'menuOrder'; order: MenuOrderSnapshot }
   /** 一个组合（`null` = 已经不在了） */
   | { entity: 'combo'; combo: ComboSnapshot | null }
+  /** 采购清单上的那一条（`null` = 已经不在了） */
+  | { entity: 'shopping'; board: ShoppingSnapshot }
   /**
    * 一份口味档案（`null` = 不在了）。
    *
@@ -428,6 +495,12 @@ export type UndoPlan =
   | { op: 'restoreCombo'; combo: ComboRemoveUndo['combo'] }
   /** 把口味档案里 AI 动过的那几项写回原值（撤"改口味"） */
   | { op: 'updateTaste'; userId: string; patch: Record<string, unknown> }
+  /** 删掉清单上那条自加条目（撤"往清单上加"） */
+  | { op: 'deleteShoppingExtra'; extraId: string }
+  /** 把清单上某一样的勾设成指定状态（撤"勾选/取消勾选"） */
+  | { op: 'setShoppingCheck'; name: string; checked: boolean }
+  /** 按原样重建一条清单条目（撤"删掉清单上那一条"） */
+  | { op: 'restoreShoppingExtra'; extra: ShoppingRemoveUndo['extra'] }
 
 /**
  * 这一步的判断顺序是刻意的，**先判"能不能撤"再判"该撤什么"**：
@@ -703,6 +776,41 @@ export function planUndo(record: AiActionRecord, context: UndoContext): { plan?:
     return { plan: { op: 'updateTaste', userId: undo.userId, patch: undo.before }, verdict: { type: 'ok' } }
   }
 
+  // ---------- 采购清单三件（M7）----------
+
+  if (record.kind === AI_ACTION_SHOPPING_ADD) {
+    const undo = readUndo<ShoppingAddUndo>(record.undoData, ['extraId', 'name'])
+    if (!undo) return { verdict: { type: 'refused', reason: '这笔记录的格式不认识，撤不了' } }
+    if (context.entity !== 'shopping') return { verdict: { type: 'refused', reason: '这笔记录的格式不认识，撤不了' } }
+    // 那条已经不在了 = 用户自己删过，结果已经达成
+    if (!context.board.extra) return { verdict: { type: 'already', message: `「${undo.name}」已经不在清单上了` } }
+    return { plan: { op: 'deleteShoppingExtra', extraId: undo.extraId }, verdict: { type: 'ok' } }
+  }
+
+  if (record.kind === AI_ACTION_SHOPPING_CHECK) {
+    const undo = readUndo<ShoppingCheckUndo>(record.undoData, ['name', 'before', 'after'])
+    if (!undo) return { verdict: { type: 'refused', reason: '这笔记录的格式不认识，撤不了' } }
+    if (context.entity !== 'shopping') return { verdict: { type: 'refused', reason: '这笔记录的格式不认识，撤不了' } }
+    /*
+     * 用户在这之后自己又点过一下（现在的勾 != AI 写下去的那个）：**不动**。
+     * 撤回去会把他的这一下反掉——而"我在超市又确认了一遍"是最常见的事。
+     * 这条与冰箱那条"你自己改过了"是同一个规矩，只是判据从字段变成了布尔。
+     */
+    if (context.board.checked !== undo.after) {
+      return { verdict: { type: 'already', message: `「${undo.name}」的勾你自己又动过，按你现在的来` } }
+    }
+    return { plan: { op: 'setShoppingCheck', name: undo.name, checked: undo.before }, verdict: { type: 'ok' } }
+  }
+
+  if (record.kind === AI_ACTION_SHOPPING_REMOVE) {
+    const undo = readUndo<ShoppingRemoveUndo>(record.undoData, ['extra'])
+    if (!undo) return { verdict: { type: 'refused', reason: '这笔记录的格式不认识，撤不了' } }
+    if (context.entity !== 'shopping') return { verdict: { type: 'refused', reason: '这笔记录的格式不认识，撤不了' } }
+    // 撤"删除" = 重建。它还在（用户自己又加了一条同名的）就不动——硬重建会撞唯一约束
+    if (context.board.extra) return { verdict: { type: 'already', message: `「${undo.extra.name}」还在清单上` } }
+    return { plan: { op: 'restoreShoppingExtra', extra: undo.extra }, verdict: { type: 'ok' } }
+  }
+
   return { verdict: { type: 'refused', reason: '这笔操作不支持撤销' } }
 }
 
@@ -838,6 +946,10 @@ export function undoLabel(kind: string): string {
   if (kind === AI_ACTION_FAVORITE_ON || kind === AI_ACTION_FAVORITE_OFF) return '收回去'
   // 菜单与组合沿用同一套（加菜撤掉、撤菜放回去、改组合/改人数改回去、删组合放回去）
   if (kind === AI_ACTION_TASTE_UPDATE) return '改回去'
+  // 采购清单三件（加条目撤掉、勾按回去、删条目放回去——说法与冰箱那三件一致）
+  if (kind === AI_ACTION_SHOPPING_ADD) return '撤掉'
+  if (kind === AI_ACTION_SHOPPING_CHECK) return '按回去'
+  if (kind === AI_ACTION_SHOPPING_REMOVE) return '放回去'
   if (kind === AI_ACTION_MENU_ADD) return '撤掉'
   if (kind === AI_ACTION_MENU_REMOVE) return '放回去'
   if (kind === AI_ACTION_MEAL_DINERS) return '改回去'

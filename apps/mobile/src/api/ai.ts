@@ -65,6 +65,25 @@ export interface ChatTurn {
    * （「历史会话图片也得展示，不能丢失」）。
    */
   attachments?: string[]
+  /**
+   * 这一轮**没能答上来**（内容 = 失败原因）。
+   *
+   * 用户 2026-10-14：「还有刚才出现了会话没返回，最后一条显示的是用户的消息」——
+   * 原来失败时只弹一条 3.6 秒的 toast、然后把那格空气泡**删掉**，于是对话里
+   * 只剩用户自己那句话，看起来像"问了没人应"，刷新之后连痕迹都没有。
+   *
+   * 现在失败**留在对话里**（服务端真正说了什么、或超时/断线），并带一个「再试一次」。
+   * 有它就不是"还没长出字的空格"：落盘时保留（见 `pruneTurns`），也**不会**被当成
+   * 历史发给模型（`wireMessages` 只过滤空内容，它正好没有内容）。
+   */
+  failed?: string
+  /**
+   * 这一轮是**用户自己收起抽屉**中断的。
+   *
+   * 与 `failed` 分开：那不是失败，不该红着脸提示（用户就是不想等了）。
+   * 但也要留个记号，否则历史里那一轮同样会变成"用户自言自语"。
+   */
+  aborted?: boolean
 }
 
 /**
@@ -250,70 +269,142 @@ export async function streamAiChat(
   },
 ): Promise<void> {
   const token = useAuth.getState().token
-  const response = await fetch(`${API_BASE}/ai/chat/stream`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ messages }),
-    signal: handlers.signal,
-  })
+  /*
+   * 自己有控制器：**只有两条路能叫停这次请求**——调用方传进来的 signal（用户关掉抽屉），
+   * 以及下面的"哑火看门狗"。都在这里汇进 `controller`，不直接动调用方那个
+   * （不然看门狗一停，调用方看到的就是"signal.aborted"，会被当成"用户自己取消"而静默收场，
+   * 用户等了两分钟却什么提示都没有——那正是要修的毛病）。
+   */
+  const controller = new AbortController()
+  const forwardAbort = () => controller.abort()
+  handlers.signal?.addEventListener('abort', forwardAbort, { once: true })
+  if (handlers.signal?.aborted) controller.abort()
 
-  // 出错时后端还没写响应头，所以这里能拿到真正的状态码与话术
-  if (!response.ok) {
-    let message = 'AI 服务开小差了，过会儿再试'
-    try {
-      const payload = (await response.json()) as { message?: string | string[] }
-      const raw = payload.message
-      message = Array.isArray(raw) ? String(raw[0] ?? '') || message : raw || message
-    } catch {
-      // 保持兜底话术
-    }
-    throw new StreamError(message, response.status)
+  let stalled = false
+  let idleTimer: number | undefined
+  const armIdle = () => {
+    if (idleTimer !== undefined) window.clearTimeout(idleTimer)
+    idleTimer = window.setTimeout(() => {
+      // 移动网络下半死的连接不会报错、也不会 EOF：只能自己定个"多久没动静就不等了"
+      stalled = true
+      controller.abort()
+    }, STREAM_IDLE_MS)
   }
 
-  if (!response.body) throw new StreamError('这次没收到 AI 的回答，再试一次', 502)
+  try {
+    /*
+     * 看门狗从**发请求之前**就装上：服务器是"等到第一段才写响应头"的
+     * （见 ai.controller：先 `await stream.next()` 才能把 400/503 当状态码报出来），
+     * 所以"连响应头都不来"也是一种哑火，得一起管。
+     */
+    armIdle()
+    const response = await fetch(`${API_BASE}/ai/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ messages }),
+      signal: controller.signal,
+    }).catch((error: unknown) => {
+      if (stalled) throw new StreamError(idleMessage(), 504)
+      throw error
+    })
 
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    // SSE 以空行分隔事件；最后一段可能被切断，留在 buffer 里等下一块
-    const events = buffer.split(/\n\n/)
-    buffer = events.pop() ?? ''
-    for (const event of events) {
-      for (const line of event.split('\n')) {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith('data:')) continue
-        const data = trimmed.slice(5).trim()
-        if (!data) continue
-        if (data === '[DONE]') return
-        try {
-          const payload = JSON.parse(data) as {
-            type?: string; text?: string; label?: string
-            items?: MenuProposal[] | AiReceipt[]; error?: string
+    // 出错时后端还没写响应头，所以这里能拿到真正的状态码与话术
+    if (!response.ok) {
+      let message = 'AI 服务开小差了，过会儿再试'
+      try {
+        const payload = (await response.json()) as { message?: string | string[] }
+        const raw = payload.message
+        message = Array.isArray(raw) ? String(raw[0] ?? '') || message : raw || message
+      } catch {
+        // 保持兜底话术
+      }
+      throw new StreamError(message, response.status)
+    }
+
+    if (!response.body) throw new StreamError('这次没收到 AI 的回答，再试一次', 502)
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    for (;;) {
+      let result: ReadableStreamReadResult<Uint8Array>
+      try {
+        result = await reader.read()
+      } catch (error) {
+        if (stalled) throw new StreamError(idleMessage(), 504)
+        throw error
+      }
+      if (result.done) break
+      // 有字节就是"还活着"：看门狗重新计时（它管的是"多久没动静"，不是总时长）
+      armIdle()
+      buffer += decoder.decode(result.value, { stream: true })
+      // SSE 以空行分隔事件；最后一段可能被切断，留在 buffer 里等下一块
+      const events = buffer.split(/\n\n/)
+      buffer = events.pop() ?? ''
+      for (const event of events) {
+        for (const line of event.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const data = trimmed.slice(5).trim()
+          if (!data) continue
+          // 服务端成功收尾一定会写它（见 ai.controller）——见到就是**成功的唯一凭据**
+          if (data === '[DONE]') return
+          try {
+            const payload = JSON.parse(data) as {
+              type?: string; text?: string; label?: string
+              items?: MenuProposal[] | AiReceipt[]; error?: string
+            }
+            // 头已经发出去了，中途失败是以 error 事件回来的（见后端 chatStream）
+            if (payload.error) throw new StreamError(payload.error, 502)
+            // 按 type 分派而不是"猜有哪些字段"：四种事件共用一套解析（见具名事件的说明）
+            if (payload.type === 'status' && payload.label) handlers.onStatus?.(payload.label)
+            else if (payload.type === 'proposals' && Array.isArray(payload.items)) {
+              handlers.onProposals?.(payload.items as MenuProposal[])
+            } else if (payload.type === 'receipts' && Array.isArray(payload.items)) {
+              handlers.onReceipts?.(payload.items as AiReceipt[])
+            } else if (payload.text) handlers.onChunk(payload.text)
+          } catch (error) {
+            if (error instanceof StreamError) throw error
+            // 半截 JSON：跳过（下一块会补全成新的一段）
           }
-          // 头已经发出去了，中途失败是以 error 事件回来的（见后端 chatStream）
-          if (payload.error) throw new StreamError(payload.error, 502)
-          // 按 type 分派而不是"猜有哪些字段"：四种事件共用一套解析（见具名事件的说明）
-          if (payload.type === 'status' && payload.label) handlers.onStatus?.(payload.label)
-          else if (payload.type === 'proposals' && Array.isArray(payload.items)) {
-            handlers.onProposals?.(payload.items as MenuProposal[])
-          } else if (payload.type === 'receipts' && Array.isArray(payload.items)) {
-            handlers.onReceipts?.(payload.items as AiReceipt[])
-          } else if (payload.text) handlers.onChunk(payload.text)
-        } catch (error) {
-          if (error instanceof StreamError) throw error
-          // 半截 JSON：跳过（下一块会补全成新的一段）
         }
       }
     }
+
+    /*
+     * 走到这里说明流结束了而**没有** `[DONE]`——连接是断的，不是"回答说完了"。
+     *
+     * 这正是用户 2026-10-14 报的「会话没返回 / 最后一条只剩用户那句」的真身：
+     * 原来这里直接当成功返回，半截回答被当作完整回答落下（甚至连一个字都没收到
+     * 也算"成功"），于是界面上只剩用户自己那句话，刷新后连痕迹都没有、也不报错。
+     */
+    throw new StreamError(stalled ? idleMessage() : '这次回答没说完就断了，再问一次试试', 504)
+  } finally {
+    if (idleTimer !== undefined) window.clearTimeout(idleTimer)
+    handlers.signal?.removeEventListener('abort', forwardAbort)
   }
 }
+
+/** 哑火时给用户的那句（说清"等了多久"与"下一步"，而不是一句笼统的失败） */
+function idleMessage(): string {
+  return `AI 有一阵子没动静了（${Math.round(STREAM_IDLE_MS / 1000)} 秒没有回应），先不等了——过会儿再问一次`
+}
+
+/**
+ * "哑火"判据：这么久**一个字节都没来**就不等了。
+ *
+ * 为什么不设一个总时长上限：一次带工具轮次的问答本来就可能跑一两分钟（服务端每轮 90 秒），
+ * 按总时长掐会把"正常但慢"误杀。**按"多久没动静"**判才对准真实故障——
+ * 连接半死（移动网络最常见）、上游卡住、服务端进程没了，都是"没有任何字节"。
+ *
+ * 取 75 秒而不是更短：模型在工具轮次之间思考几十秒是正常的，而服务端自己的
+ * 上游超时是 90 秒；这条线要在那之前一点，才能给用户一句**说人话**的理由
+ * （"没动静"），而不是等满 90 秒再看一句笼统的上游超时。
+ */
+export const STREAM_IDLE_MS = 75_000
 
 /** 流式问答的失败（带状态码，便于按 apiErrorMessage 的同一套话术显示） */
 export class StreamError extends Error {
@@ -334,13 +425,19 @@ export class StreamError extends Error {
  * 后端加一种新动作时前端必然漏掉一处（而漏掉的后果就是**页面上看不见刚发生的事**，
  * 用户会以为 AI 在骗他）。宁可多作废一个没动过的域（它本来就没被取过，不会发请求）。
  *
- * 这份清单与 AI 现在能写的六块一一对应（D-052/D-053 + 2026-10-13 的全应用 CRUD）：
- * 冰箱、菜谱（含「我的菜谱」）、收藏、常用组合、菜单/餐次、采购清单（由菜单推导）。
+ * 这份清单与 AI 现在能写的七块一一对应（D-052/D-053 + 2026-10-13 的全应用 CRUD
+ * + 2026-10-14 的采购清单）：冰箱、菜谱（含「我的菜谱」）、收藏、常用组合、菜单/餐次、
+ * 采购清单、口味档案。
+ *
+ * ⚠️ **`taste` 是 2026-10-14 补上的**：AI 从 2026-10-13 起就能写口味档案
+ * （`update_taste`），但这份清单当时没跟着加——症状是用户说完"我不吃辣"，
+ * 抽屉一收，「口味与忌口」页上还是旧的那份。这类"新动作忘了加 key"的漏
+ * 已经发生过两次（冰箱→菜谱，菜谱→口味），所以规矩是：**加一种能写的域，先改这里**。
  *
  * 只作废不自己拼缓存：回执里只有一句摘要，硬 set 一份"猜的"数据比不动更糟。
  */
 export function invalidateAfterAiWrite(queryClient: QueryClient): void {
-  for (const key of ['fridge', 'recipes', 'favorites', 'combos', 'orders', 'shopping']) {
+  for (const key of ['fridge', 'recipes', 'favorites', 'combos', 'orders', 'shopping', 'taste']) {
     void queryClient.invalidateQueries({ queryKey: [key] })
   }
 }

@@ -70,13 +70,27 @@ interface AiAssistantState {
   setDraft: (draft: string) => void
   beginTurn: (userText: string, attachments?: string[]) => void
   appendChunk: (chunk: string) => void
-  endTurn: (options?: { dropEmptyAssistant?: boolean }) => void
+  /**
+   * 收尾这一轮。
+   *
+   * `error` 传了就是**没答上来**：那条空回答会被写成一条"失败"消息留在对话里
+   * （见 ChatTurn.failed 的说明），而不是删掉。
+   */
+  endTurn: (options?: { dropEmptyAssistant?: boolean; error?: string; aborted?: boolean }) => void
   setStage: (stage: string) => void
   setProposals: (items: MenuProposal[]) => void
   markAdded: (key: string) => void
   addReceipts: (items: AiReceipt[]) => void
   /** 某一笔撤销成功之后，把它从卡上划掉（不是删卡：撤了也要留痕） */
   markUndone: (id: string) => void
+  /**
+   * 从某一格起把后面的对话全部剪掉（重试用）。
+   *
+   * **回执行要跟着重算下标**：它们靠 `turnIndex` 挂到某一轮下面，剪掉几格之后
+   * 老下标会指到别的轮上——不重算的话，重试一次就会看到"上一轮的回执卡长在
+   * 这一轮的答案下面"，看起来像 AI 又说了一遍它没做过的事。
+   */
+  rewindTo: (index: number) => void
 }
 
 let seq = 0
@@ -206,10 +220,34 @@ export const useAiAssistantSession = create<AiAssistantState>()(
       endTurn: (options) => set((state) => {
         const active = ensureActive(state)
         const last = active.turns[active.turns.length - 1]
-        // 撤掉"还没长出字"的那格 assistant：失败与中途取消都要撤，否则会剩一个空气泡
-        const turns = options?.dropEmptyAssistant && last?.role === 'assistant' && last.content === ''
-          ? active.turns.slice(0, -1)
-          : active.turns
+        /*
+         * 末尾那格 assistant 有三种收尾（用户 2026-10-14 报的「会话没返回，
+         * 最后一条显示的是用户的消息」就是第一种没处理对）：
+         *
+         * ① 一个字都没收到 + 有错：**不能删掉**（删了对话里只剩用户自问自答，
+         *    刷新后连痕迹都没有）。把它改写成失败说明，界面上长出「再试一次」；
+         * ② 一个字都没收到 + 用户自己关掉抽屉：同样留着，标 `aborted`
+         *    （不是错误，不该红着脸提示，但也不该让历史变成自言自语）；
+         * ③ 收到半句就断：**留着那半句**，另外挂一条失败说明（见下面 `failed` 的写法）——
+         *    用户看得见它说到哪儿停了，而不是以为回答就这么多。
+         */
+        const turns = [...active.turns]
+        const at = turns.length - 1
+        if (options?.error && last?.role === 'assistant') {
+          if (last.content === '') {
+            turns[at] = { role: 'assistant', content: '', failed: options.error }
+          } else {
+            // 半句 + 失败说明分两条更好读：正文保持原样，下面单独一行说"没说完"
+            turns.push({ role: 'assistant', content: '', failed: options.error })
+          }
+        } else if (options?.dropEmptyAssistant && last?.role === 'assistant' && last.content === '') {
+          if (options.aborted) {
+            // 用户自己收起的：留一个不刺眼的记号（界面画"已停下"，不画错误）
+            turns[at] = { role: 'assistant', content: '', aborted: true }
+          } else {
+            turns.pop()
+          }
+        }
         return { ...upsert(state, { ...active, turns, updatedAt: Date.now() }), pending: false, stage: '' }
       }),
 
@@ -244,6 +282,22 @@ export const useAiAssistantSession = create<AiAssistantState>()(
             items: group.items.map((item) => (item.id === id ? { ...item, undone: true } : item)),
           })),
         })
+      }),
+
+      rewindTo: (index) => set((state) => {
+        const active = ensureActive(state)
+        if (index < 0 || index >= active.turns.length) return state
+        const turns = active.turns.slice(0, index)
+        // 被剪掉的那几轮上的回执一并丢掉；留下的按新下标平移（见接口上的说明）
+        const receipts = active.receipts
+          .filter((group) => group.turnIndex < index)
+          .map((group) => ({ ...group, turnIndex: Math.min(group.turnIndex, Math.max(0, turns.length - 1)) }))
+        return {
+          ...upsert(state, { ...active, turns, receipts, updatedAt: Date.now() }),
+          // 重试是"重新问一遍刚才那句"，之前那批建议与"已加入"标记都作废
+          proposals: [],
+          added: [],
+        }
       }),
     }),
     {

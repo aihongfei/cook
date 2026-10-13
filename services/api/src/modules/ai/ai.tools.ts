@@ -57,6 +57,50 @@ export const TOOL_ADD_COMBO_TO_MEAL = 'add_combo_to_meal'
 export const TOOL_READ_TASTE = 'read_taste'
 export const TOOL_UPDATE_TASTE = 'update_taste'
 
+/**
+ * 采购清单（M7 / F7-01~F7-05）。
+ *
+ * 用户 2026-10-14：「还需要 ai 能够处理采购清单、口味忌口等现在所有没接入 ai 的功能」——
+ * 实测模型当时确实说了「我这边没有『采购单』这个功能，做不了它」（AI 的表里根本没有这张单）。
+ *
+ * **清单与菜单是两件事**，提示词里必须分清：菜单是"这一餐吃什么"，清单是"要去买什么"。
+ * 前者推得出后者（按菜谱配料算），但用户完全可能只要后者（"顺手买袋盐"）。
+ * 所以 `add_shopping_items` 加的是**自加条目**（没有菜谱的那些），
+ * 与菜单推出来的条目在界面上是同一种东西、共用同一套勾选。
+ */
+export const TOOL_READ_SHOPPING = 'read_shopping_list'
+export const TOOL_ADD_SHOPPING_ITEMS = 'add_shopping_items'
+export const TOOL_CHECK_SHOPPING_ITEM = 'check_shopping_item'
+export const TOOL_REMOVE_SHOPPING_ITEM = 'remove_shopping_item'
+export const TOOL_RESTOCK_SHOPPING = 'restock_shopping_items'
+
+/** 一次最多往清单上加几样（与冰箱/菜单同一个护栏：模型偶尔会把整周的东西倒出来） */
+export const SHOPPING_ADD_MAX = 8
+/** 一次最多勾/取消勾几样 */
+export const SHOPPING_CHECK_MAX = 12
+/** 一次最多补货几样进冰箱（补货是真的往冰箱写，比勾选重一档） */
+export const SHOPPING_RESTOCK_MAX = 8
+
+/**
+ * 只读的三件：帮我决定、家人最爱、打卡。
+ *
+ * 用户 2026-10-14：「还需要 ai 能够处理采购清单、口味忌口**等现在所有没接入 ai 的功能**」。
+ * 这三件是那份清单上剩下的、**适合在对话里办**的：都是"问一句、答一句"的事，
+ * 而且**一个字都不写库**——所以没有回执、没有撤销，也就没有"它擅自改了家里什么"的风险。
+ *
+ * 为什么"决定"要交给服务端算而不是让模型自己想：那道菜的答案要同时看**冰箱里快过期的**
+ * （F6-05）、**谁吃不了什么**（F8-03）、**家里做过几回与几个人收藏**（F5-02）。
+ * 模型看不到这些（它只拿到一段摘要），凭印象说一道等于把三条口径一次性丢掉。
+ */
+export const TOOL_WHAT_TO_COOK = 'what_to_cook'
+export const TOOL_READ_FAMILY_PICKS = 'read_family_picks'
+export const TOOL_READ_CHECKINS = 'read_checkins'
+
+/** 家人最爱一次最多几道（与 `/discover/family-picks` 的上限一致） */
+export const FAVORITES_LIST_MAX = 12
+/** 打卡一次最多几条（墙上最近的照片） */
+export const CHECKIN_LIST_MAX = 12
+
 /** 一次最多往冰箱里记几样（模型会一口气倒出十几条，见 D-052 的护栏） */
 export const FRIDGE_ADD_MAX = 8
 /** 一次最多往菜单里加几道（同上：模型偶尔会把整周菜单一口气倒出来） */
@@ -570,6 +614,175 @@ export const AI_TOOLS = [
           flavors: { type: 'array', items: { type: 'string' }, description: '口味偏好，如"清淡"、"少盐"' },
           diet: { type: 'string', enum: ['多吃素', '全素'], description: '荤素倾向；说"无偏好"就别给这个字段' },
           note: { type: 'string', description: '一句备注（"医生说要少盐"）' },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_READ_SHOPPING,
+      description: '读采购清单**现在缺什么**：按货架分好组、标出哪些家里已经有了不用买、哪些已经勾掉（买到了）。'
+        + '清单是按最近几天的菜单算出来的，所以"这周要买什么"直接读它，不要自己去翻菜谱配料。'
+        + '每一行都带 `name`（改/勾/补货时用它）与 `extra`（是不是用户自己加的条目）。',
+      parameters: {
+        type: 'object',
+        properties: { days: { type: 'integer', description: '按往后几天算，默认 3' } },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_ADD_SHOPPING_ITEMS,
+      description: '往采购清单上加几样**要去买的东西**（垃圾袋、洗洁精、或者用户点名要买的食材）。'
+        + '**这个工具会真的写库**（用户已经同意），所以只在他明确说了要买什么的时候调。'
+        + `一次最多 ${SHOPPING_ADD_MAX} 样，不要一样调一次。`
+        + '已经有同名的东西在清单上时那一条会被拒并说明——照实转达，别自己改成"加好了"。',
+      parameters: {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            description: `要买的东西，最多 ${SHOPPING_ADD_MAX} 样`,
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: '要买的东西，如「鸡蛋」「洗洁精」' },
+                amount: { type: 'string', description: '要买多少，可空，如「两袋」「1L」' },
+              },
+              required: ['name'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['items'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_CHECK_SHOPPING_ITEM,
+      description: '勾掉 / 取消勾掉清单上的某几样（**买到了**就勾上）。'
+        + '这是"买到 N 样"的进度，也是后面"一键补货进冰箱"的依据。'
+        + '用户说"这些都买到了""盐不用买了"时调它。名字必须是清单上真实有的（先调 read_shopping_list）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          names: {
+            type: 'array',
+            description: `清单上的名字，最多 ${SHOPPING_CHECK_MAX} 个`,
+            items: { type: 'string' },
+          },
+          checked: { type: 'boolean', description: 'true = 买到了（勾上），false = 取消勾选。默认 true' },
+        },
+        required: ['names'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_REMOVE_SHOPPING_ITEM,
+      description: '从清单上删掉**自己加的那一条**（临时想起来了，后来不用买了）。'
+        + '菜单推出来的条目删不掉（下次还会算出来）——那种情况告诉用户勾掉它就行。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '要删掉的那一项的名字' },
+        },
+        required: ['name'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_RESTOCK_SHOPPING,
+      description: '一键补货：把**已经勾掉（买到了）**的那几样写进冰箱。'
+        + '用户说"买回来的都记进冰箱吧""这些收进冰箱"时调它。'
+        + `一次最多 ${SHOPPING_RESTOCK_MAX} 样，且**只补勾掉的**——没勾的一样都没买，不要替用户勾。`
+        + '存放区按货架自动推（推错了用户能去冰箱页改），数量留空（清单上的量是"菜谱要多少"，不是"买回来多少"）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          names: {
+            type: 'array',
+            description: `要收进冰箱的那几样（必须是清单上已勾掉的），最多 ${SHOPPING_RESTOCK_MAX} 样`,
+            items: { type: 'string' },
+          },
+        },
+        required: ['names'],
+        additionalProperties: false,
+      },
+    },
+  },
+  /*
+   * 只读的三件（用户 2026-10-14 的「等现在所有没接入 ai 的功能」）。
+   *
+   * 它们**一个字都不写库**，所以没有回执、也不需要撤销——三件的共同点是
+   * "这件事的答案在服务端手里，不在模型印象里"：
+   * 该做哪道菜要看冰箱的临期、谁吃不了什么、家里做过几回；这些都在库与规则里。
+   */
+  {
+    type: 'function',
+    function: {
+      name: TOOL_WHAT_TO_COOK,
+      description: '**帮我决定**：只给一道、且是此刻最该做的那道（看过冰箱里快过期的、谁吃不了什么、'
+        + '家里做过几回与几个人收藏）。用户说"不知道吃什么""帮我决定""随便来一道"时调它。'
+        + '**只给一道**是这条出口的全部意思（别一次列几道让他挑）；回答时把它给的理由一起说出来。'
+        + '返回 `recipe` 是 null 时说明这条路算不出菜，`reason` 里就是原因（照实说，别自己编一道）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          exclude: {
+            type: 'array',
+            description: '这一轮已经看过的菜谱 id（用户说"换一道"时把上一次给的那个 id 放进来）',
+            items: { type: 'string' },
+          },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_READ_FAMILY_PICKS,
+      description: '读**这一家人**的最爱榜（做过几次 + 几个人收藏，合起来排的）。'
+        + '用户问"我们家常做什么""家里最爱吃哪几道""谁收藏了什么"时调它。'
+        + '注意它只含有信号的那几道（做过或收藏过），不是菜谱库列表。',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer', description: `最多几道，默认 8、上限 ${FAVORITES_LIST_MAX}` },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_READ_CHECKINS,
+      description: '读家里的打卡墙：最近谁在什么时候做了什么、有没有留言、挂在哪一餐上。'
+        + '用户问"最近做了几次""我连续打卡多少天了""家里人最近下厨了吗"时调它。'
+        + '统计里会给出**我的连续天数**与全家累计张数——这两个数字只有服务端算得对。',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer', description: `最多几条，默认 8、上限 ${CHECKIN_LIST_MAX}` },
+          stats: { type: 'boolean', description: '要不要连统计（热力图累计/连续天数）一起给，默认要' },
         },
         required: [],
         additionalProperties: false,
@@ -1122,4 +1335,89 @@ export function comboText(combos: { id: string; name: string; note: string | nul
     const dishes = combo.dishes.map((dish) => `${dish.name}[${dish.recipeId}]`).join('、')
     return `${combo.name}${note}（comboId: ${combo.id}）：${dishes}`
   }).join('\n')
+}
+
+// ---------- 采购清单（M7 / F7-01~F7-05，用户 2026-10-14 要求接入）----------
+
+/** 给模型看的清单：按货架分组，标出"已有不用买"和"已勾（买到了）" */
+export function shoppingText(board: {
+  days: number
+  aisles: { aisle: string; items: { name: string; amount: string | null; needsBuy: boolean; extra: boolean }[] }[]
+  checkedNames: string[]
+  toBuyCount: number
+  coveredCount: number
+  missing: string[]
+  meals: { mealLabel: string; date: string }[]
+}): string {
+  const head = `按最近 ${board.days} 天菜单算：还要买 ${board.toBuyCount} 样，家里已有 ${board.coveredCount} 样`
+    + (board.meals.length ? `（覆盖 ${board.meals.map((meal) => `${meal.date} ${meal.mealLabel}`).join('、')}）` : '（这几天还没定菜单，清单只有自加的条目）')
+  if (board.aisles.length === 0) {
+    return toolResult({
+      list: '（清单是空的）',
+      hint: '没有要买的东西。用户要买什么就直接用 add_shopping_items 加上去。',
+      toBuyCount: 0,
+    })
+  }
+  const lines = board.aisles.map((group) => {
+    const rows = group.items.map((item) => {
+      const amount = item.amount ? `（要 ${item.amount}）` : ''
+      const tags = [
+        item.needsBuy ? '' : '家里已有不用买',
+        board.checkedNames.includes(item.name) ? '已勾=买到了' : '',
+        item.extra ? '用户自己加的' : '菜单推出来的',
+      ].filter(Boolean)
+      return `  - ${item.name}${amount}${tags.length ? ` [${tags.join('，')}]` : ''}`
+    })
+    return [group.aisle, ...rows].join('\n')
+  })
+  return toolResult({
+    list: [head, ...lines].join('\n'),
+    hint: '勾掉买到的东西用 check_shopping_item（名字原样照抄）；'
+      + '把勾掉的收进冰箱用 restock_shopping_items。'
+      + (board.missing.length ? `另外这几道菜没有配料表、算不出要买什么：${board.missing.join('、')}` : ''),
+    toBuyCount: board.toBuyCount,
+    coveredCount: board.coveredCount,
+    checked: board.checkedNames,
+  })
+}
+
+/** 读 `add_shopping_items` 的参数：一批「名字 + 数量」。返回 null = 参数根本解析不出来 */
+export function readShoppingAdds(rawArguments: string): { name: string; amount?: string }[] | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+  const items = (parsed as { items?: unknown }).items
+  if (!Array.isArray(items)) return null
+  const out: { name: string; amount?: string }[] = []
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as { name?: unknown; amount?: unknown }
+    const name = typeof row.name === 'string' ? row.name.trim() : ''
+    if (!name) continue
+    const amount = typeof row.amount === 'string' ? row.amount.trim() : ''
+    out.push({ name, amount: amount || undefined })
+  }
+  return out.slice(0, SHOPPING_ADD_MAX)
+}
+
+/** 读一个字符串数组参数（`names`）。**去重且去空**——模型偶尔会把同一样写两遍 */
+export function readNameList(rawArguments: string, key: string, max: number): string[] | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+  const value = (parsed as Record<string, unknown>)[key]
+  if (!Array.isArray(value)) return null
+  const names = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return [...new Set(names)].slice(0, max)
 }

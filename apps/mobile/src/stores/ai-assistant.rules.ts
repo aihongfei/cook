@@ -37,6 +37,9 @@ export const KEEP_CONVERSATIONS = 20
  *
  * 顺序是先过滤再截断——反过来（先截断再过滤）的话，末尾那条空的会把一条有用的话挤掉，
  * 只剩九条。
+ *
+ * ⚠️ 失败那格与取消那格**没有内容**，下面这个 `.filter` 顺手把它们挡在外面——
+ * 它们只是界面上的记号（"这一轮没答上来"），不是对话内容，后端也不收空消息。
  */
 export function wireMessages(turns: ChatTurn[]): ChatTurn[] {
   return turns
@@ -49,7 +52,7 @@ export function wireMessages(turns: ChatTurn[]): ChatTurn[] {
     .map((turn) => ({
       role: turn.role,
       content: turn.content.trim(),
-      // 图片 id 要跟着发（服务端凭它去私有桶取字节）。助手消息没有图，不必带空数组
+      // 图片 id 要跟着发（服务端凭它去私有桶取字节给模型看）。助手消息没有图，不必带空数组
       ...(turn.attachments?.length ? { attachments: turn.attachments } : {}),
     }))
 }
@@ -59,6 +62,10 @@ export function wireMessages(turns: ChatTurn[]): ChatTurn[] {
  *
  * **只剪末尾，不剪中间**：中间的空格不该出现（流中途失败时 endTurn 已经把它撤了），
  * 真出现了说明别处有 bug——这时候静默剪掉反而把问题藏了，留着它更容易发现。
+ *
+ * ⚠️ **带 `failed` / `aborted` 的空格不算空格**（用户 2026-10-14：「会话没返回，
+ * 最后一条显示的是用户的消息」）：那是"这一轮没答上来"的记号，剪掉它就把
+ * 用户看到的唯一线索也删了——他会以为 App 出了问题，而其实是模型那边没回应。
  */
 export function pruneTurns(turns: ChatTurn[]): ChatTurn[] {
   const kept = turns.slice(-KEEP_TURNS)
@@ -66,6 +73,7 @@ export function pruneTurns(turns: ChatTurn[]): ChatTurn[] {
   // 判"空格"要连图一起看：只有图、没文字的**用户消息是完整的**（拍张照直接发），
   // 按文字判空会把它当成没长出来的那格剪掉，用户的照片就凭空消失了
   const isEmpty = (turn: ChatTurn) => turn.content === '' && (turn.attachments?.length ?? 0) === 0
+    && !turn.failed && !turn.aborted
   const trimmed = last?.role === 'assistant' && isEmpty(last) ? kept.slice(0, -1) : kept
   return trimmed
 }

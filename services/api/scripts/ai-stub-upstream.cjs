@@ -127,7 +127,23 @@ const server = http.createServer((req, res) => {
     }
 
     const system = parsed.messages?.find((m) => m.role === 'system')?.content ?? ''
-    const user = parsed.messages?.find((m) => m.role === 'user')?.content ?? ''
+    /*
+     * **最后**一条用户消息才是用户现在问的。
+     *
+     * 原来是 `find`（第一条）：单条消息的验收看不出来，但真实对话会把**整场历史**一起发过来，
+     * 于是 stub 一直在回答**最早**那句话——浏览器里实测就是这样（问"采购清单上有什么"，
+     * 它回的是十几轮之前那句的答案）。真实模型看的是最后一条，stub 必须一致。
+     */
+    const lastUser = [...(parsed.messages ?? [])].reverse().find((m) => m.role === 'user')
+    const user = (() => {
+      const content = lastUser?.content
+      if (typeof content === 'string') return content
+      // 带图的消息是内容块数组（文字块在前）：判用户意图只看得见文字那部分
+      if (Array.isArray(content)) {
+        return content.filter((block) => block?.type === 'text').map((block) => block.text).join('\n')
+      }
+      return ''
+    })()
     const tools = parsed.tools ?? []
     received.push({
       model: parsed.model,
@@ -209,8 +225,22 @@ const server = http.createServer((req, res) => {
      * 若只看"工具在不在"就会对每句话都去写冰箱（第一版就是这样，于是普通问一句
      * "今晚吃什么"也把冰箱写了，验收里的批次全乱）。真实模型是靠语义判断的，
      * stub 只能靠关键词——判据写成 stub 内部约定，产品代码不依赖它。
+     *
+     * **"买回来的收进冰箱"不算**：那句话说的是**采购清单**（`restock_shopping_items`），
+     * 冰箱只是它的去处。不排掉的话两句会抢同一个"冰箱"关键词，落到冰箱那一支去
+     * ——验收里就会出现"让它补货，它往冰箱记了一条牛奶"这种莫名其妙的结果。
      */
-    const mentionsFridge = /冰箱|记一下|记下|拿掉|吃完了|扔了|放进去/.test(user)
+    const restockTalk = /买到|买回来|补货|采购/.test(user)
+    /*
+     * **"记一下"本身不算说冰箱**。这个词太泛了：「我对花生过敏，这个要记一下」
+     * 一个字都没提冰箱，却会被吸到这一支来（验收现场就是这么错的：让它记忌口，
+     * 它回的是"我记一下"，然后往冰箱里记东西）。真正说冰箱的那几句里都有"冰箱"，
+     * 所以判据只留与冰箱绑定的那些词。
+     *
+     * 口味那几句也一并排掉（它们有自己的分支，见下文"口味与忌口"）。
+     */
+    const mentionsFridge = /冰箱|拿掉|吃完了|扔了|放进去/.test(user)
+      && !restockTalk && !/忌口|过敏|口味|不吃|吃不了/.test(user)
     const fridgeMode = mentionsFridge && tools.some((t) => t.function?.name === 'read_fridge')
     /*
      * 要记的食材**从用户那句话里取**（真实模型也是这么理解"记一下鸡蛋和牛奶"的）。
@@ -668,6 +698,281 @@ const server = http.createServer((req, res) => {
       }
       console.log(`[stub] 再点一次收尾：来源=${source?.mealKey ?? '(没读到)'}`)
     }
+
+    // ---------- 口味与忌口（M8，F8-01/F8-02）----------
+    /*
+     * 两件：`read_taste`（读全家档案）与 `update_taste`（写**自己**那份）。
+     *
+     * 提示词里要求"要推荐菜、要往菜单里加菜之前先 read_taste"（有人过敏还推荐那道菜
+     * 是不可接受的），所以这一支也演**先读后写**：先问全家档案，再照用户那句话写。
+     *
+     * 两处刻意与真实模型一致：
+     * ① **只写用户说的那几项**。`allergies` 会真的影响推荐过滤，添油加醋补一个进去是危险的
+     *    （验收有一条断言盯这个：说了"不吃辣"就不许冒出过敏原）；
+     * ② **不替别人写**。schema 里压根没有"给谁写"这个参数（服务端永远只写调用者本人），
+     *    而提示词要求模型照实说"只能记你自己的"——所以 stub 遇到"我妈…"就**不下手**，
+     *    演的就是那句该说的话。不这么演的话，验收里会出现"AI 把'我妈对虾过敏'记进了
+     *    提问者自己的档案"这种结果，而那是模型的判断问题、不是产品的行为。
+     */
+    const tasteMode = /忌口|过敏|不吃|吃不了|口味|少放盐|辣/.test(user)
+      && tools.some((t) => t.function?.name === 'update_taste')
+    if (tasteMode) {
+      const tasteRead = toolResults.some((m) => /"profiles"/.test(String(m.content)))
+      const tasteWrote = toolResults.some((m) => /已记下/.test(String(m.content)))
+      /**
+       * 说的是**别人**的忌口（"我妈对虾过敏，帮她记一下"）：这一轮只读、不写。
+       *
+       * 判据只看"有没有点名别人"，**不看句子以什么开头**——第一版加了 `!/^(我|自己)/`
+       * 这道闸，于是"我妈…"（也以"我"开头）被放行、真把虾写进了提问者自己的档案。
+       */
+      const aboutSomeoneElse = /(我妈|我爸|我老婆|我老公|我媳妇|我儿子|我女儿|我孩子|我爷爷|我奶奶|我婆婆|我丈母娘)/.test(user)
+        || /(替|帮)(他|她|他们|别人)[^，。]{0,4}(记|写)/.test(user)
+      const spicyWord = /不吃辣|不能吃辣|忌辣/.test(user) ? 0
+        : /微辣/.test(user) ? 1
+          : /中辣/.test(user) ? 2
+            : /重辣|很能吃辣/.test(user) ? 3 : null
+      /** 过敏原：只认"对 X 过敏"这种写法，**不许自己补**（写进去会真的过滤推荐） */
+      const allergyHit = /对([\u4e00-\u9fa5]{1,6})过敏/.exec(user)?.[1] ?? ''
+      /** 不爱吃：排除"辣"（那一项属于辣度，写两遍会让用户看到两条重复的忌口） */
+      const dislikeHit = (() => {
+        const hit = /不[爱吃]([\u4e00-\u9fa5]{1,6})/.exec(user)?.[1] ?? ''
+        return hit === '辣' ? '' : hit
+      })()
+      const tastePatch = {
+        ...(spicyWord !== null ? { spicyLevel: spicyWord } : {}),
+        ...(allergyHit ? { allergies: [allergyHit] } : {}),
+        ...(dislikeHit && dislikeHit !== allergyHit ? { dislikes: [dislikeHit] } : {}),
+      }
+      const wantsWrite = !aboutSomeoneElse && Object.keys(tastePatch).length > 0
+      const tasteCalls = !tasteRead
+        ? [{ id: 'call_taste_1', name: 'read_taste', args: {} }]
+        : tasteWrote || !wantsWrite
+          ? []
+          : [{ id: 'call_taste_2', name: 'update_taste', args: tastePatch }]
+
+      if (tasteCalls.length > 0) {
+        console.log(`[stub] 口味忌口：${tasteCalls.map((call) => call.name).join(',')} 补丁=${JSON.stringify(tastePatch)}`)
+        res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+        const frame = (delta, finish) => `data: ${JSON.stringify({
+          id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+          model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }],
+        })}\n\n`
+        res.write(frame({ role: 'assistant', content: '我先看下家里的口味档案。' }, null))
+        tasteCalls.forEach((call, index) => {
+          const json = JSON.stringify(call.args)
+          res.write(frame({ tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.name, arguments: '' } }] }, null))
+          for (const piece of json.match(/.{1,8}/gs) ?? []) {
+            res.write(frame({ tool_calls: [{ index, function: { arguments: piece } }] }, null))
+          }
+        })
+        res.write(frame({}, 'tool_calls'))
+        res.write('data: [DONE]\n\n')
+        res.end()
+        return
+      }
+
+      /*
+       * 收尾：按**服务端真的回了什么**说一句。
+       *
+       * 读结果里有 `missing`（还没写档案的人），那是要转述给用户的——
+       * "谁还没写"本身就是有用的一条信息。写结果里有 `已记下：…`，
+       * 那说明档案真的动了，可以说"记好了"。
+       */
+      const seen = toolResults.map((m) => String(m.content)).join('\n')
+      const readPayload = (() => {
+        const raw = toolResults.map((m) => String(m.content)).find((text) => /"profiles"/.test(text))
+        try { return JSON.parse(raw ?? '{}') } catch { return {} }
+      })()
+      const tasteFinal = aboutSomeoneElse
+        ? '口味档案只能记你自己的——你自己的那份我可以马上写；家里别人得他自己在「我的 → 口味与忌口」里写，那样才算他本人的意思。'
+        : /已记下/.test(seen) ? '记好了，回执卡上有「改回去」，点错了能还原。你也可以在「我的 → 口味与忌口」里改得更细。'
+          : Array.isArray(readPayload.missing) && readPayload.missing.length
+            ? `我看了家里的档案：${readPayload.missing.join('、')}还没写。你自己要写的我随时能记——比如"我不吃辣""我对花生过敏"。`
+            : '家里的口味档案我看过了，该记的都已经记着。'
+      console.log(`[stub] 口味忌口收尾：${tasteFinal.slice(0, 20)}…`)
+      res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+      const textFrame = (chunk, finish) => `data: ${JSON.stringify({
+        id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+        model: parsed.model, choices: [{ index: 0, delta: chunk, finish_reason: finish }],
+      })}\n\n`
+      res.write(textFrame({ role: 'assistant', content: tasteFinal }, null))
+      res.write(textFrame({}, 'stop'))
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
+    }
+
+    // ---------- 采购清单（M7，用户 2026-10-14 要求接入）----------
+    /*
+     * 五种：读清单 / 加自加条目 / 勾选 / 删自加条目 / 一键补货。
+     *
+     * 与冰箱那条同一个讲究——**先读再动**（勾选与补货都要清单上真实存在的名字），
+     * 所以 stub 演两轮：先 `read_shopping_list` 拿下名字，再动手。
+     * 「把某道菜需要的食材加进采购单」这句在真实模型那里该走**菜单**那条路
+     * （加菜进菜单，清单自己按配料算出来），所以 stub 不拦那种说法。
+     */
+    const shoppingMode = /采购|清单|买到|买回来|要买|收进冰箱/.test(user)
+      && tools.some((t) => t.function?.name === 'read_shopping_list')
+    if (shoppingMode) {
+      /*
+       * 取**最近一次**读清单的结果，不是第一次。
+       *
+       * 这条区别是必需的：补货那条路是"先勾上、再收进冰箱"，中间那次勾选之后
+       * 清单已经变了——照第一次那份读结果算，会得出"一样都没勾"然后原地打转，
+       * 三轮轮次烧光、验收看到的是"AI 什么都没办"（第一版就是这个形状）。
+       */
+      const shopReads = toolResults.filter((m) => {
+        try { return 'list' in JSON.parse(String(m.content)) } catch { return false }
+      })
+      const shopReadText = (() => {
+        const raw = String(shopReads[shopReads.length - 1]?.content ?? '')
+        try { return String(JSON.parse(raw).list ?? '') } catch { return '' }
+      })()
+      // 清单上的名字（形状由产品侧 `shoppingText()` 定：`  - 名字（要 X）[标签]`）
+      const shopNames = [...shopReadText.matchAll(/^\s*- (.+?)(?:（|\[|$)/gm)].map((hit) => hit[1].trim())
+      const shopRead = shopReadText !== ''
+      /*
+       * 「读不出来」也要认（没有家庭的人读清单是 404，工具结果里是 `{"error":"先加入家庭…"}`）。
+       * 不认它的话 stub 会一轮轮地重读，把三轮轮次烧光——而真实模型这时该做的是
+       * **停下来照实说**，不是接着乱试。
+       */
+      const shopReadFailed = toolResults.some((m) => /加入家庭/.test(String(m.content)))
+      /*
+       * 服务端**已经回过话**的那几类（写成了、被拒了、没找到）。分别认，
+       * 因为收尾那句要按"真的发生了什么"来说：`没加成` 也在这里面——
+       * 同名重复会被服务端拒（「清单上已经有『垃圾袋』了」），真实模型这时该**如实转述**，
+       * 而不是再试一遍（那会白白烧掉一轮，用户等得更久）。
+       */
+      const shopRestocked = toolResults.some((m) => /已收进冰箱|跳过了|还没勾/.test(String(m.content)))
+      const shopChecked = toolResults.some((m) => /已更新：/.test(String(m.content)))
+      const shopAdded = toolResults.some((m) => /已加进采购清单|没加成|清单上没有/.test(String(m.content)))
+      const shopRemoved = toolResults.some((m) => /已去掉：/.test(String(m.content)))
+      /*
+       * 「删不掉」也要认：菜单推出来的那几条没有自加记录，服务端会回
+       * 「清单上没有「X」这条自加的条目（菜单推出来的那些删不掉，勾掉就行）」。
+       * 不认它就会一轮轮地重删（把轮次烧光），而真实模型这时该**照实转述**那条理由。
+       */
+      const shopRemoveRefused = toolResults.some((m) => /删不掉|这条自加的条目/.test(String(m.content)))
+      const wantsRestock = /收进冰箱|补货|放进冰箱|记进冰箱/.test(user)
+      const wantsUncheck = /取消勾|不用买|不买了/.test(user)
+      const wantsRemove = !wantsUncheck && /从清单上?去掉|划掉|删掉这条/.test(user)
+      const wantsCheck = /买到了|都买了|买好了|勾掉|勾上/.test(user)
+      /** 清单里标着 `已勾=买到了` 的那几样（补货只能补这些，与产品侧口径一致） */
+      const shopMarked = [...shopReadText.matchAll(/^\s*- (.+?)(?:（|\[)[^\n]*已勾=买到了/gm)].map((hit) => hit[1].trim())
+      /*
+       * 只是问"有什么"——**一个字的库都不写**。
+       *
+       * 这一支必须有：默认那支是"往清单上加"，只问一句"清单上有什么要买的"会被演成
+       * "顺手加了两样"（第一版就是这样），于是"读清单不写库"这条断言看着红、其实是 stub 演错。
+       */
+      const wantsReadOnly = /我看|看看|有什么|还剩|多少样/.test(user)
+        && !wantsCheck && !wantsRestock && !wantsRemove && !wantsUncheck
+      /** 用户这句话里点到的、又确实在清单上的名字（真实模型也是照着用户说的取） */
+      const shopNamed = shopNames.filter((name) => user.includes(name))
+      const pick = (limit) => (shopNamed.length ? shopNamed : shopNames).slice(0, limit)
+
+      const shopCalls = !shopRead
+        // 读失败（没有家庭）就**不再重读**：真实模型这时要停下来照实说
+        ? (shopReadFailed ? [] : [{ id: 'call_shop_1', name: 'read_shopping_list', args: {} }])
+        // 只是问"有什么"：读完就收尾，不写库
+        : wantsReadOnly ? []
+        : (() => {
+          if (wantsRestock) {
+            if (shopRestocked) return []
+            if (shopMarked.length > 0) {
+              return [{ id: 'call_shop_3', name: 'restock_shopping_items', args: { names: shopMarked.slice(0, 3) } }]
+            }
+            /*
+             * 一样都没勾：**同一轮发两个调用**（先勾上、再收进冰箱）。
+             * 服务端是按数组顺序一条条执行的（见 ai.service 的工具循环），
+             * 所以第二个调用能看见第一个刚写下的勾——这也正是真实模型的做法
+             * （"先勾上再收"是一件事，分两轮只是浪费一轮）。
+             */
+            const first = shopNames[0]
+            if (!first) return []
+            return [
+              { id: 'call_shop_2', name: 'check_shopping_item', args: { names: [first], checked: true } },
+              { id: 'call_shop_3', name: 'restock_shopping_items', args: { names: [first] } },
+            ]
+          }
+          if (wantsRemove) {
+            const target = pick(1)[0]
+            if (!target) return []
+            return (shopRemoved || shopRemoveRefused) ? [] : [{ id: 'call_shop_4', name: 'remove_shopping_item', args: { name: target } }]
+          }
+          if (wantsUncheck) {
+            const target = pick(1)[0]
+            if (!target) return []
+            return shopChecked ? [] : [{ id: 'call_shop_5', name: 'check_shopping_item', args: { names: [target], checked: false } }]
+          }
+          if (wantsCheck) {
+            const targets = pick(2)
+            if (targets.length === 0) return []
+            return shopChecked ? [] : [{ id: 'call_shop_6', name: 'check_shopping_item', args: { names: targets, checked: true } }]
+          }
+          /*
+           * 默认：往清单上加几样。要加的东西从用户那句话里取，取不到给一个固定的。
+           *
+           * **用户点名的名字优先**（哪怕它已经在清单上）：真实模型会照说照加、
+           * 由服务端回一句「清单上已经有『垃圾袋』了」——这条"同名要被拒"的路
+           * 只有这么演才走得到（否则 stub 永远加一个全新的名字，那条判据一次也没被验过）。
+           */
+          const namedFoods = KNOWN_FOODS.filter((food) => user.includes(food))
+          const errand = /垃圾袋|洗洁精|纸巾|保鲜膜|牙膏/.exec(user)?.[0]
+          const said = (shopNamed.length ? shopNamed : namedFoods.length ? namedFoods : errand ? [errand] : []).slice(0, 3)
+          const items = (said.length ? said : ['垃圾袋']).map((name) => ({ name, amount: name === '垃圾袋' ? '两卷' : undefined }))
+          return shopAdded ? [] : [{ id: 'call_shop_7', name: 'add_shopping_items', args: { items } }]
+        })()
+
+      /*
+       * 收尾那一轮（这一轮不再调工具了）：按**服务端真的做了什么**说一句。
+       *
+       * 为什么必须演这一段：验收里要断言"AI 有没有照实说"——比如加一样清单上已有的，
+       * 服务端回的是「没加成」，模型就不能说"加好了"。兜底文案（"今晚可以煮个青菜豆腐汤"）
+       * 是给普通问答用的，落在这一支上会让"它答非所问"看着像产品坏了。
+       */
+      if (shopCalls.length === 0) {
+        const seen = toolResults.map((m) => String(m.content)).join('\n')
+        const shopFinal = shopReadFailed ? '你还没加入家庭，先建一个家庭（或让家里人邀请你），采购清单才有得算。'
+          : /没加成/.test(seen) ? '这几样清单上已经有了，不用再加——要的话直接勾一下就行。'
+            : /删不掉|这条自加的条目/.test(seen) ? '这一条是菜单推出来的，删不掉——在清单上勾掉它就行。'
+              : /已收进冰箱|跳过了/.test(seen) ? '买到的那几样收进冰箱了，回执卡上每条都能撤。'
+                : /已去掉：/.test(seen) ? '从清单上去掉了，要恢复的话说一声。'
+                  : /已更新：/.test(seen) ? '清单上勾好了，买到几样就勾几样。'
+                    : /已加进采购清单/.test(seen) ? '加进采购清单了，回执卡上有「撤」。'
+                      : shopRead ? `采购清单我看过了，上面有 ${shopNames.length} 条。`
+                        : '采购清单这块我这边办不了，过会儿再试。'
+        console.log(`[stub] 采购清单收尾：${shopNames.length} 样 → ${shopFinal.slice(0, 20)}…`)
+        res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+        const textFrame = (chunk, finish) => `data: ${JSON.stringify({
+          id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+          model: parsed.model, choices: [{ index: 0, delta: chunk, finish_reason: finish }],
+        })}\n\n`
+        res.write(textFrame({ role: 'assistant', content: shopFinal }, null))
+        res.write(textFrame({}, 'stop'))
+        res.write('data: [DONE]\n\n')
+        res.end()
+        return
+      }
+      console.log(`[stub] 采购清单：${shopCalls.map((call) => call.name).join(',')}（清单上 ${shopNames.length} 样）`)
+      res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+      const frame = (delta, finish) => `data: ${JSON.stringify({
+        id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+        model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }],
+      })}\n\n`
+      res.write(frame({ role: 'assistant', content: '我看下采购清单。' }, null))
+      shopCalls.forEach((call, index) => {
+        const json = JSON.stringify(call.args)
+        res.write(frame({ tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.name, arguments: '' } }] }, null))
+        for (const piece of json.match(/.{1,8}/gs) ?? []) {
+          res.write(frame({ tool_calls: [{ index, function: { arguments: piece } }] }, null))
+        }
+      })
+      res.write(frame({}, 'tool_calls'))
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
+    }
     // 提示词要的是 {"hints":[...],"examples":[...]}。stub 故意回**一份脏数据**：
     // 一条重复的、一条超长的、一条非字符串的 —— 服务端必须清洗掉它们并且仍然凑够一屏，
     // 这样"模型的回包要核对"这条在本地就验到了（不然只能靠真额度碰运气）。
@@ -681,6 +986,124 @@ const server = http.createServer((req, res) => {
       ? JSON.stringify(parsed.response_format)
       : askedForPrompts ? promptsAnswer
         : askedForPicks ? picksAnswer : '今晚可以煮个青菜豆腐汤，配一盘蒜蓉西兰花，清爽又省事。'
+
+    // ---------- 只读三件：帮我决定 / 家人最爱 / 打卡（用户 2026-10-14）----------
+    /*
+     * 三件都是**一次调用就完事**的只读出口（不像冰箱/清单那样先读后写），
+     * 所以这一支的演法很直：认出用户问的是哪一件，发那个工具调用，然后把服务端
+     * 回的那句 `reason`/数字转述出去。
+     *
+     * 为什么值得演：这三事事前在对话里**完全办不了**（工具表里没有），
+     * 而它们的答案只有服务端算得对——「该做哪道菜」要看冰箱临期、口味过滤与家里做过几回，
+     * 「连续打卡多少天」要跑热力图那段。stub 不许自己编这些数字，
+     * 只能**照抄工具结果**，这与真实模型该做的事完全一样。
+     */
+    /*
+     * **必须确认这些工具真的在这一轮的表里**（与冰箱/清单那几支同一条护栏）。
+     *
+     * 少了这道闸会撞上一个很隐蔽的串台：`/ai/suggest` 那条路**不带工具**，而它的
+     * `hint` 是当 user 消息发的——"随便来点家常菜"正好命中下面的关键词，
+     * 于是 stub 回了一个 `what_to_cook` 工具调用，而那条路根本不认工具，
+     * 结果 `/ai/suggest` 全部 502（"AI 的回答不是有效的推荐结果"）。
+     * 验收里表现成"反复问同一句话拿到 0 条推荐"，看着像推荐功能坏了。
+     */
+    const readOnlyToolsReady = tools.some((t) => t.function?.name === 'read_family_picks')
+    const readOnlyMode = readOnlyToolsReady && (
+      /不知道吃|吃什么好|帮我决定|随便来|来个主意|换一道/.test(user)
+      || /最爱|常做|爱吃的|做过几|收藏/.test(user)
+      || /打卡|连续|做了几次|下厨/.test(user)
+    )
+    if (readOnlyMode) {
+      /*
+       * 「这一件问过了」= 收到了一个**形状对的回包**（含 error 的那种也算：没有家庭时三条
+       * 都回一句"先加入家庭"，那也是问到底了）。
+       *
+       * 只看"有没有成功回包"会漏掉失败那一种，于是 stub 一轮轮地重问、把三轮轮次烧光
+       * ——验收里看到的是四句一模一样的"我看看家里现在什么情况"，像卡住了。
+       */
+      const answered = (keys) => toolResults.some((m) => {
+        try {
+          const payload = JSON.parse(String(m.content))
+          return payload && typeof payload === 'object' && ('error' in payload || keys.some((key) => key in payload))
+        } catch { return false }
+      })
+      const decideDone = answered(['canSwap'])
+      const picksDone = answered(['picks'])
+      const checkinDone = answered(['entries'])
+      const wantsDecide = /不知道吃|吃什么好|帮我决定|随便来|来个主意|换一道/.test(user)
+      const wantsPicks = !wantsDecide && /最爱|常做|爱吃的|做过几|收藏/.test(user)
+      const wantsCheckin = !wantsDecide && !wantsPicks && /打卡|连续|做了几次|下厨/.test(user)
+      const pickCalls = (wantsDecide && !decideDone)
+        ? [{ id: 'call_ro_1', name: 'what_to_cook', args: {} }]
+        : (wantsPicks && !picksDone)
+          ? [{ id: 'call_ro_2', name: 'read_family_picks', args: { limit: 8 } }]
+          : (wantsCheckin && !checkinDone)
+            ? [{ id: 'call_ro_3', name: 'read_checkins', args: { limit: 8, stats: true } }]
+            : []
+
+      if (pickCalls.length > 0) {
+        console.log(`[stub] 只读三件：${pickCalls.map((call) => call.name).join(',')}`)
+        res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+        const frame = (delta, finish) => `data: ${JSON.stringify({
+          id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+          model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }],
+        })}\n\n`
+        res.write(frame({ role: 'assistant', content: '我看看家里现在什么情况。' }, null))
+        pickCalls.forEach((call, index) => {
+          const json = JSON.stringify(call.args)
+          res.write(frame({ tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.name, arguments: '' } }] }, null))
+          for (const piece of json.match(/.{1,8}/gs) ?? []) {
+            res.write(frame({ tool_calls: [{ index, function: { arguments: piece } }] }, null))
+          }
+        })
+        res.write(frame({}, 'tool_calls'))
+        res.write('data: [DONE]\n\n')
+        res.end()
+        return
+      }
+
+      /*
+       * 收尾：**照抄服务端给的数字与理由**（一个都不许自己编）。
+       *
+       * 这就是这几条工具存在的全部意义——"该做哪道菜"的答案里含冰箱临期、口味过滤、
+       * 家里做过几回三条判据，模型凭印象答必然与界面对不上。
+       *
+       * **失败那条也要照抄**：没有家庭时三个工具都回一句"先加入家庭…"，
+       * 那是**有用的信息**（用户知道下一步该干什么），不该被换成"你家还没做过菜"。
+       */
+      const payloads = toolResults.map((m) => {
+        try { return JSON.parse(String(m.content)) } catch { return {} }
+      }).filter((payload) => payload && typeof payload === 'object')
+      const payloadWith = (keys) => payloads.find((payload) => keys.every((key) => key in payload)) ?? {}
+      const decidePayload = payloadWith(['canSwap'])
+      const picksPayload = payloadWith(['picks'])
+      const checkinPayload = payloadWith(['entries'])
+      const failure = payloads.find((payload) => payload.error)?.error
+      const readOnlyFinal = failure
+        ? `${failure}——这一步得先办。`
+        : wantsDecide
+          ? decidePayload.recipe
+            ? `就做「${decidePayload.recipe.name}」吧。${decidePayload.reason ?? ''}`
+            : `这会儿我给不出主意：${decidePayload.reason ?? '说不清'}。`
+          : wantsPicks
+            ? picksPayload.picks?.length
+              ? `你家最爱的是：${picksPayload.picks.map((pick) => `${pick.name}（做过 ${pick.cooked} 次、${pick.favorites} 人收藏）`).join('，')}。`
+              : `你家还没做过或收藏过菜，去发现页点几道、或者点上几顿饭就有了。`
+            : checkinPayload.entries
+              ? `你连着打了 ${checkinPayload.stats?.myStreak ?? 0} 天卡，全家一共 ${checkinPayload.stats?.familyTotal ?? 0} 张。最近这几条：${(checkinPayload.entries ?? []).slice(0, 3).map((entry) => `${entry.nickname}${entry.mealLabel ? `（${entry.mealLabel}）` : ''}`).join('、') || '还没有' }。`
+              : `打卡记录我这边没读到，过会儿再试。`
+      console.log(`[stub] 只读三件收尾：${readOnlyFinal.slice(0, 24)}…`)
+      res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+      const textFrame = (chunk, finish) => `data: ${JSON.stringify({
+        id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+        model: parsed.model, choices: [{ index: 0, delta: chunk, finish_reason: finish }],
+      })}\n\n`
+      res.write(textFrame({ role: 'assistant', content: readOnlyFinal }, null))
+      res.write(textFrame({}, 'stop'))
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
+    }
 
     // ---------- 工具循环（D-026 第三次补充）----------
     // 服务端把工具声明发过来时，脚本按"真实模型会怎么走"来演。判据看 role=tool 的消息数：

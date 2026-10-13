@@ -297,6 +297,37 @@
 }
 
 /*
+ * 对话型抽屉（AI 助手 / 问 AI）：**输入行要永远在面板底部**，滚的只有上面那段对话。
+ *
+ * 用户 2026-10-14：「这个输入框聚焦被裁切了」——截图里输入行与发送键被切掉一半。
+ * 成因是键盘起来之后视口腰斩、面板跟着缩，而对话区当时写死 `max-height: 46vh`，
+ * 加上输入行与底部按钮的总高超过了面板剩下的高度，输入行就被挤出面板、被下沿裁掉。
+ *
+ * 这里把内容区从"整块滚动"改成"列向布局 + 只有对话区滚"：
+ * 上面滚、下面（待发图 / 输入行 / 底部按钮）`flex: 0 0 auto` 钉住。
+ * 这样无论视口多矮（键盘全开、或横屏），输入框都在可视区内。
+ */
+.sheet__body--chat {
+  display: flex;
+  flex-direction: column;
+  /* 自己不滚：滚动交给里面的对话区，输入行才不会被一起滚走 */
+  overflow: hidden;
+}
+
+.sheet__body--chat > .ai__thread {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 输入行、待发区、来源选择、底部按钮：都不参与伸缩，永远留在底部 */
+.sheet__body--chat > .ai__ask,
+.sheet__body--chat > .ai__pending-photos,
+.sheet__body--chat > .ai__sources,
+.sheet__body--chat > .ai-assistant__foot {
+  flex: 0 0 auto;
+}
+
+/*
  * 抽屉里的小节标题**不再自带左右栏距**：内容区（上面面板的 padding）已经有了 16px，
  * 两处都加就是 32px——比抽屉外同样的小节明显内缩一截，看着像没对齐。
  * `.section-title` 自己的上下留白保留（那是它作为分隔的作用）。

@@ -5,7 +5,7 @@ import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
 import {
   StreamError, invalidateAfterAiWrite, streamAiChat, uploadAiAttachment, useAiStatus, useUndoAiAction,
-  type AiReceipt,
+  type AiReceipt, type ChatTurn,
 } from '@/api/ai'
 import { shrinkImage } from '@/api/checkins'
 import { useAddOrderItem } from '@/api/orders'
@@ -66,6 +66,7 @@ export default function AiAssistantSheet() {
   const markAdded = useAiAssistantSession((state) => state.markAdded)
   const addReceipts = useAiAssistantSession((state) => state.addReceipts)
   const markUndone = useAiAssistantSession((state) => state.markUndone)
+  const rewindTo = useAiAssistantSession((state) => state.rewindTo)
 
   const status = useAiStatus()
   const undo = useUndoAiAction()
@@ -127,6 +128,53 @@ export default function AiAssistantSheet() {
     invalidateAfterAiWrite(queryClient)
   }, [addReceipts, queryClient])
 
+  /**
+   * 真正跑一轮：把这一句登进对话，读流，收尾。**发送与重试共用它**。
+   *
+   * `history` 由调用方算好（它要过 `wireMessages` 那两道筛，见 `send` 里的说明）：
+   * 重试那条路要的是"**原来那一轮的历史**"，而不是"当前对话 + 再问一遍"——
+   * 后者会让同一句话在对话里出现两次，看起来像用户问了两遍。
+   */
+  const runTurn = useCallback(async (history: ChatTurn[], content: string, sending: string[]) => {
+    beginTurn(content, sending)
+
+    const controller = new AbortController()
+    abortRef.current = controller
+    try {
+      await streamAiChat(history, {
+        signal: controller.signal,
+        onStatus: setStage,
+        // 回执挂到"当前这轮"下面——它证明的就是这句话
+        onReceipts: handleReceipts,
+        onProposals: setProposals,
+        onChunk: appendChunk,
+      })
+      endTurn()
+    } catch (error) {
+      /*
+       * 失败**留在对话里**（用户 2026-10-14：「会话没返回，最后一条显示的是用户的消息」）。
+       *
+       * 原来这里只弹一条 3.6 秒的 toast、把那格空气泡删掉——于是对话里只剩用户自己那句，
+       * 刷新之后连痕迹都没有：看起来像 App 坏了，而实际上模型那边根本没回应。
+       * 现在把原因写进那一轮（界面画成一条提示 + 「再试一次」），要有据可查。
+       *
+       * **不再另弹 toast**：失败就写在对话里、就在用户眼前，叮一声再重复一遍同一句话
+       * 是多余的（而且 toast 几秒后就没了，真回头看历史的人什么都看不到）。
+       *
+       * `abortRef` 那个 controller **只有"用户收起抽屉"这一条路会 abort**
+       * （见上面那个 effect；哑火看门狗用的是 streamAiChat 自己的控制器，不会走到这）。
+       * 所以这里 `aborted` 就是"用户自己不想等了"：留个不刺眼的记号，不当失败。
+       */
+      const aborted = controller.signal.aborted
+      endTurn({
+        error: aborted ? undefined : (error instanceof StreamError ? error.message : apiErrorMessage(error)),
+        aborted,
+      })
+    } finally {
+      abortRef.current = null
+    }
+  }, [appendChunk, handleReceipts, beginTurn, endTurn, setProposals, setStage])
+
   const send = useCallback(async (text: string) => {
     const content = text.trim()
     // **有图就能发**：拍张照直接发是最自然的用法，逼用户配一句话是多余的仪式
@@ -146,33 +194,10 @@ export default function AiAssistantSheet() {
       ...turns,
       { role: 'user' as const, content, ...(sending.length ? { attachments: sending } : {}) },
     ])
-    beginTurn(content, sending)
     // 发出去就把待发区清空：图现在挂在那一轮消息上了（重复带会让每轮都重发一遍图）
     setAttached([])
-
-    const controller = new AbortController()
-    abortRef.current = controller
-    try {
-      await streamAiChat(history, {
-        signal: controller.signal,
-        onStatus: setStage,
-        // 回执挂到"当前这轮"下面——它证明的就是这句话
-        onReceipts: handleReceipts,
-        onProposals: setProposals,
-        onChunk: appendChunk,
-      })
-      endTurn()
-    } catch (error) {
-      endTurn({ dropEmptyAssistant: true })
-      // 用户自己关掉的不算失败（abort 会以异常形式冒出来，别弹一条"出错了"吓人）
-      if (controller.signal.aborted) return
-      // 失败时**保留**用户问的那句（endTurn 只撤空的那格 assistant）：重问一遍还得重新打字
-      toast.error(error instanceof StreamError ? error.message : apiErrorMessage(error))
-    } finally {
-      abortRef.current = null
-    }
-  }, [appendChunk, handleReceipts, beginTurn, endTurn, setProposals, setStage, turns, attached])
-
+    await runTurn(history, content, sending)
+  }, [runTurn, turns, attached])
   /**
    * 选图 → 缩图 → 上传，拿到 id 放进待发区（F16-05）。
    *
@@ -236,13 +261,39 @@ export default function AiAssistantSheet() {
     )
   }
 
+  /**
+   * 重试某一轮失败的回答（用户 2026-10-14：「会话没返回」）。
+   *
+   * 交给 `runTurn` 的是**原来那一轮的历史**（截止到提问那句），不是"当前对话 + 再问一遍"：
+   * 后者会让同一句话在对话里出现两次，看起来像用户问了两遍。
+   * 所以先把那一轮（提问 + 失败格）从对话里剪掉，再原样重放一遍。
+   *
+   * 为什么只剪这一轮而不是整场重来：用户可能在这之前已经办成了好几件事，
+   * 那些回执卡还挂在上面；重开一场会把它们从眼前抹掉。
+   */
+  const resendBefore = (failedIndex: number) => {
+    if (pending) return
+    const current = useAiAssistantSession.getState()
+    const active = current.conversations.find((item) => item.id === current.activeId)
+    // 失败那格的上面一格就是用户问的那句（beginTurn 成对写入，这个位置是确定的）
+    const askIndex = failedIndex - 1
+    const ask = active?.turns[askIndex]
+    if (!active || !ask || ask.role !== 'user') return
+
+    const sending = ask.attachments ?? []
+    // 这一轮的历史：提问之前的那几句 + 这句提问本身（与第一次发出去时完全一样）
+    const history = wireMessages([...active.turns.slice(0, askIndex), ask])
+    rewindTo(askIndex)
+    void runTurn(history, ask.content, sending)
+  }
+
   const configured = status.data?.configured !== false
   const receiptsFor = (index: number) => receipts.find((group) => group.turnIndex === index)?.items ?? []
   /** 历史里有内容的那些（空的新对话不进列表，否则一按「新对话」就多一条空的） */
   const past = conversations.filter((item) => item.turns.length > 0)
 
   return (
-    <BottomSheet visible={open} title="AI 助手" onClose={closeSheet}>
+    <BottomSheet visible={open} title="AI 助手" bodyClassName="sheet__body--chat" onClose={closeSheet}>
       {!configured ? (
         <p className="ai__tip">
           还没接上 AI。在根目录 .env（本机直跑则 services/api/.env）里填 AI_API_BASE / AI_API_KEY / AI_MODEL，
@@ -302,6 +353,30 @@ export default function AiAssistantSheet() {
           {turns.length > 0 && (
             <div className="ai__thread" ref={threadRef}>
               {turns.map((turn, index) => {
+                /*
+                 * 这一轮**没答上来**（失败原因或"用户自己收起了"）：画成一条提示，
+                 * 而不是当作空气泡丢掉（用户 2026-10-14 报的正是"只剩自己那句话"）。
+                 * 位置就是它本来该在的位置——用户回头翻历史能看见当时发生了什么。
+                 */
+                if (turn.role === 'assistant' && turn.content === '' && (turn.failed || turn.aborted)) {
+                  return (
+                    <div className="ai__turn ai__turn--failed" key={`${turn.role}-${index}`}>
+                      <span className="ai__failed-text">
+                        {turn.failed ?? '这一轮停下了（你自己收起的）'}
+                      </span>
+                      {turn.failed && (
+                        <button
+                          type="button"
+                          className="ai__retry"
+                          // 重问上一条**用户**那句话：不必让用户再打一遍
+                          onClick={() => void resendBefore(index)}
+                        >
+                          再试一次
+                        </button>
+                      )}
+                    </div>
+                  )
+                }
                 // 空的那格 assistant 不画（它只是给流式正文预留的位置），等待态由下面那格负责
                 if (turn.role === 'assistant' && turn.content === '') return null
                 return (
