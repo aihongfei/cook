@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/stores/auth'
 import { apiClient } from './client'
 
@@ -290,6 +290,30 @@ export function useOrderOptions() {
 }
 
 /**
+ * 改菜单之后要作废的那些域。
+ *
+ * **采购清单（`shopping`）是用户 2026-10-14 报上来的漏网之鱼**，原话：
+ * 「我加入订单后…采购清单那边就出现了，但是实际是我点击开始做之后才出现的」。
+ * 根因就在这里——它只作废了 `orders`，而清单是**按菜单配料算出来的**：
+ * 加一道菜、撤一道菜、把这一餐定下来（PENDING → PLANNED），清单都跟着变。
+ * 清单页那份缓存 `staleTime` 是 30 秒，所以用户切过去看到的还是加菜之前的旧清单，
+ * 等几十秒再回来（或碰上一次重挂载）才对——表现就是"要点开始做才出现"。
+ *
+ * 备菜计划（`prep` 页）不必单列：它读的是 `['orders', 'plan', days]`，已经在 `orders` 里。
+ *
+ * 与 `invalidateAfterAiWrite`（`api/ai.ts`）同一条规矩：**多作废一个没动过的域没关系**
+ * （没取过就不会发请求），漏一个就是"页面上看不见刚发生的事"，而用户只会认为功能没生效。
+ */
+const MENU_DERIVED_KEYS = ['orders', 'shopping'] as const
+
+/** 菜单变过 → 把按它算出来的那几份缓存一起作废 */
+export function invalidateAfterMenuChange(queryClient: QueryClient): void {
+  for (const key of MENU_DERIVED_KEYS) {
+    void queryClient.invalidateQueries({ queryKey: [key] })
+  }
+}
+
+/**
  * 会改变点单的接口都返回**受影响的整张卡**：把它并回列表缓存，
  * 省一次往返，也保证徽标计数跟着动（不能只替换一张卡而不管计数）。
  */
@@ -303,8 +327,16 @@ function useOrderMutation<TInput>(mutationFn: (input: TInput) => Promise<MealCar
           board ? mergeCard(board, card) : board,
         )
       }
-      // 任何一处点单变化都可能影响别人的视图（同一家庭），让列表在后台重新校验一次
+      /*
+       * 任何一处点单变化都可能影响别人的视图（同一家庭），让列表在后台重新校验一次；
+       * 同时作废清单与备菜计划（见 `MENU_DERIVED_KEYS`）。
+       *
+       * 这里**不按动作区分**（加菜/撤菜/改状态/改人数全走同一支）：人数只影响备菜量、
+       * 不影响清单，区分开能少作废一份，但四种动作各自判一次必然有人漏——
+       * 而漏掉的表现是"页面没更新"，比多发一次请求糟得多。
+       */
       void queryClient.invalidateQueries({ queryKey: ['orders'], refetchType: 'active' })
+      invalidateAfterMenuChange(queryClient)
     },
   })
 }
@@ -419,6 +451,7 @@ export function useRepeatMeal() {
         }
       }
       void queryClient.invalidateQueries({ queryKey: ['orders'], refetchType: 'active' })
+      invalidateAfterMenuChange(queryClient)
     },
   })
 }

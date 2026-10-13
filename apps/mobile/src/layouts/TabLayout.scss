@@ -26,7 +26,29 @@
 }
 
 /*
- * 换页时淡入 + 轻轻上浮（动画在 TabLayout.tsx 里靠 key=pathname 重播）。
+ * 换页动画（动画在 TabLayout.tsx 里靠 key=pathname 重播，方向由 use-page-turn 算）。
+ *
+ * 原来是"淡入 + 轻轻上浮"一条，**进和退播同一个**——用户 2026-10-14 报
+ * 「前进后退没有那种左右翻页的效果」。现在按方向分三条：
+ *
+ * - `--forward`（往里进，如列表 → 详情）：**从右边滑进来**；
+ * - `--back`（往回退，「← 返回」与安卓返回键）：**从左边滑进来**；
+ * - `--fade`（底栏五个 Tab 之间互跳、以及首次进入）：还是原来那条淡入上浮。
+ *   Tab 是**平级的五个岛**，横向滑动会让人以为它们有前后关系。
+ *
+ * 三件事刻意的：
+ * - **基础样式是完全可见的那一份**（下面 `.tab-layout__page` 里没有任何 opacity/transform），
+ *   动画只是"挂上去的那 0.24 秒"。`use-page-turn` 到点会把动画类**摘掉**，
+ *   于是这一层回到基础样式。为什么必须这样：**CSS 动画可能压根不跑**（WebView 被节流、
+ *   系统关了动画、渲染进程正忙），那时元素会一直停在第一帧 `opacity: 0`，
+ *   页面**永远看不见**——底栏与 AI 球在别处还在，内容区却是一片空白。2026-10-14
+ *   装机复验真撞上过（模拟器上空白了两分多钟）。所以**可见性不许依赖动画跑没跑**；
+ * - **只动新页面，不做"两层同时在屏上"**：真做两层要留住旧页面的 DOM（它已经卸载了），
+ *   得引一层 KeepAlive 或者把 Outlet 改成手动的双层渲染——代价是每个页面都要能"被冻住
+ *   还不出错"（定时器、订阅、blob URL 都在跑）。手机上 0.24 秒的一趟，
+ *   **滑动方向**就是用户要的全部信息；
+ * - **位移用百分比**（`translateX(18%)` 而不是 `40vw`）：比例随容器走，
+ *   分屏/横屏/折叠屏展开时不会突然变成"滑过头"。
  *
  * `height: 100%` 不是装饰：页面根节点（`.page` / `.pscreen`）里有 `min-height: 100%`，
  * 那需要一个**高度确定**的父元素才生效。夹了这一层却把它写成 auto 的话，
@@ -34,6 +56,17 @@
  */
 .tab-layout__page {
   height: 100%;
+}
+
+.tab-layout__page--forward {
+  animation: page-in-right 0.24s ease-out;
+}
+
+.tab-layout__page--back {
+  animation: page-in-left 0.24s ease-out;
+}
+
+.tab-layout__page--fade {
   animation: page-in 0.24s ease-out;
 }
 
@@ -46,6 +79,32 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* 往里进：从右边推进来（与"这一页在上一页的右边"这个直觉一致） */
+@keyframes page-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(18%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 往回退：从左边回来 */
+@keyframes page-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-18%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
   }
 }
 

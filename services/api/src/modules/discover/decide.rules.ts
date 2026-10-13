@@ -128,12 +128,12 @@ export function rankDecide(rows: readonly DecideCandidate[]): DecideCandidate[] 
  * 所以新鲜的在前面、刚做过的跟在后面，两边的内部顺序都不动；
  * 没有新鲜可选时（刚起步的家庭只做过那几顿）顺序与不筛时完全一样。
  */
-export function preferFresh(
-  ranked: readonly DecideCandidate[],
+export function preferFresh<T extends { lastCookedOn: string | null }>(
+  ranked: readonly T[],
   recentKeys: readonly string[],
-): DecideCandidate[] {
+): T[] {
   const recent = new Set(recentKeys)
-  const isRecent = (row: DecideCandidate) => row.lastCookedOn !== null && recent.has(row.lastCookedOn)
+  const isRecent = (row: T) => row.lastCookedOn !== null && recent.has(row.lastCookedOn)
   return [...ranked.filter((row) => !isRecent(row)), ...ranked.filter(isRecent)]
 }
 

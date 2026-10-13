@@ -466,6 +466,67 @@
   color: var(--color-ink-3);
 }
 
+/*
+ * 「这一餐要买什么」（F7-06，用户 2026-10-14 报的第二件事）。
+ *
+ * 视觉上**与「人数」那一行同一档**（都是汇总视图里的信息块，不是主按钮），
+ * 但用左边一道竖线把它与上面区分开：它是"顺带看一眼"的信息，
+ * 而真正要用户做的动作还是底下那个「就这些，定了」。
+ *
+ * 不用红色/警告色：**缺料不是错误**，正是买菜这件事本身。
+ * 上了警告色会让用户以为"定不了"，而它其实照样能定。
+ */
+.confirm-menu__shopping {
+  padding: 10px 12px;
+  margin-top: 12px;
+  background: var(--color-cream-2);
+  border: 1px solid var(--color-line);
+  border-left: 3px solid #e0b183;
+  border-radius: 12px;
+}
+
+.confirm-menu__shopping-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--color-ink-3);
+
+  b {
+    font-size: 13px;
+    color: #c4652a;
+  }
+}
+
+.confirm-menu__shopping-list {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--color-ink-2);
+}
+
+.confirm-menu__shopping-note {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-3);
+}
+
+.confirm-menu__shopping-go {
+  padding: 0;
+  margin-top: 8px;
+  font-family: inherit;
+  font-size: 11.5px;
+  color: #c4652a;
+  cursor: pointer;
+  background: none;
+  border: 0;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
 .confirm-menu__submit {
   width: 100%;
   margin-top: 14px;

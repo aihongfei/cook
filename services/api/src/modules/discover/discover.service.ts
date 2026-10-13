@@ -3,6 +3,7 @@ import { publicImageUrl } from '../media/media.storage'
 import type { FamilyRole } from '../family/family.roles'
 import { dateKey, visibleToMember } from '../orders/orders.rules'
 import { PrismaService } from '../recipes/prisma.service'
+import { canWriteRecipe, sourceLabel } from '../recipes/recipe.rules'
 import { expiryState } from '../fridge/fridge.rules'
 import { matchDish } from '../fridge/pantry.rules'
 import { judgeDish } from '../taste/taste.rules'
@@ -25,6 +26,13 @@ import {
   RECENT_DAYS,
   type DecideCandidate,
 } from './decide.rules'
+import {
+  fillWithExtras,
+  parseRecommendCount,
+  pickRecommendations,
+  scoreCandidates,
+  type RecommendScore,
+} from './recommend.rules'
 
 /**
  * 家人最爱 / 家人常点（M5 / F5-02）。口径见 D-038。
@@ -258,7 +266,142 @@ export class DiscoverService {
     }
   }
 
-  // ---------- 内部 ----------
+  /**
+   * 首页「菜谱推荐」（用户 2026-10-14 报的第三件事）。口径见 D-071。
+   *
+   * 与 `decide` 的分工：那个是"**就现在这一餐**给我一道"，要冰箱、要临期、要挑到一道；
+   * 这个是"**这一屏放几道**"，要的是"像他家会吃的、但每次不太一样"。
+   *
+   * 为什么不直接在 `/recipes` 上加个 `random=1`：那一支是**公共菜谱库的读接口**，
+   * 匿名也能翻（应用门面，见 recipes.controller 的注释）。个性化要家庭关系、要共享开关、
+   * 要口味档案——这些是"这家人"的东西，塞进公共读接口会让它一半公开一半私人
+   * （同一个 URL 带不带 token 返回两套语义，缓存与权限都说不清）。
+   * 所以挂在 `discover` 下，与「家人最爱」「帮我决定」同一处。
+   */
+  async recommend(userId: string, rawCount?: unknown) {
+    const count = parseRecommendCount(rawCount)
+
+    const membership = await this.prisma.familyMember.findUnique({
+      where: { userId },
+      include: { family: true },
+    })
+    if (!membership) throw new NotFoundException('先加入家庭，才能给你挑你家的菜')
+    const { familyId } = membership
+    const role = membership.role as FamilyRole
+    const scope = visibleToMember(membership.family.shared, role)
+
+    /*
+     * 五样输入并行取：冰箱、做过、收藏、口味档案、菜谱全表。
+     * 与 `decide` 同一套信号——**不另定一份权重**（那里是 `COOKED_WEIGHT`/`FAVORITE_WEIGHT`）。
+     */
+    const now = new Date()
+    const [fridgeRows, itemRows, favoriteRows, recipes, profiles] = await Promise.all([
+      this.prisma.fridgeItem.findMany({
+        where: { familyId, ...(scope === 'mine' ? { addedById: userId } : {}) },
+        select: { name: true, expiresOn: true },
+      }),
+      this.cookedRows(familyId, scope === 'mine' ? userId : null),
+      this.favoriteRows(familyId, scope === 'mine' ? userId : null),
+      this.prisma.recipe.findMany({
+        select: {
+          id: true, name: true, image: true, imageKey: true, category: true, cuisine: true,
+          calories: true, caloriesEstimated: true, spiciness: true, ingredients: true,
+          // 下面四个是**卡片直接要的**（与 `/recipes` 的 `RecipeSummary` 同形，见下）
+          tags: true, origin: true, familyId: true, createdById: true,
+        },
+      }),
+      this.taste.activeProfiles(familyId),
+    ])
+
+    if (recipes.length === 0) {
+      return { scope, reason: '菜谱小书里还没有菜，先去加几道', items: [], total: 0, fridgeEmpty: fridgeRows.length === 0 }
+    }
+
+    const soonNames = new Set(
+      fridgeRows
+        .filter((row) => row.expiresOn !== null && expiryState(row.expiresOn, now) !== null)
+        .map((row) => row.name),
+    )
+    const pantry = fridgeRows.map((row) => row.name)
+    const cooked = countCooked(itemRows)
+    const favorites = countFavorites(favoriteRows)
+
+    const scored: RecommendScore[] = scoreCandidates(
+      recipes
+        .filter((recipe) => {
+          // 口味优先于一切：过敏的菜不该出现在首页（F5-03 同一个判据）
+          if (profiles.length === 0) return true
+          const ingredients = readIngredientNames(recipe.ingredients)
+          return (
+            judgeDish({ name: recipe.name, spiciness: recipe.spiciness, ingredients }, profiles).verdict !== 'block'
+          )
+        })
+        .map((recipe) => {
+          const ingredients = readIngredientNames(recipe.ingredients)
+          const match = matchDish(ingredients, pantry)
+          const soon = (match?.have ?? []).filter((name) => soonNames.has(name))
+          /*
+           * `ready` 只给"冰箱里正好有临期的"加分，**满分也就 1**——
+           * 它比一次收藏（`FAVORITE_WEIGHT` = 1）一样重，比一次做过（2）轻。
+           * 这个位置是刻意的：临期是"今天就能做"的强信号，但不该盖过"他家常做这道"。
+           */
+          return {
+            id: recipe.id,
+            cooked: cooked.get(recipe.id)?.cooked ?? 0,
+            favorites: favorites.get(recipe.id) ?? 0,
+            lastCookedOn: cooked.get(recipe.id)?.lastCookedOn ?? null,
+            ready: soon.length > 0 ? 1 : 0,
+          }
+        }),
+    )
+
+    /*
+     * 顺序与 `decide` 一致：**先把最近做过的往后放，再在分数靠前的那一池里随机**。
+     *
+     * 两步都只在"还有别的可选"时改变结果（`fillWithExtras` 兜底），
+     * 所以小家庭（就爱吃那几道）不会因此得到一屏陌生菜。
+     */
+    const recentKeys = recentDayKeys(RECENT_DAYS, now)
+    const fresh = preferFresh(scored, recentKeys)
+    const filled = fillWithExtras(pickRecommendations(fresh, count), fresh, count)
+
+    const byId = new Map(recipes.map((recipe) => [recipe.id, recipe]))
+    const items = filled.flatMap((row) => {
+      const source = byId.get(row.id)
+      if (!source) return []
+      /*
+       * 字段与 `/recipes` 的 `RecipeSummary` **同形**（外加 `cooked`/`favorites`）：
+       * 首页用的还是同一张 `DishCard`，卡片要 `origin`/`sourceLabel` 画来源角标、
+       * 要 `mine` 决定画不画编辑键。少一个字段卡片就画不出来，而"再写一张推荐专用卡"
+       * 会让两处的样式慢慢分叉——复用同一张卡是这一条的目的。
+       */
+      return [{
+        id: source.id,
+        name: source.name,
+        image: publicImageUrl(source.imageKey, source.image),
+        category: source.category,
+        cuisine: source.cuisine,
+        tags: source.tags as string[],
+        calories: source.calories,
+        caloriesEstimated: source.caloriesEstimated,
+        origin: source.origin,
+        sourceLabel: sourceLabel(source.origin),
+        mine: canWriteRecipe(source, { userId, familyId }),
+        /** 做过几次（首页要能说清"凭什么推这几道"，否则与随机没区别） */
+        cooked: row.cooked,
+        favorites: row.favorites,
+      }]
+    })
+
+    return {
+      scope,
+      items,
+      /** 参与挑选的菜一共几道（空状态时说清"库里有 600 道，只是没挑出来"） */
+      total: recipes.length,
+      /** 冰箱里一条都没记：界面要说"记了冰箱，推荐会跟着变" */
+      fridgeEmpty: fridgeRows.length === 0,
+    }
+  }
 
   /** 「做过」的行（F5-02 家人最爱与 F5-05 帮我决定共用：只认 DONE、按餐去重） */
   private async cookedRows(familyId: string, onlyUserId: string | null): Promise<CookedRow[]> {

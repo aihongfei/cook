@@ -6,6 +6,7 @@ import AiAssistantSheet from '@/components/ai/AiAssistantSheet'
 import { useAiAssistantSession } from '@/stores/ai-assistant-session'
 import { tabs } from '@/config/tabs'
 import { tabOf } from '@/pages/back-link'
+import { usePageTurn } from './use-page-turn'
 import './TabLayout.scss'
 
 /**
@@ -30,6 +31,17 @@ export default function TabLayout() {
   const isRecipePage = pathname === '/recipes' || pathname.startsWith('/recipes/')
   const borrowedTab = isRecipePage ? recipeOwner ?? '/kitchen' : null
 
+  /*
+   * 换页方向（用户 2026-10-14：「前进后退没有那种左右翻页的效果」）。
+   *
+   * 原来只有一条淡入上浮，**进和退播的是同一个**，于是"往里进"和"往回退"分不出来。
+   * 方向由 `usePageTurn` 在渲染期间算好（不能在 effect 里算：那时第一帧已经画完了），
+   * 它返回的是**要挂的类名修饰**（`--forward` / `--back` / `--fade`），
+   * 动画放完会自己返回空串——那种"动画压根不跑就永远 opacity:0"的情况因此不会发生
+   * （见 `use-page-turn` 里那段说明）。
+   */
+  const turnClass = usePageTurn()
+
   return (
     <div className="tab-layout">
       <main ref={bodyRef} className="tab-layout__body">
@@ -38,7 +50,7 @@ export default function TabLayout() {
           "啪"地替换掉旧页面（用户 2026-10-12：「整个系统都是不要生硬的」）——CSS 动画只在
           元素挂载时播一次，同一个 DOM 节点换了内容不会重播。
         */}
-        <div className="tab-layout__page" key={pathname}>
+        <div className={['tab-layout__page', turnClass].filter(Boolean).join(' ')} key={pathname}>
           <Outlet />
         </div>
       </main>

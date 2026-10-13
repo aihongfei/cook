@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useFavoriteStatus, useToggleFavorite } from '@/api/favorites'
-import { fetchRecipes, recipeErrorMessage, recipeListUrl, useRecipeFilters } from '@/api/recipes'
+import { recipeErrorMessage, recipeListUrl, useRecipeFilters } from '@/api/recipes'
+import { useRecommendations } from '@/api/recommend'
 import BottomSheet from '@/components/ui/BottomSheet'
 import Page from '@/components/ui/Page'
 import SectionTitle from '@/components/ui/SectionTitle'
@@ -22,12 +22,14 @@ export default function KitchenPage() {
   const [photoSheet, setPhotoSheet] = useState(false)
   const [familySheet, setFamilySheet] = useState(false)
   const filters = useRecipeFilters()
-  const recommendations = useQuery({
-    queryKey: ['recipes', 'recommendations'],
-    queryFn: ({ signal }) => fetchRecipes({}, 1, signal),
-    staleTime: 60_000,
-    retry: 1,
-  })
+  /*
+   * 菜谱推荐（D-071）：走 `/discover/recommend` 而不是 `/recipes`。
+   *
+   * 原来那一支是按 `name ASC` 取公共库第 1 页的前 6 条——**每次进首页都是同样六道**，
+   * 用户 2026-10-14 的原话：「现在固定那几样了，能不能随机一些呢，根据个人习惯、口味等进行推荐」。
+   * 现在的这一支按口味过滤 + 收藏/做过/冰箱临期排序，**在分数靠前的那一池里随机取**。
+   */
+  const recommendations = useRecommendations(6)
 
   // 收藏（F1-09）：与菜谱小书同一套——**一屏一次问清**（这里只有 6 张，但口径一致，
   // 免得以后推荐位变多时又要回来改）。没登录时 hook 不发请求、卡片不画心。
@@ -52,9 +54,13 @@ export default function KitchenPage() {
       <SectionTitle title="菜谱推荐" more="全部" onMoreClick={() => navigate('/recipes')} />
       {recommendations.isPending && <div className="kitchen-api-status"><RecipeStatus title="菜谱推荐加载中…" loading /></div>}
       {recommendations.isError && <div className="kitchen-api-status"><RecipeStatus title="推荐加载失败" onRetry={() => { void recommendations.refetch() }}>{recipeErrorMessage(recommendations.error)}</RecipeStatus></div>}
-      {recommendations.data && recommendations.data.items.length === 0 && <div className="kitchen-api-status"><RecipeStatus title="菜谱库里还没有菜谱">有菜谱后，会在这里和你见面。</RecipeStatus></div>}
+      {recommendations.data && recommendations.data.items.length === 0 && (
+        <div className="kitchen-api-status">
+          <RecipeStatus title="菜谱库里还没有菜谱">{recommendations.data.reason ?? '有菜谱后，会在这里和你见面。'}</RecipeStatus>
+        </div>
+      )}
       <div className="dish-row">
-        {recommendations.data?.items.slice(0, 6).map((dish) => (
+        {recommendations.data?.items.map((dish) => (
           <DishCard
             key={dish.id}
             dish={dish}
@@ -63,6 +69,21 @@ export default function KitchenPage() {
           />
         ))}
       </div>
+      {/*
+       * 推荐是**按家里的口味与冰箱挑的**，所以"没记冰箱"时要说一句——
+       * 不说的话用户看到的一屏与"随机"没区别，就看不出它认得他家
+       * （与采购清单那句"记了冰箱才能替你扣掉"同一条：空信号要说出来）。
+       */}
+      {recommendations.data && !recommendations.data.fridgeEmpty && recommendations.data.items.length > 0 && (
+        <button type="button" className="kitchen-recommend__why" onClick={() => navigate('/fridge', { state: { from: '/kitchen' } })}>
+          按家里的口味和冰箱挑的 · 去冰箱看看
+        </button>
+      )}
+      {recommendations.data?.fridgeEmpty && recommendations.data.items.length > 0 && (
+        <button type="button" className="kitchen-recommend__why" onClick={() => navigate('/fridge', { state: { from: '/kitchen' } })}>
+          记一下冰箱里有什么，推荐会跟着变 →
+        </button>
+      )}
       <SeasonalBanner />
 
       <BottomSheet visible={photoSheet} title="拍照识菜" onClose={() => setPhotoSheet(false)}>

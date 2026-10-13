@@ -69,6 +69,7 @@ export const TOOL_UPDATE_TASTE = 'update_taste'
  * 与菜单推出来的条目在界面上是同一种东西、共用同一套勾选。
  */
 export const TOOL_READ_SHOPPING = 'read_shopping_list'
+export const TOOL_PREVIEW_MEAL_SHOPPING = 'preview_meal_shopping'
 export const TOOL_ADD_SHOPPING_ITEMS = 'add_shopping_items'
 export const TOOL_CHECK_SHOPPING_ITEM = 'check_shopping_item'
 export const TOOL_REMOVE_SHOPPING_ITEM = 'remove_shopping_item'
@@ -631,6 +632,28 @@ export const AI_TOOLS = [
         type: 'object',
         properties: { days: { type: 'integer', description: '按往后几天算，默认 3' } },
         required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_PREVIEW_MEAL_SHOPPING,
+      description:
+        '看**某一餐**（还没定下来的也行）要买哪些、冰箱里已经有哪几样。**不写库。**'
+        + '用户问"鱼香肉丝要买什么""这一餐还缺什么"、或者你想告诉他"这道菜做起来要买几样"时用它。'
+        + '⚠️ 它算的是**一道菜/一餐的配料**，与整份采购清单不是一回事：'
+        + '整份清单（read_shopping_list）只算**已经定了的**餐次（已安排/准备中），'
+        + '而这一支连还没定的餐也能算——这正是它的用处：'
+        + '用户还没定这一餐时，只有它能告诉他"定了的话要买什么"。'
+        + '`missing` 里的菜没有配料表（自由菜品），要如实说"这几道算不出要买什么"。',
+      parameters: {
+        type: 'object',
+        properties: {
+          mealKey: { type: 'string', description: '哪一餐，如 `2026-10-14-DINNER`（先 read_menu 拿它）' },
+        },
+        required: ['mealKey'],
         additionalProperties: false,
       },
     },
@@ -1381,8 +1404,36 @@ export function shoppingText(board: {
   })
 }
 
-/** 读 `add_shopping_items` 的参数：一批「名字 + 数量」。返回 null = 参数根本解析不出来 */
-export function readShoppingAdds(rawArguments: string): { name: string; amount?: string }[] | null {
+/**
+ * 给模型看的「这一餐要买什么」（`preview_meal_shopping`）。
+ *
+ * 与 `shoppingText` 分开写而不是复用：那一份是**整份清单**（按货架分组、带勾选状态、
+ * 带"用户自己加的"标记），而这一份是**一道菜/一餐的配料**、没有勾选也没有自加条目。
+ * 硬凑成一个函数会让两边都要判"我这次是哪一种"，读起来比两段各自二十行更绕。
+ */
+export function mealShoppingText(preview: {
+  mealLabel: string
+  date: string
+  status: string
+  toBuy: { name: string; amount: string | null }[]
+  covered: { name: string; amount: string | null }[]
+  missing: string[]
+  stockEmpty: boolean
+}): string {
+  const head = `${preview.date} ${preview.mealLabel}：要买 ${preview.toBuy.length} 样，冰箱里已有 ${preview.covered.length} 样`
+  const buy = preview.toBuy.length
+    ? `要买：${preview.toBuy.map((item) => item.name + (item.amount ? `（${item.amount}）` : '')).join('、')}`
+    : '要买：不用买，冰箱里都有'
+  const have = preview.covered.length
+    ? `家里已有：${preview.covered.map((item) => item.name).join('、')}`
+    : ''
+  const lines = [head, buy, have].filter(Boolean)
+  if (preview.missing.length) lines.push(`${preview.missing.join('、')} 没有配料表，算不出要买什么`)
+  if (preview.stockEmpty) lines.push('（冰箱里还什么都没记，所以算不出"家里已有"，这些都是照买）')
+  return lines.join('\n')
+}
+
+/** 读 `add_shopping_items` 的参数：一批「名字 + 数量」。返回 null = 参数根本解析不出来 */export function readShoppingAdds(rawArguments: string): { name: string; amount?: string }[] | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(rawArguments)

@@ -485,6 +485,30 @@
   padding: 12px var(--spacing-page) 0;
 }
 
+/*
+ * 「按家里的口味和冰箱挑的」那一行（D-071）。
+ *
+ * 它是**按钮不是说明**：点它去冰箱页。用户 2026-10-14 说这一块"固定那几样"，
+ * 改成个性化之后得让人**看得出来它认得他家**——否则换了算法，观感上还是"随便给几道"。
+ * 样子刻意比正文轻（浅色小字），因为它不该抢菜品卡的注意力。
+ */
+.kitchen-recommend__why {
+  display: block;
+  padding: 0 var(--spacing-page);
+  margin-top: 4px;
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
 /* 时令食材横幅（整块为笔绘图片） */
 .seasonal {
   margin: 16px var(--spacing-page);

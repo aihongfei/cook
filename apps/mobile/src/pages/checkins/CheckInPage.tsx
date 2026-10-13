@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
-import { useCheckInWall } from '@/api/checkins'
+import { useCheckInWall, type CheckIn } from '@/api/checkins'
 import { useFamily } from '@/api/family'
 import CheckInPhoto from '@/components/ui/CheckInPhoto'
 import EmptyState from '@/components/ui/EmptyState'
@@ -10,6 +10,7 @@ import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
 import CheckInUploadSheet from './components/CheckInUploadSheet'
+import CheckInDetailSheet from './components/CheckInDetailSheet'
 import './checkins.scss'
 
 /**
@@ -26,6 +27,8 @@ export default function CheckInPage() {
   const family = useFamily()
   const [scope, setScope] = useState<'family' | 'mine'>('family')
   const [uploading, setUploading] = useState(false)
+  /** 点开看详情的那一张（用户 2026-10-14：「打卡墙卡片不能点击查看详情」） */
+  const [opened, setOpened] = useState<CheckIn | null>(null)
   // 每次打开都 +1，用来给抽屉换 key：抽屉不在 effect 里清状态，靠重挂载拿回干净的一份
   const [uploadSeq, setUploadSeq] = useState(0)
   const openUpload = () => {
@@ -99,7 +102,21 @@ export default function CheckInPage() {
 
         <div className="checkin-grid">
           {entries.map((entry) => (
-            <figure className="checkin-card" key={entry.id}>
+            /*
+             * 卡片是**按钮**（用户 2026-10-14：「打卡墙卡片不能点击查看详情」）。
+             *
+             * 原来是纯 `<figure>`：一屏照片谁做的、几点拍的、当时说了什么，
+             * 全都塞不进那张小卡里，而**没处点**就等于这些信息不存在。
+             * 用 `<button>` 而不是给 `<figure>` 挂 onClick：键盘/读屏能聚焦、能回车打开
+             * （给 `figure` 加 tabIndex 只是把"可点"画上去，语义仍然是一张插图）。
+             */
+            <button
+              type="button"
+              className="checkin-card"
+              key={entry.id}
+              onClick={() => setOpened(entry)}
+              aria-label={`看${entry.isMe ? '我' : entry.nickname} ${entry.checkDate} 的打卡详情`}
+            >
               <CheckInPhoto photoUrl={entry.photoUrl} alt={entry.note ?? `${entry.nickname}的打卡`} />
               <figcaption>
                 <span className="checkin-card__who">
@@ -109,7 +126,7 @@ export default function CheckInPage() {
                 {entry.note && <span className="checkin-card__note">{entry.note}</span>}
                 <span className="checkin-card__date">{entry.checkDate}</span>
               </figcaption>
-            </figure>
+            </button>
           ))}
         </div>
 
@@ -126,6 +143,10 @@ export default function CheckInPage() {
           onUploaded={() => setScope('family')}
         />
       )}
+
+      {/* 详情抽屉。**只在点开时才挂载**（与上传抽屉同一做法）：它自己会取一次照片字节，
+          墙上一屏十几张不该因为"可能会点"就各自多取一份 */}
+      {opened && <CheckInDetailSheet entry={opened} onClose={() => setOpened(null)} />}
     </Page>
   )
 }

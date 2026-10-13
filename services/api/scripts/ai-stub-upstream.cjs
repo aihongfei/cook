@@ -802,6 +802,73 @@ const server = http.createServer((req, res) => {
       return
     }
 
+    // ---------- 「做这道菜要买什么」（preview_meal_shopping，用户 2026-10-14 报的第二件事）----------
+    /*
+     * 这一支必须排在采购清单那一段**前面**：用户的原话是
+     * 「我让 ai 加入鱼香肉丝的配料到采购清单，他不加入，要让我加到订单中就自动出现了」——
+     * 这句话里既有"采购清单"也有"要买"，会被下面那段抢走，然后演成"往清单上写东西"。
+     *
+     * 真实模型该走的也是这条路：**不写库**，先 read_menu 拿 mealKey，再 preview_meal_shopping
+     * 把这一餐要买的几样列出来，然后说清"定了这一餐它就进清单"。
+     */
+    const previewMode = /要买什么|缺什么|买些什么|需要买|要买哪|得买|买点啥|缺些/.test(user)
+      && tools.some((t) => t.function?.name === 'preview_meal_shopping')
+      && !/收进冰箱|补货|勾掉|买到了|加进采购|加到采购/.test(user)
+    if (previewMode) {
+      const menuTextForPreview = String(
+        toolResults.find((m) => /mealKey/.test(String(m.content)))?.content ?? '',
+      )
+      const previewResult = toolResults
+        .map((m) => String(m.content))
+        .find((text) => /要买 \d+ 样|家里已有|冰箱里还什么都没记/.test(text)) ?? ''
+      /*
+       * 轮次一：还没有菜单 → 先 `read_menu` 拿 mealKey。
+       * 轮次二：拿到 mealKey → 调 `preview_meal_shopping`。
+       * 轮次三：两条都齐了 → 收尾（不再调工具）。
+       *
+       * 为什么非要先读菜单：`preview_meal_shopping` 要的是 `mealKey`（如 `2026-10-14-DINNER`），
+       * 而 stub 造不出真实日期——只能从 `read_menu` 的返回里解出来，与"撤菜要先拿 itemId"同一个道理。
+       */
+      const meals = parseMenuForStub(menuTextForPreview)
+      const previewMeal = meals.find((row) => row.dishes.length > 0) ?? meals[0] ?? null
+      const previewCalls = previewResult
+        ? []
+        : !menuTextForPreview
+          ? [{ id: 'call_preview_1', name: 'read_menu', args: {} }]
+          : previewMeal
+            ? [{ id: 'call_preview_2', name: 'preview_meal_shopping', args: { mealKey: previewMeal.mealKey } }]
+            : []
+      if (previewCalls.length === 0) {
+        const previewFinal = previewResult
+          ? `${previewResult.split('\n')[0]}。定了这一餐，这些就会进采购清单（现在还没写进去）。`
+          : '这几天的菜单上还没有菜，先点一道想吃的，我就能算出要买什么。'
+        console.log(`[stub] 餐次采购预览收尾：${previewFinal.slice(0, 24)}…`)
+        res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+        const textFrame = (chunk, finish) => `data: ${JSON.stringify({
+          id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+          model: parsed.model, choices: [{ index: 0, delta: chunk, finish_reason: finish }],
+        })}\n\n`
+        res.write(textFrame({ role: 'assistant', content: previewFinal }, null))
+        res.write(textFrame({}, 'stop'))
+        res.write('data: [DONE]\n\n')
+        res.end()
+        return
+      }
+      console.log(`[stub] 餐次采购预览：${previewCalls.map((call) => call.name).join(',')}`)
+      res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+      const frame = (delta, finish) => `data: ${JSON.stringify({
+        id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+        model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }],
+      })}\n\n`
+      for (const call of previewCalls) {
+        res.write(frame({ tool_calls: [{ index: 0, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } }] }, null))
+      }
+      res.write(frame({}, 'tool_calls'))
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
+    }
+
     // ---------- 采购清单（M7，用户 2026-10-14 要求接入）----------
     /*
      * 五种：读清单 / 加自加条目 / 勾选 / 删自加条目 / 一键补货。

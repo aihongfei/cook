@@ -1,7 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import type { FamilyRole } from '../family/family.roles'
 import { toView, type FridgeItemView } from '../fridge/fridge.rules'
-import { MEAL_LABEL, dateKey, dateOnly, dayWindow, parsePlanDays, visibleToMember } from '../orders/orders.rules'
+import {
+  MEAL_LABEL,
+  dateKey,
+  dateOnly,
+  dayWindow,
+  mealKeyOf,
+  parseMealKey,
+  parsePlanDays,
+  visibleToMember,
+} from '../orders/orders.rules'
 import { PrismaService } from '../recipes/prisma.service'
 import {
   AISLE_ORDER,
@@ -211,6 +220,103 @@ export class ShoppingService {
       missing,
       /** 一共几道菜参与（含待补的）：清单为空时界面据此说清原因 */
       dishCount: dishes.length + missing.length,
+    }
+  }
+
+  /* ---------------------------------------------------------------- *
+   * F7-06 「这一餐要买什么」预览（定这一餐之前看的那一眼）
+   * ---------------------------------------------------------------- */
+
+  /**
+   * 单看**一餐**：它要买哪些、家里已经有哪几样。用户 2026-10-14 报的第二件事。
+   *
+   * 与 `list` 的差别只有一处、但很关键：**不按状态过滤**。
+   * `list` 只算 `PLANNED`/`COOKING`（那是"定了才去买"的规矩，D-059），
+   * 而这一支是给**还没定的那一餐**看的——用户正在「定下这一餐」的汇总页上，
+   * 正好要决定要不要定。如果它也按状态过滤，那时候看到永远是"没有要买的"，
+   * 这个提示就等于不存在。
+   *
+   * 聚合与比对**复用 `list` 那一套规则函数**（`aggregateIngredients` + `isBuyable` + `applyStock`），
+   * 不另写一份：另算一份必然分叉——汇总页说"缺 3 样"、清单页列 5 样，
+   * 用户就不知道信哪个（与 `decide` 不自己重算推荐同一条道理）。
+   */
+  async previewMeal(userId: string, rawMealKey: unknown) {
+    const { familyId, role, shared } = await this.requireMember(userId)
+    const scope = visibleToMember(shared, role)
+
+    const mealKey = typeof rawMealKey === 'string' ? rawMealKey.trim() : ''
+    if (!mealKey) throw new BadRequestException('要告诉我哪一餐（mealKey）')
+    // 格式不对时 `parseMealKey` 自己抛中文话术，这里不必再包一层
+    const { mealDate, meal } = parseMealKey(mealKey)
+
+    const row = await this.prisma.mealOrder.findUnique({
+      where: { familyId_mealDate_meal: { familyId, mealDate, meal } },
+      include: {
+        items: { select: { recipeId: true, recipeName: true, userId: true } },
+      },
+    })
+    if (!row) throw new NotFoundException('这一餐还没有人点菜')
+
+    // 可见性与 list 同一套闸门（共享关掉时只看自己参与的餐）
+    if (scope === 'mine' && !row.items.some((item) => item.userId === userId)) {
+      throw new NotFoundException('这一餐里没有你点的菜')
+    }
+
+    const recipeIds = [
+      ...new Set(row.items.map((item) => item.recipeId).filter((id): id is string => Boolean(id))),
+    ]
+    const recipes = await this.prisma.recipe.findMany({
+      where: { id: { in: recipeIds } },
+      select: { id: true, name: true, ingredients: true },
+    })
+    const ingredientsById = new Map(
+      recipes.map((recipe) => [recipe.id, recipe.ingredients as { name: string; amount: string }[]]),
+    )
+    const nameById = new Map(recipes.map((recipe) => [recipe.id, recipe.name]))
+
+    const dishes: DishIngredients[] = []
+    const missing: string[] = []
+    for (const item of row.items) {
+      const ingredients = item.recipeId ? ingredientsById.get(item.recipeId) : undefined
+      if (!ingredients) {
+        if (!missing.includes(item.recipeName)) missing.push(item.recipeName)
+        continue
+      }
+      dishes.push({ dish: nameById.get(item.recipeId as string) ?? item.recipeName, ingredients })
+    }
+
+    const stockRows: StockRow[] = await this.prisma.fridgeItem.findMany({
+      where: { familyId, ...(scope === 'mine' ? { addedById: userId } : {}) },
+      select: { name: true, amount: true },
+    })
+
+    const items = applyStock(
+      aggregateIngredients(dishes).filter((item) => isBuyable(item.name)),
+      stockRows,
+    )
+    const toBuy = items.filter((item) => item.needsBuy)
+    const covered = items.filter((item) => !item.needsBuy)
+
+    return {
+      mealKey: mealKeyOf(mealDate, meal),
+      date: dateKey(mealDate),
+      meal,
+      mealLabel: MEAL_LABEL[meal],
+      /** 这一餐此刻的状态：界面据此说"定了才有清单"还是"清单上已经有了" */
+      status: row.status,
+      /** 几道菜（`missing` 那几道没有配料表，算不进条目里，但要说出来） */
+      dishCount: dishes.length,
+      missing,
+      /** 要买的（`missing` 与"家里不够"）；界面主要看它 */
+      toBuy: toBuy.map((item) => ({ name: item.name, amount: item.amount, from: item.from, stockLabel: item.stockLabel })),
+      /** 家里已经有、不用买的 */
+      covered: covered.map((item) => ({ name: item.name, amount: item.amount, stockLabel: item.stockLabel })),
+      toBuyCount: toBuy.length,
+      coveredCount: covered.length,
+      /** 其中"量算不清、够不够自己看"的样数 */
+      unsureCount: covered.filter((item) => item.stock.verdict === 'unknown').length,
+      /** 冰箱里一条都没记：界面要说"记了冰箱才能替你扣掉" */
+      stockEmpty: stockRows.length === 0,
     }
   }
 

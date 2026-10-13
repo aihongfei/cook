@@ -46,6 +46,19 @@ export class ShoppingController {
     return this.shopping.list(userId, days)
   }
 
+  /**
+   * 单看一餐（F7-06）。**放在 `check` 这些写动作之前**只是为了读起来顺，
+   * 它本身必须排在 `@Get()` 后面且**不能被 `:id` 那种动态段吃掉**——
+   * 本控制器里没有 GET 动态段，所以 `preview` 不会被当成某个 id。
+   */
+  @Get('preview')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '单看一餐要买什么（定这一餐之前的那一眼，F7-06）' })
+  @ApiQuery({ name: 'mealKey', required: true, description: '哪一餐，如 2026-10-14-DINNER' })
+  async preview(@CurrentUserId() userId: string, @Query('mealKey') mealKey?: string) {
+    return this.shopping.previewMeal(userId, mealKey)
+  }
+
   @Post('check')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '勾掉 / 取消勾选一样东西（F7-03 持久化）' })

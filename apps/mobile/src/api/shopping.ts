@@ -103,6 +103,68 @@ export async function fetchShoppingList(days?: number, signal?: AbortSignal): Pr
   return data
 }
 
+/** 预览里的条目（比清单条目少一层：这里只要"买什么、家里有没有"这两件事） */
+export interface MealPreviewItem {
+  name: string
+  amount: string | null
+  /** 哪几道菜要用它（预览时一般就一道） */
+  from?: string[]
+  stockLabel: string | null
+}
+
+/** 单看一餐要买什么（F7-06）。**比整份清单少很多字段**——它只服务"定这一餐"那一眼 */
+export interface MealPreview {
+  mealKey: string
+  date: string
+  meal: string
+  mealLabel: string
+  /** 这一餐此刻的状态（`PENDING` = 还没定，清单页此刻还看不到它） */
+  status: string
+  dishCount: number
+  /** 没有配料表可算的菜（自由菜品）：必须说出来，否则用户以为"要买的就是这些" */
+  missing: string[]
+  /** 要买的 */
+  toBuy: MealPreviewItem[]
+  /** 家里已经有、不用买的 */
+  covered: MealPreviewItem[]
+  toBuyCount: number
+  coveredCount: number
+  /** 其中"量算不清、够不够自己看"的样数 */
+  unsureCount: number
+  /** 冰箱里一条都没记 */
+  stockEmpty: boolean
+}
+
+/**
+ * 「这一餐要买什么」。**不写库**（`GET`）——它只是让人看一眼再决定要不要定这一餐。
+ *
+ * 为什么需要它：用户 2026-10-14 报「我让 ai 加入鱼香肉丝的配料到采购清单，
+ * 他不加入，要让我加到订单中就自动出现了」——那个行为本身是对的（清单按菜单配料算，
+ * 见 D-039），但用户在**定这一餐之前**看不到"会缺什么"，只能先把餐定了再去清单页翻。
+ * 这一步让他当场看见缺口、并且**自己去决定要不要买**（绝不自动写进清单）。
+ */
+export async function fetchMealPreview(mealKey: string, signal?: AbortSignal): Promise<MealPreview> {
+  const { data } = await apiClient.get<MealPreview>('/shopping-list/preview', {
+    params: { mealKey },
+    signal,
+  })
+  return data
+}
+
+/**
+ * 定这一餐的汇总页上那一块（F7-06）。
+ *
+ * `enabled` 由父级传：抽屉没开、或这一餐还没点菜（后端会 404）时不该发请求。
+ */
+export function useMealPreview(mealKey: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['shopping', 'preview', mealKey],
+    queryFn: ({ signal }) => fetchMealPreview(mealKey as string, signal),
+    enabled: Boolean(mealKey) && enabled,
+    staleTime: 0,
+  })
+}
+
 /**
  * 清单缓存的键。**读与写必须落在同一处**（勾选是乐观更新，写错键就会出现
  * "点了没反应、重进又对了"这种最难查的错），所以读写都走这个函数，不各写一遍字面量。

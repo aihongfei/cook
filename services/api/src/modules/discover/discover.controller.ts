@@ -23,6 +23,20 @@ export class DiscoverController {
   }
 
   /**
+   * 首页「菜谱推荐」：按这家人的口味/收藏/做过排序，**在这一批里随机取几道**。
+   *
+   * 它替代了首页原来直接调 `GET /recipes` 的做法（用户 2026-10-14：
+   * 「首页的菜谱推荐现在固定那几样了」——原来按 `name ASC` 取前 6 条，每天一样）。
+   */
+  @Get('recommend')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '首页菜谱推荐：按口味与习惯挑一屏，每次不同（D-071）' })
+  @ApiQuery({ name: 'count', required: false, description: '要几道，默认 6、上限 18' })
+  async recommend(@CurrentUserId() userId: string, @Query('count') count?: string) {
+    return this.discover.recommend(userId, count)
+  }
+
+  /**
    * 帮我决定（F5-05）：**只给一道**。
    *
    * `exclude` 是「换一道」用的：把这一轮已经看过的 id 报回来（逗号分隔），

@@ -20,15 +20,14 @@ import {
   TOOL_READ_PLAN, TOOL_READ_RECIPES, TOOL_REMOVE_FRIDGE_ITEM, TOOL_REMOVE_MENU_ITEM, TOOL_REPEAT_MEAL,
   TOOL_READ_TASTE, TOOL_ROUNDS_MAX, TOOL_SEARCH_DISHES, TOOL_SET_DINERS, TOOL_SET_MEAL_STATUS,
   TOOL_TOGGLE_FAVORITE, TOOL_UPDATE_COMBO, TOOL_UPDATE_FRIDGE_ITEM, TOOL_UPDATE_RECIPE, TOOL_UPDATE_TASTE,
-  TOOL_READ_SHOPPING, TOOL_ADD_SHOPPING_ITEMS, TOOL_CHECK_SHOPPING_ITEM, TOOL_REMOVE_SHOPPING_ITEM, TOOL_RESTOCK_SHOPPING,
+  TOOL_READ_SHOPPING, TOOL_PREVIEW_MEAL_SHOPPING, TOOL_ADD_SHOPPING_ITEMS, TOOL_CHECK_SHOPPING_ITEM, TOOL_REMOVE_SHOPPING_ITEM, TOOL_RESTOCK_SHOPPING,
   SHOPPING_ADD_MAX, SHOPPING_CHECK_MAX, SHOPPING_RESTOCK_MAX,
   TOOL_WHAT_TO_COOK, TOOL_READ_FAMILY_PICKS, TOOL_READ_CHECKINS,
   FAVORITES_LIST_MAX, CHECKIN_LIST_MAX,
-  comboText, fridgeText, menuText, readAddItems, readComboDraft, readDiners, readIdArg, readMealStatus,
+  comboText, fridgeText, mealShoppingText, menuText, readAddItems, readComboDraft, readDiners, readIdArg, readMealStatus,
   readMealTarget, readMenuAdds, readProposals, readRecipeDraft, readRecipePatch, readRemoveItem,
   readNameList, readShoppingAdds, shoppingText,
-  readTastePatch, readUpdateItem, recipeText, searchResult, todayKey, toolResult,
-  type MenuProposal, type ToolCall,
+  readTastePatch, readUpdateItem, recipeText, searchResult, todayKey, toolResult,  type MenuProposal, type ToolCall,
 } from './ai.tools'
 import { AiActionService, humanError, type AiReceipt } from './ai-action.service'
 import { CheckInsService } from '../checkins/checkins.service'
@@ -408,6 +407,7 @@ export class AiService {
        */
       `采购清单（要去买什么）也能直接帮你办：`
         + `看现在缺什么 → ${TOOL_READ_SHOPPING}（它已按货架分好组、标出了家里已有的和已勾掉的）；`
+        + `看**某一餐**要买什么 → ${TOOL_PREVIEW_MEAL_SHOPPING}（**不写库**，还没定的餐也能算）；`
         + `加想去买的 → ${TOOL_ADD_SHOPPING_ITEMS}（**这个也会真的写库**，有回执可撤）；`
         + `买到就勾上 → ${TOOL_CHECK_SHOPPING_ITEM}；`
         + `不想买那条自加的 → ${TOOL_REMOVE_SHOPPING_ITEM}；`
@@ -416,7 +416,15 @@ export class AiService {
         + '清单是"要去买什么"。用户说"把某道菜需要的食材加进采购单"时，'
         + '正确的做法是**把那道菜加进菜单**（清单会照它的配料自己算出来），'
         + '而不是把一堆食材名一条条手写进清单——手写的那些在菜单变了之后不会跟着变。'
-        + '只有"清单上没有、也不是哪道菜要的"（垃圾袋、洗洁精）才用 add_shopping_items。',
+        + '只有"清单上没有、也不是哪道菜要的"（垃圾袋、洗洁精）才用 add_shopping_items。'
+        /*
+         * 用户 2026-10-14 报的原文：「我让 ai 加入鱼香肉丝的配料到采购清单，**他不加入**，
+         * 要让我加到订单中就自动出现了」——说明只讲界线还不够：模型答"你得先去点菜"
+         * 就把人打发了，而用户真正要的是"那做这道菜要买什么"。所以下面这一句要求它**当场算给他看**。
+         */
+        + `⚠️ 用户问"做某道菜要买什么/这餐还缺什么"时，**不要只说"你得先去点菜"**——`
+        + `用 ${TOOL_PREVIEW_MEAL_SHOPPING} 当场把它要买的几样列出来（还没定的餐也算得出来），`
+        + '再说清"定了这一餐之后它就会进采购清单"。这样他既拿到了答案，也知道下一步点哪里。',
       `要让用户明白哪些事你能直接做、哪些要他自己点：冰箱、菜单、自家菜谱、常用组合、收藏、采购清单都可以`
         + '（有回执可撤；状态流转没有撤销）；家庭管理（改角色、转让、退家庭）你没有工具，'
         + '用户问起就告诉他去"我的 → 家庭"里做。'
@@ -722,6 +730,32 @@ export class AiService {
           coveredCount: board.coveredCount,
           missing: board.missing,
           meals: board.meals.map((meal) => ({ mealLabel: meal.mealLabel, date: meal.date })),
+        })
+      } catch (error) {
+        return toolResult({ error: humanError(error) })
+      }
+    }
+
+    /*
+     * 「这一餐要买什么」（用户 2026-10-14：「我让 ai 加入鱼香肉丝的配料到采购清单，
+     * 他不加入，要让我加到订单中就自动出现了」）。
+     *
+     * 只读、不写库。它是给上面那段"清单与菜单的界线"配的**证据来源**：
+     * 模型原来只能回答"你得先把菜加进菜单"——那是对的，但对用户没帮助，
+     * 他真正想知道的是"加进去之后要买什么"。有了这一支它就能当场算出来。
+     */
+    if (call.name === TOOL_PREVIEW_MEAL_SHOPPING) {
+      const mealKey = readStringArg(call.arguments, 'mealKey')
+      if (!mealKey) return toolResult({ error: '没解析出 mealKey（先调 read_menu 拿到它）' })
+      try {
+        const preview = await this.shopping.previewMeal(userId, mealKey)
+        return toolResult({
+          preview: mealShoppingText(preview),
+          hint: '这只是"要买什么"，**没有写进采购清单**。要让它进清单得先把这餐定下来'
+            + '（set_meal_status 设成 PLANNED；那一步没有撤销，要用户明确同意）。'
+            + '用户只是想知道缺什么时，说完就打住，不要顺手去定餐或往清单里写。',
+          toBuyCount: preview.toBuyCount,
+          coveredCount: preview.coveredCount,
         })
       } catch (error) {
         return toolResult({ error: humanError(error) })
@@ -1398,6 +1432,7 @@ function statusLabel(toolName: string): string {
   if (toolName === TOOL_TOGGLE_FAVORITE) return '正在改收藏…'
   // 采购清单（M7）：口气与别的工具一致——像家里人在做家务，不出现字段名
   if (toolName === TOOL_READ_SHOPPING) return '正在看要买什么…'
+  if (toolName === TOOL_PREVIEW_MEAL_SHOPPING) return '正在算这一餐要买什么…'
   if (toolName === TOOL_ADD_SHOPPING_ITEMS) return '正在把这几样加进采购清单…'
   if (toolName === TOOL_CHECK_SHOPPING_ITEM) return '正在清单上勾一下…'
   if (toolName === TOOL_REMOVE_SHOPPING_ITEM) return '正在从清单上划掉那一样…'

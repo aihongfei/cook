@@ -3393,3 +3393,108 @@ adb shell monkey -p com.yushan.cook -c android.intent.category.LAUNCHER 1
 **第一版被用户当场否掉**：我先把胶囊内边距压到 `2px` 换来空间，用户说「**看做法左侧的空白有点小**」——那 4px 是文字与描边的呼吸位，不能拿。**结论：改布局要从"没有信息量的空隙"里借（行内边距、胶囊间距），不能从"有信息量的余量"里挤（文字边距、字号）。**
 
 **验证**：模拟器裁图量像素——胶囊宽 62px、文字宽 47px、左右各留 **8px**、单行显示；`kitchen.scss` 的注释里留了这段推算过程，下次改这张卡先看那段注释。
+
+## R-062 左右翻页 / 一餐要买什么 / 首页推荐随机化 / 打卡卡片可点（用户报的四件事·第二轮，✅ 已验证，2026-10-14）
+
+配套：`DECISIONS.md` **D-071**（为什么这么定）、`RISKS.md` **R-61**（动画不许决定可见性）、脚本 `verify-meal-preview-http.cjs` / `verify-recommend-http.cjs`。
+
+用户原话四件：①「前进后退没有那种左右翻页的效果」②「为什么我让ai加入鱼香肉丝的配料到采购清单，他不加入…不要直接加到清单中」③「首页的菜谱推荐现在固定那几样了，能不能随机一些呢」④「打卡墙卡片不能点击查看详情」。
+
+### 一、先复现②，再动手（这一步定了后面所有改动的方向）
+
+用户的描述听起来像"清单只认 COOKING 状态"。**先跑这三行，别猜**：
+
+```bash
+# 同一餐，只改状态，数清单条目（account/password 换成你自己的验收账号）
+API=http://127.0.0.1:3000/api
+TOKEN=$(curl -s -X POST "$API/auth/login" -H 'Content-Type: application/json' \
+  -d '{"account":"<账号>","password":"<密码>"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["accessToken"])')
+
+# 每次先改这一餐的状态（PENDING / PLANNED / COOKING），再数清单
+curl -s -X PATCH "$API/orders/2026-10-14-DINNER/status" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"status":"PLANNED"}' > /dev/null
+curl -s "$API/shopping-list" -H "Authorization: Bearer $TOKEN" \
+  | python3 -c 'import sys,json;d=json.load(sys.stdin);print("条目数",len(d["toBuy"]))'
+```
+
+实测：**PENDING → 0 条 / PLANNED → 19 条 / COOKING → 19 条**。
+
+结论：**后端从一开始就是对的**（`list` 的过滤是 `PLANNED/COOKING`，D-039/D-059 定的口径）。用户看到的"要点开始做才出现"是**前端缓存**：`useOrderMutation` 只作废了 `['orders']`，而清单页的 query 带 `staleTime: 30_000`，于是把改前那份空清单又端了出来。**先复现省下的是"没去改对的那个地方"。**
+
+### 二、两个新脚本怎么跑
+
+`test:http:meal-preview` 要 stub（它验 AI 那条支路），`test:http:recommend` **不需要 stub**（纯读接口）。
+
+```bash
+# ① stub 上游（只给 meal-preview 的 AI 那一组用）
+node services/api/scripts/ai-stub-upstream.cjs 18990 > /tmp/stub.log 2>&1 &
+AI_API_BASE=http://host.docker.internal:18990/v1 AI_API_KEY=stub-key AI_MODEL=stub-model \
+  docker compose build api && \
+AI_API_BASE=http://host.docker.internal:18990/v1 AI_API_KEY=stub-key AI_MODEL=stub-model \
+  docker compose up -d --force-recreate api
+sleep 12
+
+# ② 两条验收
+pnpm --dir services/api run test:http:meal-preview   # 16/16
+pnpm --dir services/api run test:http:recommend      # 9/9
+
+# ③ ⚠️ 收工必须复原（R-042 的教训：容器还指着 stub，用户点开「问 AI」永远是写死的台词）
+pkill -f ai-stub-upstream.cjs
+cd /Users/aihf/Downloads/work/cook && docker compose up -d --force-recreate api
+docker exec cook-api-1 printenv AI_API_BASE   # 必须是真网关，不是 18990
+lsof -nP -iTCP:18990 -sTCP:LISTEN             # 应当什么都没有
+```
+
+**`test:http:recommend` 里最该看的那条断言**不是"两次不一样"（整体乱序也能满足），而是**"连打 8 次得到 8 种组合，同时出现过的菜只有十几道"**（实测 17～18）——后一个数才证明随机发生在**前 18 名的池子里**，不是从 600 道里糊脸。
+
+### 三、手工验"一餐要买什么"（不需要 stub）
+
+```bash
+# 还没定的餐也算得出来（这是 preview 相对 list 的关键差别）
+curl -s "$API/shopping-list/preview?mealKey=2026-10-15-DINNER" -H "Authorization: Bearer $TOKEN" \
+  | python3 -m json.tool | head -30
+
+# 钉住口径一致：把这一餐定成 PLANNED，再比 list 的 toBuy 名字集合
+#   （脚本里就是这么断言"定餐前 preview == 定餐后 list"的）
+```
+
+### 四、装机复验（服务器版 APK v2）与那条真白屏
+
+**先出包/装包**（`build:apk` 指向公网服务器）：
+
+```bash
+pnpm --dir apps/mobile run build:apk
+adb -s emulator-5554 install -r "release/御膳-服务器版-20261014-v2.apk"
+adb -s emulator-5554 shell am start -n com.yushan.cook/.MainActivity
+```
+
+**本轮在真机上撞到的那个真问题**：装完 v1 之后**内容区空白、几分钟也不出来**。排查顺序（值得背下来）：
+
+```bash
+# 别看接口，先看计算样式 —— 本轮接口一直是 200
+adb -s emulator-5554 shell screencap -p /sdcard/s.png && adb -s emulator-5554 pull /sdcard/s.png /tmp/s.png
+# （在应用里对着空白区取一次 computed style）
+#   .tab-layout__page → opacity: 0、动画类 --none、document.timeline.currentTime === 0
+```
+
+`document.timeline.currentTime === 0` 就是"**动画时间线冻住**"的判据：那一帧 `opacity: 0` 被永久留在屏幕上。修法与后续规矩见 `RISKS.md` **R-61** / `DECISIONS.md` **D-071 七**——要点是**基样式必须自带可见性**，动画只做叠加，且用完就摘。
+
+**v2 复验结果**：冷启动 **25 秒不做任何操作**，首页完整渲染（hero / 搜索 / 分类 / 今日安排 / 推荐都在）——白屏没复发；首页推荐那一栏与上次装机**不是同一批菜**（③ 在真机上也成立）。
+
+### 五、`adb` 在 WebView 里的经验（R-061 记过两条，这里补第三条）
+
+**截图上的坐标不能照着眼测**。我读的截图被缩放了约 **1.2×**，按目测值点击连续落空五次（`/tmp/v3-me2-zoom.png` 拍出来还是原页面）。稳定做法：
+
+1. **先裁图量出真实位置**，再点——`magick` 裁目标区域（比如底部 Tab 栏），量出图标中心像素，**不要**在整屏截图上凭感觉估：
+
+```bash
+magick /tmp/s.png -crop 1080x180+0+2100 +repage /tmp/tabbar.png   # 底部 Tab 栏那一带
+# 读这张裁图量出目标中心，例如 我的 ≈ (967, 2212)，再拿这个数去 tap
+adb -s emulator-5554 shell input tap 967 2212
+```
+
+2. **更稳的是 TAB 轮询**（R-061 已记）：`adb shell input keyevent 61` 逐个换焦点，每次 `dumpsys input_method | grep mInputShown` 看焦点是否到了要填的框，到了就回车提交；
+3. **`input text` 打不出中文**（`NullPointerException`），中文只能人来敲——所以装机验收里凡是"要输入中文"的断言，改用英文问句或提前 `adb shell` 写进库。
+
+**一条诚实的边界**：本轮 `adb` 在底部 Tab 栏上的点击**仍然不可靠**（量准了坐标也会落空），所以 ④ 打卡详情这一条**只在浏览器里验过**（点开有全备注 / 时间 / 可点开的照片），**APK 内没验成**——不是功能有问题，是模拟器上没点中。要在真机补一遍。

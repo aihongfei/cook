@@ -229,3 +229,70 @@ it('没带来源（直接输地址）时兜底回「我的」，不是厨房', a
   const back = await screen.findByRole('link', { name: '← 返回我的' })
   expect(back.getAttribute('href')).toBe('/mine')
 })
+
+/*
+ * 点开看详情（用户 2026-10-14：「打卡墙卡片不能点击查看详情」）。
+ *
+ * 卡片原来是纯 `<figure>`——一屏照片里谁做的、几点拍的、当时说了什么，
+ * 全都塞不进那张小卡里，而**没处点**就等于这些信息不存在。
+ */
+it('卡片能点开看详情：完整备注 + 拍下来的时刻', async () => {
+  const longNote = '小满说想吃糖醋排骨，我照着菜谱做了，收汁那一步火候没控制好，下次少放一点糖。'
+  mockGet({
+    family: familyFixture(),
+    wall: {
+      items: [entry({
+        id: 'ck1', nickname: '妈妈', isMe: true, note: longNote, checkDate: '2026-10-12',
+        // 用一个明确的本地时刻：详情里要显示到"几点"（卡片上只有日期）
+        createdAt: new Date(2026, 9, 12, 18, 42).toISOString(),
+      })],
+      total: 1, hasMore: false, scope: 'family',
+    },
+  })
+  renderWall()
+
+  // 卡片本身是个按钮（不是"点了没反应的图"，也不是靠 tabIndex 画上去的可点性）
+  const card = await screen.findByRole('button', { name: '看我 2026-10-12 的打卡详情' })
+  fireEvent.click(card)
+
+  // 详情里备注**完整**给出（卡片上那两行是 CSS 截断的）。
+  // 墙上那张卡里还有一份同样的文字，所以按"详情里那一处"精确取。
+  const note = await screen.findByText(longNote, { selector: '.checkin-detail__note' })
+  expect(note.textContent).toBe(longNote)
+  // 「几点拍的」只在详情里有
+  expect(screen.getByText(/18:42/)).toBeTruthy()
+  // 照片能点开看大图
+  expect(screen.getByRole('button', { name: '看大图' })).toBeTruthy()
+})
+
+it('详情里没写备注时说一句，而不是留一片空白', async () => {
+  mockGet({
+    family: familyFixture(),
+    wall: { items: [entry({ id: 'ck1', note: null })], total: 1, hasMore: false, scope: 'family' },
+  })
+  renderWall()
+
+  fireEvent.click(await screen.findByRole('button', { name: /打卡详情/ }))
+  expect(await screen.findByText('这一张没写备注。')).toBeTruthy()
+})
+
+it('照片加载失败时，详情里的文字仍然看得到（不能整屏白掉）', async () => {
+  vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
+    if (url === '/family') return Promise.resolve({ data: familyFixture() } as never)
+    if (url === '/checkins') {
+      return Promise.resolve({
+        data: { items: [entry({ id: 'ck1', note: '红烧排骨' })], total: 1, hasMore: false, scope: 'family' },
+      } as never)
+    }
+    if (url === '/checkins/stats') return Promise.resolve({ data: statsFixture() } as never)
+    if (url.startsWith('/checkins/photos/')) return Promise.reject(new Error('图没了'))
+    throw new Error(`未预期的请求：${url}`)
+  })
+  renderWall()
+
+  fireEvent.click(await screen.findByRole('button', { name: /打卡详情/ }))
+  expect(await screen.findByText('照片打不开了')).toBeTruthy()
+  // 关键：照片挂了不该把"谁、什么时候、说了什么"一起藏掉
+  // （墙上那张卡里也有一份同样的文字，所以这里按"至少有一份"断言）
+  expect(screen.getAllByText('红烧排骨').length).toBeGreaterThan(0)
+})
