@@ -3002,6 +3002,10 @@ ssh cook "cd /opt/cook && docker compose exec -T mysql mysql -uroot -p\"\$MYSQL_
 - 新注册 `srv10140106` / Papa → 直接进厨房页、6 张菜谱图正常显示；**服务器库里查到这条账号**（`createdAt 2026-10-13 17:09:47`），决定性证据；
 - APK 内嵌 `http://120.48.142.161:3000/api` ×2、回环地址 ×0。
 
+### 产物放在哪（给人拿的副本）
+
+`release/御膳-服务器版-<日期>.apk`（仓库根下，**已 gitignore**——19MB 二进制不进版本库，可随时从源码重建）。原始产物在 `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`。
+
 ### 已知边界（发出去之前要知道）
 
 1. **明文 HTTP**：地址是 `http://`，`usesCleartextTraffic=true`（开发期就开了）。能用，但流量不加密；上域名 + HTTPS 要同时改 `.env.server`、服务器 `MEDIA_BASE_URL`、`CORS_ORIGIN` 与 `cap sync` 后重打包。

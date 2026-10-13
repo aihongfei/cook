@@ -5,6 +5,11 @@ build/
 out/
 *.tsbuildinfo
 
+# 发出去的安装包（单包 19MB 的二进制，不该进版本库；可随时从源码重建）
+# 这里放的是给人拿的副本，源产物在 apps/mobile/android/app/build/outputs/apk/ 下
+release/
+*.apk
+
 # 环境与密钥（绝不入库）
 .env
 .env.local
