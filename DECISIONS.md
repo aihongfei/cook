@@ -748,3 +748,19 @@
 - **不改的**：`.order-history-link` / `.order-freedish` 其余样式、两者的路由与点击行为、后端接口全部不动（纯前端排版 + 文案）。
 - **验证**：见 `RUNBOOK.md` R-035（前端 289/289、反证 1 组会红、浏览器实测并排坐标 / 不溢出 / 窄屏等高 / 两个入口行为不变）。
 - **相关**：`NOW.md` 同节；D-035（F3-09 历史入口的原始形态）；F3-10「自己写一道」的交付记录在同名 NOW 节（未有独立决策号）。
+
+## D-043 AI 调用层迁移到 pi-ai（用户 2026-10-13「迁移吧」；对外契约不变）（2026-10-13）
+
+- **背景**：D-042 的可行性验证通过后，用户一句「迁移吧」。迁移范围按当时说定的执行：**只换 AI 调用层的内部实现**，HTTP 契约、工具定义、schema 常量、验收脚本、前端都不动。
+- **决定**：
+  1. **依赖**：`@earendil-works/pi-ai@1.2.0`（+75 个包）。**没有**引入 `pi-agent-core`：它是"状态化 Agent + 自动工具循环 + 事件流"，会把 `runToolLoop` 的三道闸门（轮数上限、工具只提名不下单、未知工具名不崩）整体搬进框架的语义里——那是**行为改变**，不是"换个调用方式"。本轮迁移的目标是"离线自研 harness"，工具循环保留在我们自己的代码里（它已被 29 条接口验收覆盖）。**将来若要做多模态/规划类功能，再按 D-009 评估 pi-agent-core。**
+  2. **ESM 桥**（`ai.pi.loader.ts`）：pi-ai 是 ESM-only，后端是 CommonJS。TS 的 commonjs 目标会把 `await import()` **降级成 require**（编译产物实测），所以用 `new Function('specifier','return import(specifier)')` 藏过编译器。**这条踩了两次**：第一次只给 `createModels/createProvider` 绕了桥、忘了 `ai.pi.runtime.ts` 里的值导入，容器启动直接 `ERR_PACKAGE_PATH_NOT_EXPORTED`（见下面的坑）。
+  3. **兼容性显式声明**（`GATEWAY_COMPAT`）：`requiresReasoningContentOnAssistantMessages: true`、`thinkingFormat: 'deepseek'`、`supportsDeveloperRole: false`。**不靠 pi-ai 的 URL 自动探测**——它只认 `provider === 'deepseek'` 或地址含 `deepseek.com`，而我们是自建 provider 指向 opencode.ai，探测会得到"标准 OpenAI"的错误假设（丢掉思维链、用 developer 角色）。三条都有实测依据（D-042）。
+  4. **`response_format` 走 `onPayload` 注入**，并且**保留"被拒就摘掉重试一次"**：pi-ai 没为这个参数建模，也就不知道"这个 400 该摘掉谁"——**重试的责任在注入方**。这条不是可选的：迁移后第一次真网关验证，`/ai/prompts` 就撞上了网关拒绝（502），而这条路的替代验证只有"拿真额度碰运气"。为此给 stub 加了 `STUB_REJECT_SCHEMA_ONCE=1`，把这条偶发路径变成**确定可验**的一条（29/29 里有它，且反证验过会红）。
+  5. **不用 `completeSimple`**：它会给 `options.maxTokens` 兜默认值，请求体里就多一个 `max_completion_tokens`（迁移前是不发的）。用 `models.stream`，报文与迁移前逐字节一致。
+  6. **凭据与环境变量都不交给 pi-ai**：provider 用无密钥 auth，`apiKey` 每次调用从配置显式给（密钥只来自 `.env`）；`refetchOnWindowFocus` 那类行为不涉及。会话头用 `transformHeaders`（它文档里专为这类网关留的口子）。
+- **行为差异（有意保留的两处）**：
+  - 底层请求从"非流式"变成"流式收齐"（pi-ai 恒发 `stream: true`）——实测结构化输出与流式在这个网关下**叠加可用**（D-042 的 A 项），推荐/提示词两条路都验过；
+  - R-23（网关要求回传思维链）由 pi-ai 按 compat 自动处理：没有思维的助手消息补空串、有思维的照实重放。**这修掉了自研客户端从 2026-10-12 起挂着的那个偶发 400。**
+- **验证**：见 `RUNBOOK.md` R-035。后端单测 185/185（新增 ai.pi.rules 12 条 + 重试判定 3 条）、后端 `tsc --noEmit` exit 0、接口 stub **29/29**（新增"摘掉 schema 补发一次"）、反证变红（去掉补发 → 推荐与提示词**双双 502**）、真网关端到端（提示词 17.7s 返回 18+12 条、推荐 13.6s 返回 5 道、流式问答 10.8s / 95 段 / 4 次工具调用 / 2 条建议）、浏览器复核（抽屉 5 条快问全来自 AI，0 条落在写死池）、前端 289/289。
+- **相关**：D-009（harness 原定 pi-agent）、D-026 第三次补充（自研偏离）、D-042（可行性验证）、`RISKS.md` R-23（本条修掉）、R-30（本轮踩的"镜像没更新 + 编译失败当反证"两个坑）。

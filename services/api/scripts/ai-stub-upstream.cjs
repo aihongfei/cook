@@ -15,6 +15,8 @@ const http = require('node:http')
 
 const port = Number(process.argv[2] ?? 18990)
 const received = []
+/** STUB_REJECT_SCHEMA_ONCE 已经拒过哪些 schema 名（每种只拒一次，好让重试能走通） */
+const rejectedSchemaNames = new Set()
 
 const server = http.createServer((req, res) => {
   // 验收脚本用它取"服务端到底发了什么"（只读，仅本机验收用）
@@ -91,6 +93,32 @@ const server = http.createServer((req, res) => {
     // STUB_ECHO_JSON_OBJECT=1 模拟**老 json_object 模式的故障**：模型把该参数原样当正文回。
     // 这不是虚构——实测真实网关（DeepSeek）就是这个行为，所以客户端只能用 json_schema（见 D-026）。
     const echoObject = parsed.response_format?.type === 'json_object' && process.env.STUB_ECHO_JSON_OBJECT === '1'
+
+    /*
+     * STUB_REJECT_SCHEMA_ONCE=1 模拟**真网关偶发拒绝 response_format**（约 8 次里 5 次，
+     * 错误体明说 `This response_format type is unavailable now`，见 D-026 / D-043）。
+     *
+     * 为什么需要它：这条路径唯一的替代验证是"拿真额度反复碰运气"，而它恰恰是**偶发**的
+     * ——迁移到 pi-ai 之后第一次真网关验证就撞上了（`/ai/prompts` 502），说明它并不罕见。
+     * 只拒第一次（按 schema 名记账），这样"摘掉 schema 重试一次"能真的走通并被验收看见。
+     */
+    const rejectSchemaOnce = process.env.STUB_REJECT_SCHEMA_ONCE === '1'
+      && Boolean(parsed.response_format?.json_schema?.name)
+      && !rejectedSchemaNames.has(parsed.response_format.json_schema.name)
+    if (rejectSchemaOnce) {
+      rejectedSchemaNames.add(parsed.response_format.json_schema.name)
+      // 在记录上打标：验收脚本据此断言"客户端摘掉 schema 补发了一次"
+      if (received.length > 0) received[received.length - 1].schemaRejected = true
+      console.log(`[stub] !! 按 STUB_REJECT_SCHEMA_ONCE 拒绝这次 response_format（schema=${parsed.response_format.json_schema.name}）`)
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({
+        param: null,
+        type: 'invalid_request_error',
+        code: 'invalid_request_error',
+        message: 'Upstream request failed: [invalid_request_error] This response_format type is unavailable now',
+      }))
+      return
+    }
 
     // ---------- 快问/示例问题（用户 2026-10-12：「内置的这些不够用」）----------
     // 提示词要的是 {"hints":[...],"examples":[...]}。stub 故意回**一份脏数据**：

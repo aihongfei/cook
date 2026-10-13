@@ -404,15 +404,53 @@ async function main() {
         )
         check(
           '提示词那条路发的是**自己的** schema（prompts），不是推荐的 picks——混用会让模型被迫回 {picks:[...]}、解析必然失败',
-          promptsCalls.length > 0 && promptsCalls.every((item) => item.schemaName === 'prompts'),
+          promptsCalls.length > 0
+            // 被网关拒过之后补发的那次不带 schema（null）是**预期**的，见下面那条重试断言
+            && promptsCalls.every((item) => item.schemaName === 'prompts' || item.schemaName === null)
+            && promptsCalls.some((item) => item.schemaName === 'prompts'),
           `实际 schemaName=${JSON.stringify(promptsCalls.map((item) => item.schemaName))}`,
         )
         const picksCalls = received.filter((item) => /picks|id=/.test(item.system ?? '')).filter((item) => !/"hints"/.test(item.system ?? ''))
         check(
           '推荐那条路仍发 picks（两边各用各的，不是把推荐也改成 prompts）',
-          picksCalls.every((item) => item.schemaName === 'picks'),
+          picksCalls.every((item) => item.schemaName === 'picks' || item.schemaName === null)
+            && picksCalls.some((item) => item.schemaName === 'picks'),
           `实际 schemaName=${JSON.stringify(picksCalls.map((item) => item.schemaName))}`,
         )
+
+        /*
+         * 网关偶发拒绝 response_format 时，客户端要**摘掉它重试一次**（D-026 / D-043）。
+         *
+         * 怎么在本地验：stub 的 `STUB_REJECT_SCHEMA_ONCE=1`——第一次见到某个 schema 就回 400
+         * （错误体与真网关逐字一致），之后放行。于是记录里应当出现这样一对：
+         * 带 schema 的那次（被拒）→ **紧随其后**、同一条路的不带 schema 的补发。
+         * 而用户侧拿到的是正常结果——本轮前面那条"快问/示例返回干净的一批"就是证据
+         * （被拒的那次如果没人补发，接口会是 502）。
+         *
+         * 真网关上这条只能碰运气（拒绝本来就是偶发的），所以拿 stub 把它变成确定可验的一条。
+         */
+        const rejectedAt = received.findIndex((item) => item.schemaRejected === true)
+        if (rejectedAt >= 0) {
+          /*
+           * 找**同一条路**的下一次请求：被拒的是哪条就从哪条看补发。
+           *
+           * 判据用 `user` 而不是 `system`——第一版按 system 分组，而被拒的那条请求
+           * （推荐的候选清单那次）system 里既没有 "hints" 也没有 picks/id= 之外的稳定标记，
+           * 于是它被归到"提示词那条路"，断言去找了一条不存在的补发：形式上通过了、detail
+           * 里却写着"（没有补发）"——**假绿**。同一条路的两次请求，user 内容必然一致
+           * （补发就是把同一个请求体去掉 schema 再发一次），这是最可靠的对应关系。
+           */
+          const sameRoute = (item) => item.user === received[rejectedAt].user
+          const retry = received.slice(rejectedAt + 1).find(sameRoute)
+          check(
+            '网关拒绝 response_format 时：摘掉 schema 补发一次（用户不该为这个参数吃一次失败）',
+            Boolean(retry) && retry.schemaName === null,
+            // 注意别用 `??`：补发成功时 schemaName 正好是 null，会被 ?? 当成"没有值"
+            // 而渲染成"（没有补发）"——一条通过的断言配一句相反的说明（实测踩过）
+            `被拒的是 schema=${JSON.stringify(received[rejectedAt].schemaName)}（user=「${String(received[rejectedAt].user ?? '').slice(0, 16)}」），`
+            + `同一条路紧随其后的请求 ${retry ? `schemaName=${JSON.stringify(retry.schemaName)}` : '（没有补发）'}`,
+          )
+        }
       } catch (error) {
         check('能取到 stub 收到的请求记录（用于上面的 schema 断言）', false, `${error?.message ?? error}`)
       }

@@ -1666,3 +1666,69 @@ pnpm --dir apps/mobile run lint                  # 6 warnings（不变）
 | 改半行后右卡文字溢出卡外 | 「自己写一道」是 `<button>`，浏览器默认 `white-space: nowrap`；`<a>`（点单历史）继承 `normal` 所以只有按钮出事 | `.order-shortcuts > *` 统一 `white-space: normal`。**同类元素用不同标签时，默认值要分开看** |
 | 第一轮验收"看着还行" | 只量了容器高度与 `x` 坐标（都正确），差点收工 | 补量 `scrollWidth` 才发现溢出（`217 > 172`）；**截图看起来"挤"容易被当成窄屏正常表现，溢出必须量** |
 | 新增用例第一次红（`expected null to be truthy`） | 断言写在数据到达之前——`findByRole` 等的是元素，我先用 `document.querySelector` 直接找容器 | 先 `await findByRole` 拿到入口元素，再断言其 `parentElement` 是那个容器 |
+
+## R-035 AI 调用层迁移到 pi-ai（D-043）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：新增 `services/api/src/modules/ai/ai.pi.loader.ts`（ESM 桥）、`ai.pi.runtime.ts`（配置 → pi-ai provider/model，含 `GATEWAY_COMPAT`）、`ai.pi.rules.ts`（消息/工具形状转换与失败分类）；`ai.client.ts` 内部重写（对外签名与话术一字未改）；`services/api/package.json` 加 `@earendil-works/pi-ai@1.2.0`；`pnpm-workspace.yaml` 的 `allowBuilds` 补 protobufjs / @google/genai（拒绝）+ pi-ai 相关；stub 上游加 `STUB_REJECT_SCHEMA_ONCE=1`；验收脚本加"摘掉 schema 补发一次"断言与相应的 schema 断言放宽。
+
+### 怎么验
+
+```bash
+# 1) 后端单测与类型（每条都要看退出码，别只用管道看输出——本轮踩过整段被吞掉）
+pnpm --dir services/api test; echo "exit=$?"           # 185/185
+pnpm --dir services/api exec tsc --noEmit; echo "exit=$?"   # 0（后端这条是真检查）
+
+# 2) 镜像要真的重建（代码改了不重建，跑的还是旧镜像：本轮踩过，见"踩过的坑"）
+docker compose build api; echo "exit=$?"               # 0，且输出里要有 "Image cook-api Built"
+docker run --rm --entrypoint sh cook-api:latest -c "grep -c 'await run(false)' /app/dist/modules/ai/ai.client.js"  # ≥1
+docker inspect cook-api-1 --format '{{.Image}}'        # 与 docker images --no-trunc 的 cook-api:latest 一致
+
+# 3) 接口验收（stub 上游，含"拒绝 schema 后补发"这条偶发路径）
+node services/api/scripts/ai-stub-upstream.cjs 18990 &          # 普通模式
+STUB_REJECT_SCHEMA_ONCE=1 node services/api/scripts/ai-stub-upstream.cjs 18990 &  # 拒绝模式（验重试）
+AI_API_BASE=http://host.docker.internal:18990/v1 AI_API_KEY=stub-key AI_MODEL=stub-model \
+  docker compose up -d --force-recreate api
+pnpm --dir services/api run test:http:ai               # 29/29（拒绝模式）/ 28/28（普通模式）
+
+# 4) 真网关端到端
+docker compose up -d --force-recreate api             # 回到 .env 里的真配置
+# 提示词 / 推荐 / 流式问答三条路各打一次（浏览器里带 token，或用 RUNBOOK 的脚本）
+
+# 5) 前端
+pnpm --dir apps/mobile test                            # 289/289
+pnpm --dir apps/mobile exec tsc -b                     # ⚠️ 必须带 -b，见 RISKS R-25（仍 7 条既有错误）
+```
+
+### 实测结果（2026-10-13）
+
+| 项 | 结果 |
+| --- | --- |
+| 后端单测 | **185/185**（新增 `ai.pi.rules` 12 条：工具/消息/工具结果形状、非法 JSON 参数、失败分类；`ai.retry` 3 条：什么样的 400 才该摘掉 schema 重试） |
+| 后端类型 | `tsc --noEmit` exit 0 |
+| 镜像 | `docker compose build api` exit 0、`Image cook-api Built`；容器镜像 ID 与 latest 一致（`1d0b0c4d…`） |
+| 接口验收 | stub 普通模式 **28/28**；拒绝模式 **29/29**（多一条"摘掉 schema 补发一次"）。日志侧证据：`上游不支持结构化输出（400）… 去掉 response_format 重试一次` |
+| 反证 | 去掉补发（判断保留、`await run(false)` 删除）→ 重建镜像后 **推荐与提示词两条路双双 502**，那条断言也红（`（没有补发）`）；恢复后 29/29 |
+| 真网关（端到端） | 提示词 **17.7s** 返回 18 快问 + 12 示例（「一个人吃简单点」「秋天润一润」…）；推荐 **13.6s** 返回 5 道（薏米红豆粥/凉拌海带丝/番茄炒蛋…）；流式问答 **10.8s / 95 段 / 4 次工具调用**（读安排→翻菜谱×2→核对）**/ 2 条建议**，且模型自己避开了"已做好"的那一餐 |
+| 浏览器复核 | 抽屉里 5 条快问（「西芹拌豆干吧」「鸡肉粥再来一次」…）**全部来自 AI 现生成，0 条落在写死池** |
+| 前端 | 289/289；`tsc -b` 沿用 7 条既有错误（未新增） |
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| 容器启动即 `ERR_PACKAGE_PATH_NOT_EXPORTED`（pi-ai），服务起不来 | **ESM 桥只铺了一半**：`ai.pi.runtime.ts` 里 `import { createModels, createProvider }` 是**值导入**，被编译成 `require`；类型导入（`import type`）才会编译后消失。D-042 里预警过这座桥，落地时漏了这个文件 | 所有 pi-ai 的**值**都改成从 `loadPiAi()` 拿；补一条检查：`grep -rn "from '@earendil-works/pi-ai" src/ \| grep -v "import type"` 必须为空 |
+| 真网关 `/ai/prompts` **502**（迁移后第一次验证） | 我在迁移时**有意去掉了**"网关拒绝 response_format 就摘掉重试"那一层，理由是"pi-ai 会如实报错，那层猜测是脆弱来源"。但网关拒绝是**常态**（8 次里 5 次），这条路立刻变成用户可见的失败 | 把重试加回来（判据也收紧：只认错误体里提到 response_format / unavailable now，别的 400 不重试），并给 stub 加 `STUB_REJECT_SCHEMA_ONCE=1` 把这条偶发路径变成可确定验证的一条。**教训：迁移不是"顺便简化"的机会，行为等价的边界要显式列出来再逐条决定** |
+| 验收"29/29 通过"但容器日志里没有任何重试告警 | **镜像没更新**：`docker compose build` 那次实际**失败**了（编译错误），而我用 `2>&1 \| tail` 看输出、没看退出码，于是验收跑在旧镜像上 | ① 构建/测试命令一律看**退出码**（`; echo "exit=$?"`），不只看输出；② 验收前核实"运行的镜像 ID == latest 镜像 ID"；③ 用镜像里的**特征串**（`grep -c 'await run(false)'`）确认代码真的进包了 |
+| 反证第一次没变红 | 注入的是 `if (false && failure?.kind === …)`，这让 TS **无法收窄** `failure` → 6 个编译错误 → 构建失败 → 还是旧镜像在跑 | **"红"要分清是断言红还是编译红**（这是本项目第三次踩：R-031、R-033 各一次）。改成"判断保留、只删补发动作"（类型合法、行为=不重试），构建 exit 0 后才看到断言红 |
+| 一条**通过的**断言却写着"（没有补发）" | detail 字符串用了 `retry?.schemaName ?? '（没有补发）'`，而补发成功时 `schemaName` 恰好是 **null** → `??` 把它当"没有值" | 用 `retry ? … : '（没有补发）'` 显式判空。**断言通过 ≠ 说明文字是对的**：一条绿断言配一句反向说明会误导下一个读日志的人 |
+| 断言按 `system` 分组找"同一条路的补发"，找错了路 | 被拒的那条请求（推荐）的 `system` 里没有稳定标记（`picks`/`id=` 都不挨着），被误判成"提示词那条路" | 改成按 `user` 内容分组——同一条路的补发就是同一份请求体去掉 schema，`user` 必然一致 |
+
+### 回归测试
+
+**新增 `tests/ai.pi.rules.test.ts`（12 条）**：工具声明（OpenAI `function` 包装 → pi-ai 平铺；形状不对要抛**能看懂**的错）、助手消息（工具参数 字符串→对象；usage/stopReason/provider/model 齐备；非法 JSON → 空对象）、工具结果（从助手消息按 id 找回 `toolName`；找不到给占位名）、system 不进消息列表、工具调用反向转换（对象→原始 JSON 字符串，下游按字符串解析）、失败分类（超时/HTTP/连接/正常）。
+
+**新增 `tests/ai.retry.test.ts`（3 条）**：认得出网关那种拒绝（含截断措辞）；**认不出就别重试**（模型名写错、消息格式错、空详情一律不重试——否则拿用户额度反复试一个真问题）。
+
+**反证（1 组）**：去掉补发 → 推荐与提示词双双 502，且那条断言变红。恢复后 29/29。
+
+**注**：`pi-agent-core` **没有**引入（理由见 D-043 第 1 条：它是状态化 Agent + 自动工具循环，会把 `runToolLoop` 现有三道闸门搬进框架语义——那是行为改变）。所以本项目的"工具循环"仍是我们自己的代码，pi-ai 只负责"发消息、收正文与工具调用、重放历史（含思维链）"。

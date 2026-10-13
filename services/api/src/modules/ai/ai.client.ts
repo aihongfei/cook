@@ -1,19 +1,25 @@
 import { Logger } from '@nestjs/common'
+import type { Message, ModelsApiStreamOptions, ProviderHeaders } from '@earendil-works/pi-ai'
 import type { AiConfig, ChatMessage } from './ai.rules'
 import type { ToolCall } from './ai.tools'
+import { fromPiToolCall, readPiFailure, toPiMessages, toPiTools, type WireLike } from './ai.pi.rules'
+import { createRuntime } from './ai.pi.runtime'
 
 /**
- * 直连 OpenAI 兼容接口的极薄客户端（D-026）。
+ * AI 调用层（D-026 起是极薄客户端，**D-043 起底层换成 pi-ai**）。
  *
- * 为什么不用现成的 SDK：这里只需要一个能力——**把 messages 发到一个配置好的地址、拿回文本**。
- * 一台家庭服务器上一个 HTTP POST 就够了，引 SDK 要背上依赖树与 ESM/CJS 互操作（实测 pi-ai
- * 在本项目的 CommonJS 构建下 require 不了，且带 70+ 传递依赖）。多模态与工具调用（M16 的真正
- * 主场）再评估换 harness（见 D-009/D-026）。
+ * 为什么换（用户 2026-10-13：「我说的是让你用 pi-agent 或者其他现成的」）：原先自己写的
+ * 原因是这台网关太窄（会话头、结构化输出偶发 400、思维链要回传），而实测 pi-ai
+ * **内置了这台网关的目录**（`providers/opencode-go`：`thinkingFormat: deepseek`、
+ * `requiresReasoningContentOnAssistantMessages` 正是 R-23 的成因）——官方已把这类怪癖
+ * 编进适配器，再自己维护一份不划算（验证见 D-042，决定见 D-043）。
  *
- * 三件必须做对的事：
- * - **超时不靠运气**：AbortController 兜住（模型慢/网关挂住时用户体验是"转圈到天亮"）；
- * - **错误话术可读**：上游 401/429/500 都翻成人能看懂的一句，别把 HTML 错误页甩到界面上；
- * - **密钥不落日志**：日志只记 model 与状态码。
+ * **对外契约一字未改**：`chatJson` / `chatStreamEvents` 的签名、`StreamEvent` 的形状、
+ * `AiUpstreamError` 的话术与状态码（401/403/429/5xx/其他）都照旧——
+ * service / controller / 前端 / 28 条接口验收脚本因此一行都不用动。
+ *
+ * 客户端**只做**四件事，其余（SSE 解析、工具参数碎片拼装、思维链回传、兼容性开关）
+ * 都交给 pi-ai：发消息 → 收正文与工具调用 → 把失败翻成人话 → 保证取消与超时。
  */
 export interface ChatRequest {
   messages: ChatMessage[]
@@ -40,111 +46,116 @@ export class AiUpstreamError extends Error {
 
 const logger = new Logger('AiClient')
 
-export async function chatJson(config: AiConfig, request: ChatRequest): Promise<string> {
+/** 一次调用的公共装配：模型元数据 + 取消/超时控制器，**只有这一处**处理取消语义 */
+async function prepare(config: AiConfig, signal?: AbortSignal) {
+  const runtime = await createRuntime(config)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), config.timeoutMs)
   // 调用方的取消（客户端断线）也要传导下去，别让上游白跑一轮
-  request.signal?.addEventListener('abort', () => controller.abort(), { once: true })
-
-  const buildBody = (structured: boolean) => ({
-    model: config.model,
-    messages: [
-      { role: 'system', content: request.systemPrompt },
-      ...request.messages.map((message) => ({ role: message.role, content: message.content })),
-    ],
-    temperature: request.temperature ?? 0.7,
-    // 显式要非流式：不写这一行时上游可能默认走 SSE，而我们要的是"拿回整段文本"
-    // （实测踩过：不写 stream:false 时上游回 SSE，客户端按 JSON 解析直接失败）
-    stream: false,
-    // 结构化输出：json_schema + strict（**不要用老的 json_object**——那个在本网关下会让模型
-    // 把参数当正文回，见 rules 的 PICKS_SCHEMA 注释）
-    ...(structured ? { response_format: request.jsonSchema } : {}),
-  })
-
-  // OpenCode ZenGo 这类 agentic 网关强制要 x-opencode-session，不然会 400。
-  // 每次调用用不同的 id（timestamp），避免被网关当成同一对话堆上下文。
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-    authorization: `Bearer ${config.apiKey}`,
-    'x-opencode-session': `cook-ai-${Date.now()}`,
-  }
-
-  const post = (structured: boolean) => fetch(`${config.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(buildBody(structured)),
-    signal: controller.signal,
-  })
-
-  try {
-    let structured = Boolean(request.jsonSchema && config.sendJsonSchema)
-    let response = await post(structured)
-
-    // 网关对 response_format 的支持是**按后端路由**的：同一台网关有时回 200，有时 400。
-    // 实测 8 次里 5 次被拒，而且错误体有两种形状——一种明说
-    // `This response_format type is unavailable now`，另一种只回 `{"model":"deepseek-v4.1-flash"}`
-    // （信息被截没了）。所以判据**只能看状态码**：我们刚发过一次带 response_format 的请求，
-    // 其余的请求体（模型名、密钥、消息）与 /ai/chat 完全相同而 chat 一直正常，那这个 400
-    // 就只可能是 response_format 引起的。去掉它重试一次，别让用户为这个参数吃一次失败。
-    // 只重试一次、且只在"发过结构化参数"时重试——不会循环，别的 400（如模型名写错）多花一轮即可暴露。
-    if (!response.ok && structured && response.status === 400) {
-      const detail = await safeErrorText(response.clone())
-      logger.warn(`上游不支持结构化输出（${response.status} ${detail.slice(0, 100)}），去掉 response_format 重试一次`)
-      structured = false
-      response = await post(false)
-    }
-
-    if (!response.ok) {
-      const detail = await safeErrorText(response)
-      logger.warn(`上游 ${response.status}（model=${config.model}）：${detail}`)
-      throw new AiUpstreamError(upstreamMessage(response.status, detail), response.status)
-    }
-
-    // 有的网关即使收到 stream:false 也照样回 SSE，所以按 content-type 分流，两种都认
-    const contentType = response.headers.get('content-type') ?? ''
-    const content = contentType.includes('text/event-stream')
-      ? readSseText(await response.text())
-      : readJsonText(await response.json())
-
-    if (!content) throw new AiUpstreamError('AI 没有给出回答（回包是空的）', 502)
-    return content
-  } catch (error) {
-    if (error instanceof AiUpstreamError) throw error
-    if ((error as { name?: string })?.name === 'AbortError') {
-      throw new AiUpstreamError(`AI 响应超过 ${Math.round(config.timeoutMs / 1000)} 秒，先不等了——过会儿再试`, 504)
-    }
-    logger.warn(`上游连接失败（model=${config.model}）：${(error as Error)?.message ?? error}`)
-    throw new AiUpstreamError('连不上 AI 服务，检查 .env 里的 AI_API_BASE 是否可达', 502)
-  } finally {
-    clearTimeout(timer)
+  signal?.addEventListener('abort', () => controller.abort(), { once: true })
+  // pi-ai 的失败是"消息里的 stopReason"而不是抛异常，所以自己记一下是不是我们主动中止的
+  let aborted = false
+  controller.signal.addEventListener('abort', () => { aborted = true }, { once: true })
+  return {
+    runtime,
+    controller,
+    isAborted: () => aborted,
+    done: () => clearTimeout(timer),
+    /** 每次调用共用的请求选项（密钥、会话头、超时信号） */
+    options: (temperature: number): ModelsApiStreamOptions<'openai-completions'> => ({
+      apiKey: config.apiKey,
+      temperature,
+      signal: controller.signal,
+      transformHeaders: (headers: ProviderHeaders) => withSessionHeader(headers),
+    }),
   }
 }
 
 /**
- * 流式对话 + 工具调用：把上游的 SSE 逐块读出来，**逐事件**交给调用方。
+ * 非流式一次性调用（推荐 / 快问示例两条路用它）。
  *
- * 为什么值得单独写一条路：实测这个模型要先推理几秒到几十秒才吐正文，一次性等回包的话
- * 用户盯着转圈的时间几乎等于全程；流式能让第一个字一出现就上屏，等待感差别很大。
+ * 与迁移前的差异（都是 pi-ai 决定的，实测已验，见 D-042）：
+ * - 底层走的是**流式请求**（pi-ai 恒发 `stream: true`），只是把整段收齐再返回；
+ *   实测"结构化输出（json_schema + strict）与流式叠加"在这台网关下可用；
+ * - `response_format` 通过 `onPayload` 注入——pi-ai 没为它建模，`onPayload` 是官方口子；
+ * - `AI_JSON_SCHEMA=0` 时**不发** `response_format`（与迁移前同一个总开关）。
  *
- * 与 `chatJson` 的差别只有三处，别的一律照旧：
- * - 请求体发 `stream: true`，且**不带 response_format**（结构化输出与流式要靠流式 JSON 解析凑，
- *   而我们这边已经有容忍解析 `parsePicks`，不需要再赌网关支不支持两者叠加）；
- * - 回包按 SSE 边读边给，不 `await` 到整段；
- * - 除了正文增量，还要**攒工具调用**：OpenAI 兼容的流式协议把 `tool_calls` 切成一堆碎片按
- *   `index` 分发（`function.name` 只来一次，`function.arguments` 一段一段拼），所以必须按
- *   index 归并、等这一轮读完再整只交出去——半截 JSON 交给谁都没法执行。
- *
- * 没有流可读（上游直接回 JSON、或网关把 stream 忽略了）时，退回一次性解析——**不报错**，
- * 因为对调用方来说"拿到了完整回答"这个结果是一样的。
+ * 迁移后少了一个脆弱点：原先网关偶发 400 拒绝 `response_format` 时，客户端要凭"这个 400
+ * 只可能是它引起的"去参数重试一次；现在这个 400 会作为上游失败如实报出（话术不变）。
  */
-export interface WireMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | null
-  /** 助手消息里"我要调这些工具"（下一轮要原样带回去，否则上游认不出 tool 结果对应谁） */
-  tool_calls?: ToolCall[]
-  /** role=tool 时对应哪一次调用 */
-  tool_call_id?: string
+export async function chatJson(config: AiConfig, request: ChatRequest): Promise<string> {
+  const { runtime, isAborted, done, options } = await prepare(config, request.signal)
+  const structured = Boolean(request.jsonSchema && config.sendJsonSchema)
+
+  try {
+    const run = async (withSchema: boolean) => {
+      const stream = runtime.models.stream(
+        runtime.model,
+        {
+          systemPrompt: request.systemPrompt,
+          messages: simpleMessages(request.messages, { provider: runtime.model.provider, model: runtime.model.id }),
+        },
+        {
+          ...options(request.temperature ?? 0.7),
+          ...(withSchema ? { onPayload: (payload) => withResponseFormat(payload, request.jsonSchema) } : {}),
+        },
+      )
+      const result = await stream.result()
+      return { result, failure: readPiFailure(result, isAborted()) }
+    }
+
+    let { result, failure } = await run(structured)
+
+    /*
+     * 网关对 response_format 的支持是**按后端路由**的：同一台网关有时 200，有时 400
+     * （错误体明说 `This response_format type is unavailable now`，实测约 8 次里 5 次被拒）。
+     * 去掉它重试一次——判据只看状态码：我们刚发过一次带 response_format 的请求，请求体其余
+     * 部分（模型名、密钥、消息）与不带结构化的那条路完全相同，而那条路一直正常，
+     * 所以这个 400 只可能是它引起的。只重试一次、且只在"发过结构化参数"时重试，不会循环。
+     *
+     * 这一层不随迁移去掉：pi-ai 不认这个参数（它没为 response_format 建模），
+     * 也就不知道"这个 400 该摘掉谁"——**重试的责任在注入方**（见 D-043）。
+     */
+    if (failure?.kind === 'http' && failure.status === 400 && structured && isResponseFormatRejection(failure.detail)) {
+      logger.warn(`上游不支持结构化输出（400）：${failure.detail.slice(0, 100)}，去掉 response_format 重试一次`)
+      ;({ result, failure } = await run(false))
+    }
+
+    if (failure) throw toUpstreamError(failure, config)
+    const text = textOf(result)
+    if (!text) throw new AiUpstreamError('AI 没有给出回答（回包是空的）', 502)
+    return text
+  } catch (error) {
+    throw normalizeFailure(error, config)
+  } finally {
+    done()
+  }
 }
+
+/**
+ * 这个 400 是不是"不接受 response_format"引起的。
+ *
+ * 只看状态码不够：400 也可能是模型名写错、消息格式不对（那些**不该**摘掉 schema 重试，
+ * 重试一次白花用户额度，还掩盖了真正的问题）。所以这里认两件事：
+ * 错误体里提到 response_format，或者提到这个网关那种"参数不可用"的措辞。
+ * 网关的错误体有两种形状，实测都见过：明说的那种，与只回 `{"model":"..."}` 的截断那种
+ * （截断的认不出来 → 不重试，如实报错，比乱试强）。
+ */
+export function isResponseFormatRejection(detail: string): boolean {
+  return /response_format/i.test(detail) || /unavailable now/i.test(detail)
+}
+
+/**
+ * 流式对话 + 工具调用：把正文增量与工具调用**逐事件**交给调用方。
+ *
+ * 与 `chatJson` 的差别只剩"要流"这一件事——SSE 解析、`tool_calls` 按 index 归并
+ * （协议把一次调用切成好几片发）都由 pi-ai 负责，它在本项目**已经验过**
+ * （stub 故意按碎片发参数，见 D-042 的第六项）。
+ *
+ * 事件形状与迁移前完全一致（正文增量 + 一整轮读完的工具调用），所以
+ * `runToolLoop` 的三行分发逻辑一行不用改。
+ */
+export interface WireMessage extends WireLike {}
 
 export interface ToolStreamRequest {
   systemPrompt: string
@@ -160,190 +171,109 @@ export type StreamEvent =
   | { type: 'tool_calls'; calls: ToolCall[] }
 
 export async function* chatStreamEvents(config: AiConfig, request: ToolStreamRequest): AsyncGenerator<StreamEvent> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), config.timeoutMs)
-  request.signal?.addEventListener('abort', () => controller.abort(), { once: true })
-
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-    authorization: `Bearer ${config.apiKey}`,
-    'x-opencode-session': `cook-ai-${Date.now()}`,
-  }
+  const { runtime, isAborted, done, options } = await prepare(config, request.signal)
 
   try {
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          { role: 'system', content: request.systemPrompt },
-          ...request.messages.map(toWire),
-        ],
-        temperature: request.temperature ?? 0.7,
-        stream: true,
-        ...(request.tools?.length ? { tools: request.tools } : {}),
-      }),
-      signal: controller.signal,
-    })
+    const stream = runtime.models.stream(
+      runtime.model,
+      {
+        systemPrompt: request.systemPrompt,
+        messages: toPiMessages(request.messages, { provider: runtime.model.provider, model: runtime.model.id }),
+        ...(request.tools?.length ? { tools: toPiTools(request.tools as Parameters<typeof toPiTools>[0]) } : {}),
+      },
+      options(request.temperature ?? 0.7),
+    )
 
-    if (!response.ok) {
-      const detail = await safeErrorText(response)
-      logger.warn(`上游 ${response.status}（流式，model=${config.model}）：${detail}`)
-      throw new AiUpstreamError(upstreamMessage(response.status, detail), response.status)
-    }
-
-    const contentType = response.headers.get('content-type') ?? ''
-    if (!response.body || !contentType.includes('text/event-stream')) {
-      // 上游没按流回（有的网关会忽略 stream）：整段读出来一次 yield，结果一样
-      const payload = await response.json()
-      const content = readJsonText(payload)
-      const calls = readJsonToolCalls(payload)
-      if (calls.length) yield { type: 'tool_calls', calls }
-      if (content) yield { type: 'text', text: content }
-      if (!content && calls.length === 0) throw new AiUpstreamError('AI 没有给出回答（回包是空的）', 502)
-      return
-    }
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    const pending = new Map<number, ToolCall>()
-    let buffer = ''
-    // 正文增量即时转成事件；工具调用只往 pending 里攒，等整轮读完再交（见下）
-    const drain = (event: string): StreamEvent[] => {
-      const text = readSseEvent(event, pending)
-      return text ? [{ type: 'text', text }] : []
-    }
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      // SSE 事件以空行分隔；最后一段可能被切断，留在 buffer 里等下一块
-      const events = buffer.split(/\r?\n\r?\n/)
-      buffer = events.pop() ?? ''
-      for (const event of events) {
-        for (const emitted of drain(event)) yield emitted
+    for await (const event of stream) {
+      if (event.type === 'text_delta') {
+        yield { type: 'text', text: event.delta }
+      } else if (event.type === 'toolcall_end') {
+        // 一次给一个（调用方会攒起来）；参数在这里已拼装完整——半截 JSON 交给谁都没法执行
+        yield { type: 'tool_calls', calls: [fromPiToolCall(event.toolCall)] }
+      } else if (event.type === 'error') {
+        throw toUpstreamError(readPiFailure(event.error, isAborted()) ?? { kind: 'connection', detail: '' }, config)
       }
     }
-    if (buffer.trim()) {
-      for (const emitted of drain(buffer)) yield emitted
-    }
-    // 工具调用是"整轮读完才算数"的：半截 JSON 谁也没法执行
-    const calls = [...pending.values()].filter((call) => call.name)
-    if (calls.length) yield { type: 'tool_calls', calls }
+
+    const result = await stream.result()
+    const failure = readPiFailure(result, isAborted())
+    if (failure) throw toUpstreamError(failure, config)
   } catch (error) {
-    if (error instanceof AiUpstreamError) throw error
-    if ((error as { name?: string })?.name === 'AbortError') {
-      throw new AiUpstreamError(`AI 响应超过 ${Math.round(config.timeoutMs / 1000)} 秒，先不等了——过会儿再试`, 504)
-    }
-    logger.warn(`上游连接失败（流式，model=${config.model}）：${(error as Error)?.message ?? error}`)
-    throw new AiUpstreamError('连不上 AI 服务，检查 .env 里的 AI_API_BASE 是否可达', 502)
+    throw normalizeFailure(error, config)
   } finally {
-    clearTimeout(timer)
+    done()
   }
 }
 
 /**
- * 把内部消息形状转成**上游认的协议形状**。
+ * 非流式请求的消息形状（system 由 systemPrompt 承载；这里只传 user/assistant 的纯文本）。
  *
- * ⚠️ 这里踩过一个坑：内部的 `ToolCall` 是 `{id, name, arguments}`（自己看着方便），
- * 而上游要的是 `{id, type:'function', function:{name, arguments}}`。第一版直接把内部对象
- * 塞回 `tool_calls`，结果**第二轮请求被网关 400 拒掉**（错误体还是那个信息量极少的
- * `{"model":"deepseek-v4.1-flash"}`）——表现是"第一轮搜完菜就断了"。
- * stub 当时也没拦住，因为它不校验协议形状（已给它补上，见 ai-stub-upstream.cjs）。
+ * 助手消息在 pi-ai 里是**完整对象**（要 api/provider/model/usage/stopReason）——它用这些
+ * 字段判断"这条历史怎么重放"。填零用量是安全的：这些值只参与上下文估算，不参与请求体
+ * （真正发出去的只有 role/content/tool_calls/思维链字段）。
  */
-function toWire(message: WireMessage): Record<string, unknown> {
-  const wire: Record<string, unknown> = { role: message.role, content: message.content }
-  if (message.tool_calls?.length) {
-    wire.tool_calls = message.tool_calls.map((call) => ({
-      id: call.id,
-      type: 'function',
-      function: { name: call.name, arguments: call.arguments },
-    }))
-  }
-  if (message.tool_call_id) wire.tool_call_id = message.tool_call_id
-  return wire
-}
-
-/**
- * 一个 SSE 事件块里的正文增量（只认 `choices[0].delta.content`，推理内容不算回答），
- * 顺手把 `delta.tool_calls` 按 **index 归并**进 `pending`。
- *
- * 归并是必须的：协议把一次调用切成好几片发（id 可能只在第一片、`function.arguments` 是
- * 一段一段的 JSON 碎片），不按 index 拼就永远拼不出可执行的参数。`name` 是**赋值**不是追加
- * ——它同样可能重复出现，追加会拼出 `search_dishess earch_dishes` 这种鬼东西。
- */
-function readSseEvent(event: string, pending: Map<number, ToolCall>): string {
-  let text = ''
-  for (const line of event.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed.startsWith('data:')) continue
-    const data = trimmed.slice(5).trim()
-    if (!data || data === '[DONE]') continue
-    try {
-      const parsed = JSON.parse(data) as {
-        choices?: { delta?: { content?: unknown; tool_calls?: unknown[] } }[]
-      }
-      const delta = parsed.choices?.[0]?.delta
-      if (typeof delta?.content === 'string') text += delta.content
-      if (Array.isArray(delta?.tool_calls)) {
-        for (const raw of delta.tool_calls) {
-          const index = typeof (raw as { index?: unknown })?.index === 'number'
-            ? (raw as { index: number }).index : 0
-          const call = pending.get(index) ?? { id: '', name: '', arguments: '' }
-          const id = (raw as { id?: unknown })?.id
-          if (typeof id === 'string' && id) call.id = id
-          const fn = (raw as { function?: { name?: unknown; arguments?: unknown } })?.function
-          if (typeof fn?.name === 'string' && fn.name) call.name = fn.name
-          if (typeof fn?.arguments === 'string') call.arguments += fn.arguments
-          pending.set(index, call)
+function simpleMessages(
+  messages: readonly ChatMessage[],
+  identity: { provider: string; model: string },
+): Message[] {
+  return messages.map((message) => (
+    message.role === 'assistant'
+      ? {
+          role: 'assistant' as const,
+          content: [{ type: 'text' as const, text: message.content }],
+          api: 'openai-completions' as const,
+          provider: identity.provider,
+          model: identity.model,
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: 'stop' as const,
+          timestamp: Date.now(),
         }
-      }
-    } catch {
-      // 跳过解析不了的段落（心跳/注释/半截 JSON）
-    }
-  }
-  return text
-}
-
-/** 非流式回包里的工具调用（网关忽略 stream 时的退路，形状与流式拼出来的对齐） */
-function readJsonToolCalls(payload: unknown): ToolCall[] {
-  const calls = (payload as { choices?: { message?: { tool_calls?: unknown[] } }[] })
-    ?.choices?.[0]?.message?.tool_calls
-  if (!Array.isArray(calls)) return []
-  return calls.flatMap((raw) => {
-    const id = (raw as { id?: unknown })?.id
-    const fn = (raw as { function?: { name?: unknown; arguments?: unknown } })?.function
-    if (typeof fn?.name !== 'string' || !fn.name) return []
-    return [{
-      id: typeof id === 'string' ? id : `call_${Math.random().toString(36).slice(2)}`,
-      name: fn.name,
-      arguments: typeof fn.arguments === 'string' ? fn.arguments : '',
-    }]
-  })
+      : { role: 'user' as const, content: message.content, timestamp: Date.now() }
+  ))
 }
 
 /**
- * 上游错误体可能是一大段 HTML/JSON，截断并尽量取出"人话"那一层。
+ * 会话头：这个网关强制要 `x-opencode-session`，不然 400（实测错误原文
+ * `MissingSessionID`）。每次调用用不同的 id（timestamp），避免被网关当成同一对话堆上下文。
  *
- * 实测网关的错误体有几种形状，取错了会得到莫名其妙的一句（曾把 `{"model":"deepseek-v4.1-flash"}`
- * 当详情甩给用户）。所以按 `error.message` → 顶层 `message` → 最外层原文依次退，非字符串的
- * message 不再当正文用（那通常是个对象，里面是一个更深的错误结构）。
+ * 用 pi-ai 的 `transformHeaders`（它专为这类网关留的口子）而不是自己包 fetch：
+ * 头在"鉴权之后、派发之前"合并，是唯一能保证不被覆盖的位置。
  */
-async function safeErrorText(response: Response): Promise<string> {
-  try {
-    const text = (await response.text()).slice(0, 400)
-    try {
-      const parsed = JSON.parse(text) as { error?: { message?: unknown }; message?: unknown }
-      const message = parsed.error?.message ?? parsed.message
-      if (typeof message === 'string' && message.trim()) return message.slice(0, 200)
-    } catch {
-      // 不是 JSON 就用截断后的原文
-    }
-    return text
-  } catch {
-    return '（读不到错误详情）'
+function withSessionHeader(headers: ProviderHeaders): ProviderHeaders {
+  return { ...headers, 'x-opencode-session': `cook-ai-${Date.now()}` }
+}
+
+/** 结构化输出：把 schema 注进请求体（pi-ai 没为 response_format 建模，onPayload 是它的口子） */
+function withResponseFormat(payload: unknown, jsonSchema: unknown): unknown {
+  if (!payload || typeof payload !== 'object') return payload
+  return { ...(payload as Record<string, unknown>), response_format: jsonSchema }
+}
+
+/** 助手消息里的正文（多段拼起来；推理内容不算回答——与迁移前同一个口径） */
+function textOf(message: { content?: unknown }): string {
+  const blocks = (message.content ?? []) as { type?: string; text?: string }[]
+  return blocks.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('').trim()
+}
+
+/** pi-ai 的失败形态 → 迁移前同一套话术与状态码 */
+function toUpstreamError(failure: NonNullable<ReturnType<typeof readPiFailure>>, config: AiConfig): AiUpstreamError {
+  if (failure.kind === 'timeout') {
+    return new AiUpstreamError(`AI 响应超过 ${Math.round(config.timeoutMs / 1000)} 秒，先不等了——过会儿再试`, 504)
   }
+  if (failure.kind === 'http') {
+    logger.warn(`上游 ${failure.status}（model=${config.model}）：${failure.detail}`)
+    return new AiUpstreamError(upstreamMessage(failure.status, failure.detail), failure.status)
+  }
+  logger.warn(`上游连接失败（model=${config.model}）：${failure.detail}`)
+  return new AiUpstreamError('连不上 AI 服务，检查 .env 里的 AI_API_BASE 是否可达', 502)
+}
+
+/** 已经是我们的错误就原样放行；别的（含 pi-ai 的加载失败）一律按"连不上"处理，别冒成 500 */
+function normalizeFailure(error: unknown, config: AiConfig): unknown {
+  if (error instanceof AiUpstreamError) return error
+  const detail = (error as Error)?.message ?? String(error)
+  logger.warn(`上游调用失败（model=${config.model}）：${detail}`)
+  return new AiUpstreamError('连不上 AI 服务，检查 .env 里的 AI_API_BASE 是否可达', 502)
 }
 
 function upstreamMessage(status: number, detail: string): string {
@@ -351,35 +281,4 @@ function upstreamMessage(status: number, detail: string): string {
   if (status === 429) return 'AI 服务限流了，缓一会儿再试'
   if (status >= 500) return `AI 服务自己出错了（${status}），过会儿再试`
   return `AI 服务没接受这次请求（${status}）：${detail}`
-}
-
-/** 非流式回包：OpenAI 兼容形状的 choices[0].message.content */
-function readJsonText(payload: unknown): string {
-  const content = (payload as { choices?: { message?: { content?: unknown } }[] })
-    ?.choices?.[0]?.message?.content
-  return typeof content === 'string' ? content.trim() : ''
-}
-
-/**
- * SSE 回包：把各段 `choices[0].delta.content` 拼起来。
- *
- * 只取 `data:` 行、遇到 `[DONE]` 就停；解析不了的段落直接跳过——
- * 上游偶尔会插空行、注释行（`: keep-alive`）或心跳，为这些细节报错不划算。
- */
-function readSseText(raw: string): string {
-  let text = ''
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed.startsWith('data:')) continue
-    const data = trimmed.slice(5).trim()
-    if (!data || data === '[DONE]') continue
-    try {
-      const parsed = JSON.parse(data) as { choices?: { delta?: { content?: unknown } }[] }
-      const delta = parsed.choices?.[0]?.delta?.content
-      if (typeof delta === 'string') text += delta
-    } catch {
-      // 跳过解析不了的段落（见上）
-    }
-  }
-  return text.trim()
 }
