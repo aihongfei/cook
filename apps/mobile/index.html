@@ -2,7 +2,11 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/img/logo-t.png" />
+    <!-- 图标：矢量优先（任意缩放都清晰），位图给不吃 SVG 图标的浏览器兜底。
+         两者都从品牌母图产出，见 scripts/build-brand-assets.sh 与 gen-brand-svg.py -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
