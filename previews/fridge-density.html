@@ -163,7 +163,9 @@ html.no-anno .pv-anno{ display:none }
   .pv-plans::-webkit-scrollbar{ display:none }
   .pv-plan{ flex:0 0 auto; min-width:0; padding:6px 11px; font-size:12.5px }
   .pv-plan span{ display:none }
-  .pv-device{ width:min(391px,100vw); border-radius:0; border:0; box-shadow:none }
+  /* 仍然走 --dw（否则 360 那一档在窄屏下点了没反应）：与视口取小，
+     391 视口下切 360 就能真正看到 360 的排布 */
+  .pv-device{ width:min(var(--dw,391px),100vw); border-radius:0; border:0; box-shadow:none }
 }
 
 /* =====================================================================
@@ -229,6 +231,12 @@ html[data-theme=dark] .zone{ background:rgb(255 255 255 / 4%) }
 .pic--none::after{ content:'🍽'; font-size:18px; opacity:.45 }
 .fbody{ display:flex; flex:1 1 auto; flex-direction:column; gap:1px; min-width:0 }
 .fname{ display:flex; flex-wrap:wrap; gap:6px; align-items:baseline; font-size:13px; line-height:1.35; color:var(--ink) }
+/* 名字最多两行，超出省略号：两列布局里一格文字宽只有 ~140px，
+   一个长名字（「西兰花（上周买的，掰开有点发黄）」）能撑到三行，
+   把整行从 36px 顶到 55px——一道菜名不该决定整页高度（菜品卡也是同一个规矩）。 */
+.fname__text{
+  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden;
+}
 .amount{ font-size:11px; font-style:normal; color:var(--ink-3) }
 .fmeta{ display:flex; gap:6px; font-size:10.5px; line-height:1.35; color:var(--ink-3) }
 .fnote{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
@@ -288,7 +296,11 @@ html[data-theme=dark] .recent__when{ color:#e8a273 }
  * A｜收紧一档：结构不动，只把每一档的尺寸收一档（空区不再拉高、长区折 6 行）
  * ===================================================================== */
 .pa .stock__head{ min-height:22px }
-.pa .zones{ gap:8px; margin-top:9px }
+.pa .zones{
+  gap:8px; margin-top:9px; align-items:start;
+  /* 空区框缩到内容高：视觉上不再是「一大片空」。注意**不减页面高度**——
+     同一行还有一格高的撑着，行高由它决定。 */
+}
 .pa .zone{ gap:3px; padding:8px 9px }
 .pa .zhead{ font-size:12.5px }
 .pa .fitem{ gap:6px; padding:3px 3px }
@@ -580,7 +592,7 @@ function pic(item){
 }
 function itemRow(item){
   return '<li class="fitem">' + pic(item) +
-    '<span class="fbody"><span class="fname">' + item.name +
+    '<span class="fbody"><span class="fname"><span class="fname__text">' + item.name + '</span>' +
       (item.amount ? '<em class="amount">' + item.amount + '</em>' : '') + '</span>' +
       (item.note ? '<span class="fmeta"><span class="fnote">' + item.note + '</span></span>' : '') +
     '</span></li>';
@@ -776,14 +788,14 @@ function renderScreen(plan, state, ui){
 
   if (m.loading) {
     return '<div class="pscreen">' + head +
-      '<section class="card stock"><div class="stock__head"><span class="stock__title">冰箱里有什么</span>' +
+      '<section class="card stock" data-block="stock"><div class="stock__head"><span class="stock__title">冰箱里有什么</span>' +
       '<span class="stock__add-row"><button class="stock__add">＋ 记一样</button><button class="stock__scan">📷 拍照</button></span></div>' +
       '<div class="stock__status-line"><span class="status"><span class="status__dot"></span>正在看冰箱里有什么…</span></div></section>' +
       '</div>';
   }
   if (m.error) {
     return '<div class="pscreen">' + head +
-      '<section class="card stock"><div class="stock__head"><span class="stock__title">冰箱里有什么</span>' +
+      '<section class="card stock" data-block="stock"><div class="stock__head"><span class="stock__title">冰箱里有什么</span>' +
       '<span class="stock__add-row"><button class="stock__add">＋ 记一样</button><button class="stock__scan">📷 拍照</button></span></div>' +
       '<div class="stock__status-line"><span class="status">冰箱暂时打不开 ' +
       '<button class="status__retry">重试</button></span></div></section>' +
@@ -807,7 +819,7 @@ var PLAN_WHY = {
     '</ul>' },
   a: { t:'A ｜ 收紧一档', s:'结构不动，尺寸各收一档', body:
     '<ul class="pv-list">' +
-    '<li>空区不再被拉高：只留一行「这格里没有东西」</li>' +
+    '<li>空区框缩到内容高（79px，而不是跟着旁边那格拉到 113/275px）：只留一行「这格里没有东西」。<b>这一步不减页面高度</b>——同一行还有一格高的撑着；省下的高度全部来自下面两条</li>' +
     '<li>长区折到 6 行：冷藏 10 样 → 6 样 + 「还有 4 样 ›」（点得开）</li>' +
     '<li>食材行 42/46 → 36：图 32→28、行内边距 5→3；区格内边距 10/11 → 8/9</li>' +
     '<li>菜品行 56 → 48：图 44→40、行内边距 6→4。列表仍是 12 道</li>' +
@@ -916,10 +928,12 @@ function table(){
     });
   });
   document.getElementById('table').innerHTML = html;
+  var cRef = M.c.sw3d;  /* C 的冰箱/做菜两个标签高度在这一组里量 */
   document.getElementById('tableNote').innerHTML =
-    '首屏 = 844 − 76（底部标签栏）= 768px。表里每一格都是本页**真实渲染量出来的**（不是估算）。<br>' +
-    '① C 的两个数字 = 冰箱标签 / 做菜标签（做菜默认 4 道在首屏内；点开 12 道是 ' + M.c.cookTabFull + 'px，会超出，要滚一下）。' +
-    '② C 没有"做菜块顶边"这个概念：一次只画一块，所以量的是卡顶边到首屏的距离。<br>' +
+    '首屏 = 844 − 76（底部标签栏）= 768px。表里每一格都是本页<b>真实渲染量出来的</b>（不是估算）。<br>' +
+    '① C 的两个数字 = 冰箱标签 / 做菜标签（做菜默认 4 道是 ' + cRef.cookTab + 'px，在首屏内；' +
+    '点开 12 道是 ' + cRef.cookTabFull + 'px，会超出首屏，要滚一下）。' +
+    '② C 没有「做菜块顶边」这个概念：一次只画一块，所以量的是卡顶边到首屏的距离。<br>' +
     '现状那一行是本页复刻的实测；真机（dev :5173，391×844）实测 <b>791 / 828px</b>、做菜块顶边 969px —— ' +
     '复刻与真机差十几 px 是字体与行高的复刻误差，结论不受影响。';
 }
@@ -951,7 +965,8 @@ var CONSTRAINTS = {
   a: ['卡片内边距 <code>11px 14px</code>、标题 15px 不变',
       '四区仍是 2×2，gap <code>9 → 8</code>；区格内边距 <code>10/11 → 8/9</code>，区名 <code>13 → 12.5px</code>',
       '食材行：图 <code>32 → 28px</code>，行内边距 <code>5/4 → 3/4</code>，名字 13 → 12.5px，第二行 10.5 → 10px，行高 <code>42/46 → 36</code>',
-      '空区只留一行「这格里没有东西」（10.5px），不再被旁边一列拉高',
+      '空区框缩到内容高：<code>align-items: start</code>，区内只留一行「这格里没有东西」（10.5px）。' +
+      '注意这<b>不减页面高度</b>（同行另一格决定行高），纯粹是别让空区看着像一大片空白',
       '一个区超过 6 样时显示 6 样 + 「还有 N 样 ›」（点开全看）',
       '菜品行：图 <code>44 → 40px</code>，行内边距 <code>6/4 → 4/4</code>，行高 <code>56 → 48</code>；仍是 12 道',
       '3D 位置（后期）：四区是 2×2 铺开的，没有"某一个区的列表"可换，所以「3D / 列表」在这里换的是<b>整个四区</b>' +
@@ -960,6 +975,8 @@ var CONSTRAINTS = {
   b: ['冰箱块：分区段控一行 <code>34px</code>（常温 2 / 保鲜 空 / 冷藏 10 / 冷冻 空；空区虚线灰显）',
       '选中区全宽两列 <code>grid 1fr 1fr</code>，行高 <code>32 → 26px</code> 图、名字 12.5px、第二行 10px',
       '段控可横滑但四颗必须一屏放下（360px 宽时允许滑）',
+      '长名字最多两行、超出省略号（两列布局一格文字宽 ~146px，不限的话一个长名字能顶到三行）；' +
+      '名字与数量一行放不下时数量落到第二行（行高约 75px），这是格窄的正常结果、不是 bug',
       '菜品卡：<code>128×约 150px</code>，图 <code>88px</code> 圆角 9，名字最多两行（-webkit-line-clamp:2），「用上了 …」一行省略号',
       '「不用买」徽章移到图的左上角（9.5px），不再占一行宽度',
       '横滑要能看出可滑：右边留出下一张卡的边缘（gap 9px，容器右内边距 0）',
