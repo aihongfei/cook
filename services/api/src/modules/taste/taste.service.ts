@@ -82,6 +82,38 @@ export class TasteService {
   }
 
   /**
+   * **按家庭**取"这家人在用的档案"（判据用），不需要传 userId。
+   *
+   * 给的不是界面入口（那是 `family()`）而是判据入口：F5-03 的过滤、F5-04 的"能做什么"、
+   * 点菜提醒都要"这个家庭里谁不能吃什么"，而它们手里只有 `familyId`。
+   * 让它们去查 `family()` 就得先编一个 userId 出来——那是拿界面用的查询当内部工具使，
+   * 迟早会有人传错人而拿到别的家庭的档案。所以单独开这一条，口径与 `family().active` 一致。
+   *
+   * **只回填过的那些**（没填的人不是"什么都不过敏"，而是"不知道"——
+   * 判据层面不区分，但界面上必须说"他还没写"，见 `missingProfiles`）。
+   */
+  async activeProfiles(familyId: string): Promise<{ userId: string; nickname: string; profile: TasteProfile }[]> {
+    const members = await this.prisma.familyMember.findMany({
+      where: { familyId },
+      include: { user: { select: { nickname: true } } },
+    })
+    if (members.length === 0) return []
+    const rows = await this.prisma.tasteProfile.findMany({
+      where: { userId: { in: members.map((member) => member.userId) } },
+    })
+    const byUser = new Map(rows.map((row) => [row.userId, row]))
+    const out: { userId: string; nickname: string; profile: TasteProfile }[] = []
+    for (const member of members) {
+      const row = byUser.get(member.userId)
+      if (!row) continue
+      const view = toView(member.userId, member.user.nickname, '', row)
+      if (!view.filled) continue
+      out.push({ userId: member.userId, nickname: member.user.nickname, profile: toProfile(view) })
+    }
+    return out
+  }
+
+  /**
    * 改我自己的档案（部分更新：`undefined` 的字段不动）。
    *
    * 用 upsert 而不是"先查再建"：第一次填档案时那两个请求之间可能并发

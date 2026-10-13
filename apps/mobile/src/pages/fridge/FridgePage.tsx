@@ -4,6 +4,7 @@ import { useShoppingList } from '@/api/shopping'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import FridgeStock from './components/FridgeStock'
+import FridgeCookable from './components/FridgeCookable'
 import '../shared.scss'
 import './fridge.scss'
 
@@ -74,6 +75,13 @@ export default function FridgePage() {
         )}
 
         <FridgeStock enabled={Boolean(family.data)} />
+
+        {/*
+         * 能做点什么（F5-04 / F6-07）：排在冰箱之后，读法是"这里有什么 → 能做点什么"。
+         * 它依赖 FridgeStock 那份数据（自己又取了一次，走的同一个 react-query 缓存键，
+         * 不会多发一次请求），所以必须在同一个 `enabled` 条件下一起出现。
+         */}
+        <FridgeCookable enabled={Boolean(family.data)} />
       </div>
     </Page>
   )

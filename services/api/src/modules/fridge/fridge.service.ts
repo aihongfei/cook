@@ -1,7 +1,10 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
 import type { FamilyRole } from '../family/family.roles'
+import { publicImageUrl } from '../media/media.storage'
 import { visibleToMember } from '../orders/orders.rules'
 import { PrismaService } from '../recipes/prisma.service'
+import { TasteService } from '../taste/taste.service'
+import { judgeDish } from '../taste/taste.rules'
 import {
   FRIDGE_ZONES,
   expiryState,
@@ -14,6 +17,15 @@ import {
   toView,
   type FridgeItemView,
 } from './fridge.rules'
+import {
+  isSeasoning,
+  matchDish,
+  parseCookableLimit,
+  parseMaxMissing,
+  parsePantry,
+  rankMatches,
+  type DishMatch,
+} from './pantry.rules'
 
 /**
  * 冰箱库存（M6 / F6-01/02/03/04/05）。形态见 D-049：录入 = 手动 + 拍照（拍照那半待多模态模型）。
@@ -33,7 +45,10 @@ import {
  */
 @Injectable()
 export class FridgeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly taste: TasteService,
+  ) {}
 
   /** 库存全量 + 概览（F6-02）。四区各自一组，前端直接画（不在前端再分组一遍） */
   async board(userId: string) {
@@ -168,6 +183,151 @@ export class FridgeService {
     return this.board(userId)
   }
 
+  /**
+   * 手边食材能做什么（F5-04 选食材找菜 / F6-07 库存↔推荐 / F7-02 只买缺的）。
+   *
+   * 三处用同一个判断，只是输入不同（F5-04 用户勾的、F6-07 整个冰箱、F7-02 反过来问）。
+   * 匹配规则全在 `pantry.rules`（纯函数、单测直接验）——三个页面各写一套的话，
+   * "家里有辣椒算不算有"会给出三个答案。
+   *
+   * 五件事刻意的：
+   *
+   * - **不传食材就用整个冰箱**（F6-07 的"入库即推荐"）：冰箱页打开就要看到"N 道菜能用上冰箱食材"，
+   *   不该让用户先把冰箱里的东西挨个勾一遍。传了就用传的（F5-04 的"今天就想用手边这几样"）；
+   * - **共享关掉时用"我能看见的那部分"**：冰箱可见性那一套，与 board 完全一致；
+   * - **口味过滤在这里也生效**（F5-03）：这道菜里有人过敏就不该进候选。判据同 F8-02（只看配料表）；
+   * - **不查 AI、不问模型**：这是纯规则算出来的，毫秒级、可解释、离线可用。用户要的是
+   *   "我有什么能做什么"，不是又一次十几秒的等待；
+   * - **菜谱全表扫**：612 道 × 平均 307 字节配料 = 约 190KB，比一次 AI 调用的千分之一还小。
+   *   真到几万道再谈倒排索引，现在建索引是给一个不存在的问题写代码。
+   */
+  async cookable(
+    userId: string,
+    options: { ingredients?: unknown; limit?: unknown; maxMissing?: unknown; forMeal?: unknown } = {},
+  ) {
+    const { familyId, role, shared } = await this.requireMember(userId)
+    const scope = visibleToMember(shared, role)
+    const limit = parseCookableLimit(options.limit)
+    const maxMissing = parseMaxMissing(options.maxMissing)
+
+    const given = parsePantry(options.ingredients)
+    /*
+     * 用户没指定就用冰箱里那些（且只算**他能看见的**）。
+     * 空冰箱时 `pantry` 为空 → 结果必然是空 → 界面说"冰箱还是空的"，
+     * 而不是给一份"用料最少的菜"去装成推荐（见 rankMatches 的第一条筛选）。
+     */
+    const fridgeRows = given.length
+      ? []
+      : await this.prisma.fridgeItem.findMany({
+          where: { familyId, ...(scope === 'mine' ? { addedById: userId } : {}) },
+          select: { name: true },
+          orderBy: { createdAt: 'desc' },
+        })
+    /*
+     * 从冰箱来的清单里**把调料摘出去**（用户手勾的照留）。
+     *
+     * 冰箱是照实记的：谁家冰箱里都有盐和生抽。但放进手边清单会让两件事说错——
+     * ① `usable`（"能用出菜的东西有几样"）把盐算成一样，用户会以为有 9 样可用，其实只有 6 样；
+     * ② 界面上那颗颗小标签会列出一排"盐 食用油 生抽"，看着像在说"用盐能做菜"。
+     * 调料本来就不参与匹配（`matchDish` 那边整个跳过），所以摘掉不影响任何判断，
+     * 只是让"手边有什么"这句人话是真的。摘掉几样要报数（`skipSeasonings`）。
+     */
+    const rawSource = given.length ? given : fridgeRows.map((row) => row.name)
+    const pantry = given.length ? rawSource : rawSource.filter((name) => !isSeasoning(name))
+    const source: 'fridge' | 'picked' = given.length ? 'picked' : 'fridge'
+    const skipSeasonings = rawSource.length - pantry.length
+
+    if (pantry.length === 0) {
+      return {
+        source,
+        scope,
+        pantry: [],
+        /** 手边能拿来做菜的东西一共几样（调料不算）——界面据此说"冰箱还是空的" */
+        usable: 0,
+        skipSeasonings,
+        maxMissing,
+        filteredOut: 0,
+        /** 什么都不做（不是"没找到"）：冰箱空着，任何"推荐"都是编的 */
+        total: 0,
+        items: [],
+      }
+    }
+
+    const recipes = await this.prisma.recipe.findMany({
+      select: { id: true, name: true, image: true, imageKey: true, category: true, cuisine: true, calories: true, caloriesEstimated: true, spiciness: true, ingredients: true },
+    })
+
+    const matched: { recipeId: string; name: string; match: DishMatch; recipe: (typeof recipes)[number] }[] = []
+    for (const recipe of recipes) {
+      const match = matchDish(readIngredientNames(recipe.ingredients), pantry)
+      if (match) matched.push({ recipeId: recipe.id, name: recipe.name, match, recipe })
+    }
+
+    /*
+     * 口味过滤在**排序之前**（F5-03）：过敏的菜根本不该出现在"想做什么"里。
+     * 与 AI 推荐同一个判据（`judgeDish` 只看配料表），只是那边是"交给模型之前排掉"，
+     * 这里是"交给用户之前排掉"。
+     */
+    const profiles = await this.taste.activeProfiles(familyId)
+    const safe = profiles.length
+      ? matched.filter((row) =>
+          judgeDish(
+            { name: row.name, spiciness: row.recipe.spiciness, ingredients: readIngredientNames(row.recipe.ingredients) },
+            profiles,
+          ).verdict !== 'block',
+        )
+      : matched
+
+    const ranked = rankMatches(safe, maxMissing)
+    /*
+     * "挡掉了几道"数在**排完序的两个集合之差**上，不是 `matched` 的差。
+     *
+     * 第一版数的是 `matched - safe`，验收脚本立刻给了反例：写一个与这些菜无关的过敏词，
+     * 它照样报"挡住了 4 道"——那 4 道确实含那个词，但它们**本来也进不了这份结果**
+     * （差得太远、超出了容忍度）。用户看到"N 道被挡掉"会以为是自己眼前少了几道，
+     * 而这句话必须是真的。现在它数的是"按这份手边清单本来会出现在结果里、因为过敏被拿掉的"。
+     */
+    const unfiltered = profiles.length ? rankMatches(matched, maxMissing) : ranked
+    const filteredOut = unfiltered.length - ranked.length
+
+    const byId = new Map(safe.map((row) => [row.recipeId, row]))
+
+    return {
+      source,
+      scope,
+      /** 手边用的那几样（从冰箱来时按用户记的名字，勾选时按他勾的名字） */
+      pantry,
+      usable: pantry.length,
+      skipSeasonings,
+      maxMissing,
+      /** 能做的菜一共几道（不是返回了几道）——界面据此说"还有 N 道" */
+      total: ranked.length,
+      /** 口味挡掉了几道（F5-03）：只数**本来会出现在这份结果里**的 */
+      filteredOut,
+      items: ranked.slice(0, limit).flatMap((row) => {
+        const entry = byId.get(row.recipeId)
+        if (!entry) return []
+        const { recipe } = entry
+        return [
+          {
+            id: recipe.id,
+            name: recipe.name,
+            image: publicImageUrl(recipe.imageKey, recipe.image),
+            category: recipe.category,
+            cuisine: recipe.cuisine,
+            calories: recipe.calories,
+            caloriesEstimated: recipe.caloriesEstimated,
+            /** 用上了手边的哪几样（这是这一行最该看见的话） */
+            have: row.have,
+            /** 还差哪几样：**列名字**，用户要拿它去决定买不买 */
+            missing: row.missing,
+            missingCount: row.missingCount,
+          },
+        ]
+      }),
+    }
+  }
+
   // ---------- 内部 ----------
 
   private async requireMember(userId: string) {
@@ -190,4 +350,20 @@ interface FridgeInput {
   zone?: unknown
   expiresOn?: unknown
   note?: unknown
+}
+
+/**
+ * Prisma 的 `ingredients` 是 Json 列（形状不受类型系统保护），读成配料名给匹配用。
+ * 脏数据一律丢掉而不是抛：一道菜谱的配料写坏了不该让整个"能做什么" 500。
+ *
+ * 与 `ai.service` / `orders.service` 里的同名函数是同一段代码——**没有抽公共函数是刻意的**：
+ * 那两处要的是 `{ name }[]` 给判据，这里要的是同样的东西，但抽出去会多一个只有三行、
+ * 被四个模块依赖的 util（而且改一处要动四处）。真要抽取，等第五个调用点出现。
+ */
+function readIngredientNames(raw: unknown): { name: string }[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item) => (item && typeof item === 'object' && 'name' in item ? String((item as { name: unknown }).name) : ''))
+    .filter((name) => name.trim() !== '')
+    .map((name) => ({ name }))
 }

@@ -4,7 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
-import { FRIDGE_ZONES, type FridgeBoard, type FridgeItem, type FridgeZone } from '@/api/fridge'
+import { FRIDGE_ZONES, type CookableBoard, type FridgeBoard, type FridgeItem, type FridgeZone } from '@/api/fridge'
 import type { ShoppingList } from '@/api/shopping'
 import { useAuth } from '@/stores/auth'
 import FridgePage from './FridgePage'
@@ -108,7 +108,9 @@ function mockGet({
   family = FAMILY as unknown,
   list,
   fridge = fridgeBoard(),
-}: { family?: unknown; list?: ShoppingList | null; fridge?: FridgeBoard } = {}) {
+  cookable,
+}: { family?: unknown; list?: ShoppingList | null; fridge?: FridgeBoard; cookable?: CookableBoard } = {}) {
+  const cookableBoard = cookable ?? emptyCookable(fridge)
   vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
     if (url === '/family') return Promise.resolve({ data: family } as never)
     if (url === '/shopping-list') {
@@ -116,8 +118,31 @@ function mockGet({
       return Promise.resolve({ data: list ?? board() } as never)
     }
     if (url === '/fridge') return Promise.resolve({ data: fridge } as never)
+    if (url.startsWith('/fridge/cookable')) return Promise.resolve({ data: cookableBoard } as never)
     throw new Error(`未预期的请求：${url}`)
   })
+}
+
+/**
+ * 「能做点什么」那块要的那份结果。
+ *
+ * 这一页的测试只关心**冰箱主体与采购那一行**，所以默认给一份"什么都做不了"的板子
+ * （`total: 0`）——那块自己会说"这几样配不出菜"。它自己的行为在
+ * `components/FridgeCookable.test.tsx` 里单独验，两份测试各盯各的，不互相掺和。
+ */
+function emptyCookable(fridge: FridgeBoard): CookableBoard {
+  const names = fridge.zones.flatMap((group) => group.items.map((item) => item.name))
+  return {
+    source: 'fridge',
+    scope: fridge.scope,
+    pantry: names,
+    usable: names.length,
+    skipSeasonings: 0,
+    maxMissing: 1,
+    total: 0,
+    filteredOut: 0,
+    items: [],
+  }
 }
 
 beforeEach(() => {

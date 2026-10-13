@@ -3,14 +3,18 @@ import { JwtModule } from '@nestjs/jwt'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { jwtSecret } from '../auth/jwt.config'
 import { PrismaService } from '../recipes/prisma.service'
+import { TasteModule } from '../taste/taste.module'
 import { FridgeController } from './fridge.controller'
 import { FridgeService } from './fridge.service'
 
 /**
  * 冰箱库存（M6 / F6-01~F6-05）。
  *
- * 不依赖别的业务模块：它只读写自己那张表（库存是"家里确实有什么"的事实，
- * 不从菜单推、也不回写菜单——那两件事分别是采购清单与将来 F7-02/F6-07 的事）。
+ * 只读自己那张表，除了**口味档案**（FridgeService 注入了 `TasteService`）：F5-04 的
+ * "手边食材能做什么"要把有人过敏的菜排掉（F5-03 的同一个判据），所以要 import `TasteModule`。
+ *
+ * ⚠️ **imports 里少一个模块，症状是容器无限重启**，而 `tsc` 与单测全绿
+ * （Nest 的注入错误运行时才炸，见 RISKS R-43）。加注入就顺手把这里补上。
  */
 @Module({
   imports: [
@@ -18,6 +22,7 @@ import { FridgeService } from './fridge.service'
       secret: jwtSecret(),
       signOptions: { expiresIn: Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 7200) },
     }),
+    TasteModule,
   ],
   controllers: [FridgeController],
   providers: [PrismaService, FridgeService, JwtAuthGuard],

@@ -97,6 +97,85 @@ export function useFridge(options: { enabled?: boolean } = {}) {
 }
 
 /**
+ * 手边食材能做的一道菜（F5-04 / F6-07）。
+ *
+ * `have` 与 `missing` 是这一行**最该看见的两句话**：
+ * - `have` 是"用上了你冰箱里的什么"（按用户自己记的名字回显，他说"西红柿"就不回"番茄"）；
+ * - `missing` 是**具体哪几样**（不是只给一个数字）——用户要拿它去决定买不买、顺不顺路。
+ *   空数组才叫"不用买就能做"，那是这个功能唯一敢说的话（见 pantry.rules 文件头 ③）。
+ */
+export interface CookableDish {
+  id: string
+  name: string
+  image: string | null
+  category: string | null
+  cuisine: string | null
+  calories: number | null
+  caloriesEstimated: boolean
+  have: string[]
+  missing: string[]
+  missingCount: number
+}
+
+export interface CookableBoard {
+  /** 这份手边清单是**从冰箱来的**还是**用户自己挑的**——界面上要如实说 */
+  source: 'fridge' | 'picked'
+  scope: 'family' | 'mine'
+  /** 参与比对的那几样（调料已经摘掉了） */
+  pantry: string[]
+  /** 手边有几样能拿来做菜的东西（= pantry.length；调料不算） */
+  usable: number
+  /** 冰箱里被摘掉的调料数（调料不进比对，但要说出来，不然用户以为漏了） */
+  skipSeasonings: number
+  maxMissing: number
+  /** 能做的菜一共几道（不是返回了几道） */
+  total: number
+  /** 因为有人过敏被排掉的道数（F5-03）：只数"本来会出现在这份结果里"的 */
+  filteredOut: number
+  items: CookableDish[]
+}
+
+export interface CookableQuery {
+  /** 手边食材；**不传就用整个冰箱**（F6-07）。传了空串也当没传（后端同一口径） */
+  ingredients?: string[]
+  limit?: number
+  /** 最多容忍差几样：0 = 只看不用买的 */
+  maxMissing?: number
+}
+
+export async function fetchCookable(query: CookableQuery = {}): Promise<CookableBoard> {
+  const params = new URLSearchParams()
+  if (query.ingredients?.length) params.set('ingredients', query.ingredients.join(','))
+  if (query.limit !== undefined) params.set('limit', String(query.limit))
+  if (query.maxMissing !== undefined) params.set('maxMissing', String(query.maxMissing))
+  const suffix = params.toString()
+  const { data } = await apiClient.get<CookableBoard>(`/fridge/cookable${suffix ? `?${suffix}` : ''}`)
+  return data
+}
+
+/**
+ * 能做点什么。**跟着参数进缓存键**（手边清单与 `maxMissing` 都算）：
+ * 不分开的话，用户切到"只看不用买的"会看到上一次那份列表一闪而过再变。
+ *
+ * 手边清单排序后进 key：勾选顺序不影响结果，但会影响 key → 同一组食材被当成两份缓存、
+ * 白请求一次（用户来回点两下就会出现）。
+ *
+ * `undefined`（用整个冰箱）与 `[]`（一样都没挑）**必须落在不同的键上**：
+ * 它们不是同一个请求，共用缓存会让后者拿到前者那份数据
+ * （组件那边已经用 `nothingPicked` 挡了绘制，但键这一层也不该留这个坑）。
+ */
+export function useCookable(query: CookableQuery, options: { enabled?: boolean } = {}) {
+  const token = useAuth((state) => state.token)
+  const key = query.ingredients === undefined ? 'all' : [...query.ingredients].sort().join(',')
+  return useQuery({
+    queryKey: ['fridge', 'cookable', key, query.maxMissing ?? 1, query.limit ?? 0],
+    queryFn: () => fetchCookable(query),
+    enabled: Boolean(token) && options.enabled !== false,
+    staleTime: 30_000,
+  })
+}
+
+/**
  * 三个写操作共用一套收尾：把返回的整块板子**直接写进缓存**。
  *
  * 不用 `invalidateQueries` 重取：写接口已经把新板子给回来了，再取一次是白跑一趟，

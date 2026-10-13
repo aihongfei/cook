@@ -689,3 +689,241 @@
   background: var(--color-brand);
   border-color: var(--color-brand);
 }
+
+/* ---- 能做点什么（F5-04 手边食材选菜 / F6-07 库存↔推荐） ----
+ * 它在冰箱那块下面：读法是"这里有什么 → 能做点什么"。 */
+
+.cook {
+  background: var(--color-paper);
+}
+
+.cook__head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cook__title {
+  font-size: 15px;
+  color: #6e3a1c;
+}
+
+/* 「挑几样」是个开关：开着的状态要看得出来（否则用户不知道自己在哪个模式里，
+ * 而两个模式下面显示的东西完全不一样） */
+.cook__pick {
+  padding: 4px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-brand);
+  cursor: pointer;
+  background: rgb(224 123 57 / 9%);
+  border: 1px solid rgb(224 123 57 / 32%);
+  border-radius: 999px;
+}
+
+.cook__pick.is-on {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+.cook__pick:active {
+  opacity: 0.85;
+}
+
+.cook__pick-hint {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-3);
+}
+
+/* 可点食材标签：两列排开、一行能放两个——点得中比好看重要（站在冰箱前用手指头戳） */
+.cook__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cook__chip {
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  background: rgb(255 255 255 / 70%);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+/* 选中的标签是实心的：一堆标签里"哪几个是开的"要一眼看出来 */
+.cook__chip.is-on {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+.cook__chip.is-on::before {
+  content: '✓ ';
+  font-size: 10px;
+}
+
+.cook__chip:active {
+  opacity: 0.85;
+}
+
+.cook__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.cook__filter {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  background: rgb(255 255 255 / 70%);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+/* "开"一律是品牌橙（与 .cook__pick / .cook__chip 同一套语汇）：
+ * 全站只有两个语义色——brand 表示"在用/选中"，brick 表示出错。
+ * 这块一度用过绿色，那是**调色板外的颜色**（主题是暖橙水粉，全站没有绿），
+ * 单独冒出一块绿看着像另一个应用。 */
+.cook__filter.is-on {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+.cook__summary {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--color-ink-3);
+}
+
+.cook__status-line {
+  padding: 6px 0;
+}
+
+.cook__scope,
+.cook__filtered {
+  margin: 9px 0 0;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-2);
+  background: rgb(224 123 57 / 7%);
+  border-radius: 10px;
+}
+
+.cook__empty {
+  margin: 9px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.cook__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cook__link {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 4px;
+  text-decoration: none;
+  border-radius: 10px;
+}
+
+.cook__link:active {
+  background: rgb(224 123 57 / 8%);
+}
+
+.cook__pic {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+.cook__pic img,
+.cook__pic .recipe-image-placeholder {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cook__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.cook__name {
+  overflow: hidden;
+  font-size: 13.5px;
+  color: var(--color-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "用上了什么"是**背景信息**（用掉冰箱里的东西是好事，但用户不必为它做什么），
+ * 所以压成次要色；"还差什么"要他去买，用这一页已有的提醒色（与 .stock__soon-summary 一致）。
+ * 两行的轻重是有意的：该行动的那一行更响。 */
+.cook__have {
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--color-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cook__missing {
+  overflow: hidden;
+  font-size: 11px;
+  color: #a8542a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 「不用买」是这一整块唯一敢下的结论，所以要显眼；「差 N 样」是次要信息 */
+.cook__badge {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font-size: 10.5px;
+  color: var(--color-ink-3);
+  background: var(--color-cream-2);
+  border-radius: 999px;
+}
+
+/* 「不用买」用调色板里那块暖绿（sage）：全站唯一的"可以做"信号，
+ * 而它是水粉淡色 + 深墨字——不喊，但一眼看得出来与旁边那些灰徽章不同 */
+.cook__badge.is-ready {
+  color: var(--color-ink);
+  background: var(--color-sage);
+}
+
+.cook__more-line {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}

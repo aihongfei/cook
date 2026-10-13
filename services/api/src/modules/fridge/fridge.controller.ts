@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, UseGuards } from '@nestjs/common'
-import { ApiOperation, ApiTags } from '@nestjs/swagger'
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { CurrentUserId, JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { FridgeService } from './fridge.service'
 
@@ -44,6 +44,27 @@ export class FridgeController {
   @ApiOperation({ summary: '记一样食材（M6 / F6-03 手动录入；拍照批量入库将来也走这里）' })
   async add(@CurrentUserId() userId: string, @Body() body: FridgeBody) {
     return this.fridge.add(userId, body ?? {})
+  }
+
+  /**
+   * 手边食材能做什么（F5-04 / F6-07 / F7-02 共用同一个判断）。
+   *
+   * **`GET /fridge/cookable` 必须挂在 `@Get(':id')` 之类的前面**——本项目没有 `:id` 的 GET
+   * （冰箱是按整块读的），所以这里没有冲突；写在 `board()` 之后只是为了让"读冰箱"两个接口挨着。
+   */
+  @Get('cookable')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '手边食材能做哪些菜（不传 ingredients 就用整个冰箱）（F5-04 / F6-07）' })
+  @ApiQuery({ name: 'ingredients', required: false, description: '手边食材，逗号分隔（如 `鸡蛋,土豆`）；不传 = 用整个冰箱' })
+  @ApiQuery({ name: 'limit', required: false, description: '一页最多几道，默认 12、上限 30' })
+  @ApiQuery({ name: 'maxMissing', required: false, description: '最多容忍差几样，默认 1、上限 3（0 = 只看不用买的）' })
+  async cookable(
+    @CurrentUserId() userId: string,
+    @Query('ingredients') ingredients?: string,
+    @Query('limit') limit?: string,
+    @Query('maxMissing') maxMissing?: string,
+  ) {
+    return this.fridge.cookable(userId, { ingredients, limit, maxMissing })
   }
 
   @Patch(':id')
