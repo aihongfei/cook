@@ -2592,9 +2592,12 @@ pnpm --dir apps/mobile run dev                   # http://127.0.0.1:5173/fridge
 
 4. **交互**：点「常温」→ 两样换过来、选中的那颗换过来；点「冷冻 空」→ "冷冻格里没有东西。"；展开「最近记的 8 样」→ 8 行。
 5. **跨路由保状态**：选「常温」+ 展开最近 → 点一道菜进详情 → 返回 → **仍然选中「常温」、最近仍展着**（第一版这里是跳回「冷藏」的，见 R-49）。
-6. **横滑**：容器 327px / 内容 781px，滚到 300 后第 4~5 张可见；末尾「› 还有 40 道能做」不是链接。`overflow-y` 为 auto 但 `scrollHeight === clientHeight`（159），**没有裁切**。
-7. **长名字**：库里最长的「超级下饭的番茄炒蛋.西红柿炒鸡蛋」实测 **2 行 32px**（`-webkit-line-clamp:2` 生效），没有把卡顶高。
+6. **横滑**：容器 327px / 内容 781px，滚到 300 后第 4~5 张可见；`overflow-y` 为 auto 但 `scrollHeight === clientHeight`（159），**没有裁切**。
+   （末尾那块**当天下午就改过**：当时「› 还有 40 道能做」不是链接，用户看过之后要求做成真入口，见 R-054。）
+7. **长名字**：库里最长的「超级下饭的番茄炒蛋.西红柿炒鸡蛋」当时实测 **2 行 32px**（`-webkit-line-clamp:2`）。
+   （**已改**：同一次反馈后改成**一行 16px + 省略号**，见 R-054——两行会被一条长名字把整条横滑条每张卡都撑高。）
 8. `pnpm --dir apps/mobile run test` → **481/481**；`tsc -b` 只剩既有的 2 条（CombosPage/PrepPage）；lint **9 warnings / 0 errors**（基线未变）。
+   （后续两刀之后：前端 **502/502**、`tsc -b` 干净、lint 基线未变，见 R-053 / R-054。）
 
 **踩到的坑**：
 
@@ -2609,3 +2612,61 @@ pnpm --dir apps/mobile run dev                   # http://127.0.0.1:5173/fridge
 - **预览里的数字是实现约束**：改完要**逐区域**对照，差 20px 以上一定是漏了具体某一处，要查出是哪一处而不是"差不多就行"。
 - **`line-height` 不写就是 1.6**：一排小字里每行多 3px，两列五行就多 15px——这类"没写在任何一处"的尺寸最容易被漏。
 - 这一刀**只锁了 3D 冰箱的位置与高度**（分区面板那格，205px），**3D 本身没做**（M17 / F17-01~F17-06）。
+
+## R-053 采购清单编辑与一键补货（D-064：F7-03 + F7-05）（✅ 已验证，2026-10-13）
+
+用户「继续做吧」→ 做 F7-03（勾选持久化 / 增减条目 / 分组）与 F7-05（一键补货进冰箱）。**这两条是一件事的两半**：在超市勾掉买到的，回来一键记进冰箱。
+
+### 落地了什么
+
+| 层 | 位置 | 内容 |
+| --- | --- | --- |
+| 表 | `prisma/schema.prisma` | `ShoppingCheck`（`familyId + name` 唯一，7 天过期）+ `ShoppingExtra`（自加条目，带 id 可删） |
+| 规则 | `shopping.rules.ts` | `aisleOf`/`AISLE_ORDER`（六组货架，覆盖真实语料 **91.4%**）、`isBuyable`（12 种"水"的写法）、`aisleZone`（补货分区）、`checkFresh`（7 天 TTL）、`parseExtraName/Amount` |
+| 接口 | `shopping.controller.ts` | `POST /shopping-list/check`、`POST /shopping-list/extras`、`DELETE /shopping-list/extras/:id`、`POST /shopping-list/restock`（200）；`GET` 的返回多出 `aisles`/`checkedNames`/`checkedCount` |
+| 前端 | `api/shopping.ts`、`ShoppingPage.tsx` | 勾选乐观更新（只合并这一样）、按货架分组渲染、自加条目表单、末尾 ✕ 删自加条目、「把这 N 样记进冰箱」 |
+
+### 验证步骤（按这个顺序跑）
+
+1. **后端单测**：`pnpm --dir services/api run test` → **414/414**。
+2. **后端 HTTP 验收**：先 `docker compose build api && docker compose up -d --force-recreate api`，等健康检查，再
+   `pnpm --dir services/api run test:http:shopping-edit` → **30/30**；
+   `pnpm --dir services/api run test:http:cookable` → **39/39**（含新增的 4 条 `offset` 翻页）。
+   - 两个脚本都有 `settleThrottleWindow()`：全局限流 60 次/分，连跑第二遍会撞 429，脚本会自己等窗口。
+3. **前端**：`pnpm --dir apps/mobile run test` → **502/502**；`npx tsc -b` 干净；`pnpm run lint` **9 warnings / 0 errors**（基线未变）。
+4. **浏览器**（dev :5173，391×844）：勾一下 → 立刻划掉 → **刷新后勾还在**；按货架分组的标题与行都在；加一条「垃圾袋」→ 出现在「其他」那一组；勾上后点「把这 1 样记进冰箱」→ toast + 冰箱页真的多了那一样。
+
+### 注意
+
+- **勾选的真相在服务端**（`checkedNames`），`checkedCount` 也由后端给——前端不自己数，两边各数一遍必然有一边先改。
+- **乐观更新只合并这一样**：整体替换缓存会在"连点好几样"时把先回来的响应写回去（"我点了它怎么又没勾上"）。
+- **补货的数量留空**是刻意的：清单上的"2个"是**菜谱要多少**，不是买回来多少。
+- **验收断言要确认前提成立**：见 R-52（"跳过保留勾"那条第一版永远不可能通过）。
+- 勾选 **7 天自动过期**，读的时候顺手删（`checkFresh`）。
+
+## R-054 「能做点什么」菜名单行省略 + 末尾块改成真入口（D-063 修订）（✅ 已验证，2026-10-13）
+
+用户看过 D-063 的落地效果后提：「这块不要换行，用省略吧，这个更多也不好看还不能点击，需要实现和优化」。
+
+### 改了什么
+
+1. **菜名单行省略**：`.cook__card-name` 的 `-webkit-line-clamp: 2` → `white-space: nowrap` + `text-overflow: ellipsis` + `overflow: hidden`（三件套缺一个就变成硬截断），并补 `title` 属性。实测长名字那一格 **32px → 16px**（不再把整条横滑条每张卡都撑高）。
+2. **末尾那块是入口**：`128px` 卡（与菜卡同宽同圆角、品牌色浅底），写**总数**（`45 道能做 / 看全部 ›`），`<Link to="/fridge/cookable?…">`——把当前口径（`ingredients` / `maxMissing`）一起带过去。
+3. **新页 `/fridge/cookable`**（「能做点什么」完整列表）：竖排一行一道（图 + 名字 + 用上了什么 + 还差什么 + 徽章），一次 12 道、`再看一页（还有 N 道）`、翻到底说"能做的都在这里了"。
+4. **后端 `offset` 分页**（`COOKABLE_OFFSET_MAX = 1000`，默认 0 → **老调用方一个字的代码都不用改**）。
+
+### 验证步骤
+
+1. `pnpm --dir services/api run test` → **414/414**（新增 `parseCookableOffset` 与 `parseCookableLimit` 的边界）。
+2. `pnpm --dir services/api run test:http:cookable` → **39/39**（新增：两页不重叠、翻页不改总数、翻到最后一页给得出剩下那道、`offset=-1` → 400）。
+3. `pnpm --dir apps/mobile run test` → **502/502**。
+4. 浏览器：横滑条末尾 `plateHref=/fridge/cookable`；点进去 12 行、**组内顺序与横滑条前 5 道一致**；「再看一页（还有 33 道）」→ 24 行、**零重复**、剩 21 道；开「只看不用买的」→ 地址变 `?maxMissing=0`（12 道）；从那一页点进菜谱详情、返回后**筛选还在**、底部 Tab 仍高亮「冰箱」。
+
+### 注意
+
+- **姓名格高 16px** 是这一刀的验收数字（改前长名字 32px）。
+- 末尾那块写的是**总数**不是"还剩多少"：它是入口，说的是"点进去一共有多少"。
+- 筛选走 **URL**（不是 store）：URL 本来就是"这一页看到的东西"的地址，顺带让筛选活过路由跳转、也能直接分享这一屏。
+- 这一页与冰箱页那块**是同一份结果**（同接口同顺序），点进去不会换一批菜。
+- **`/fridge/cookable` 已加入返回白名单**（`back-link.ts`），否则从它点进菜谱后的返回按钮会退到冰箱页。
+- 已修正 R-052 第 7 条：长名字**不再是 2 行 32px**，现在是 1 行 16px + 省略号。
