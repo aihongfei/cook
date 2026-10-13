@@ -22,6 +22,14 @@ import { MEAL_LABEL, ORDER_DAY_SPAN } from '../orders/orders.rules'
 export const TOOL_SEARCH_DISHES = 'search_dishes'
 export const TOOL_PROPOSE_MENU_ITEMS = 'propose_menu_items'
 export const TOOL_READ_PLAN = 'read_plan'
+/** 冰箱四件（F16-10 / D-052 的 **A 档**：真的写库，但每笔都带撤销） */
+export const TOOL_READ_FRIDGE = 'read_fridge'
+export const TOOL_ADD_FRIDGE_ITEMS = 'add_fridge_items'
+export const TOOL_UPDATE_FRIDGE_ITEM = 'update_fridge_item'
+export const TOOL_REMOVE_FRIDGE_ITEM = 'remove_fridge_item'
+
+/** 一次最多往冰箱里记几样（模型会一口气倒出十几条，见 D-052 的护栏） */
+export const FRIDGE_ADD_MAX = 8
 
 /** 一轮里最多核几个提议（模型偶尔会把整周的菜一次性倒出来） */
 export const PROPOSALS_MAX = 6
@@ -85,6 +93,85 @@ export const AI_TOOLS = [
         type: 'object',
         properties: { days: { type: 'integer', description: '往后看几天，默认 3' } },
         required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_READ_FRIDGE,
+      description: '读家里冰箱现在有什么（分区、数量、保质期）。要改或要删冰箱里的东西之前**必须先调它**，'
+        + '拿到准确的名字与 id——凭记忆操作会删错东西。',
+      parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_ADD_FRIDGE_ITEMS,
+      description: '把食材记进冰箱。**这个工具会真的写库**（用户已经同意），所以只在他明确说了要记什么的时候调，'
+        + `一次最多 ${FRIDGE_ADD_MAX} 样。用户说"买了鸡蛋和牛奶"就是一次调用传两样，不要一样调一次。`
+        + '写完界面会给用户一张可撤销的回执卡，所以你**可以说"记好了"**，但不能编造没记成的东西。',
+      parameters: {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            description: `要记的食材，最多 ${FRIDGE_ADD_MAX} 样`,
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: '食材名，如「鸡蛋」' },
+                amount: { type: 'string', description: '数量，可空，如「一盒」「约 500g」' },
+                zone: { type: 'string', enum: ['常温', '保鲜', '冷藏', '冷冻'], description: '放哪儿。不确定就按食材常识，冷藏是常见默认' },
+                expiresOn: { type: 'string', description: '保质期 YYYY-MM-DD，可空。**用户没说的不要编**，编了他会以为那天真的坏' },
+                note: { type: 'string', description: '备注，可空，如「给奶奶买的」' },
+              },
+              required: ['name'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['items'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_UPDATE_FRIDGE_ITEM,
+      description: '改冰箱里已有的一样东西（数量、位置、保质期、名字）。**会真的写库**。'
+        + `必须先调 ${TOOL_READ_FRIDGE} 拿到它的 id；只传要改的字段，不传的保持原样。`,
+      parameters: {
+        type: 'object',
+        properties: {
+          itemId: { type: 'string', description: `${TOOL_READ_FRIDGE} 返回的 id` },
+          name: { type: 'string', description: '新名字（改名时才传）' },
+          amount: { type: 'string', description: '新数量' },
+          zone: { type: 'string', enum: ['常温', '保鲜', '冷藏', '冷冻'], description: '新存放区' },
+          expiresOn: { type: 'string', description: '新保质期 YYYY-MM-DD' },
+          note: { type: 'string', description: '新备注' },
+        },
+        required: ['itemId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_REMOVE_FRIDGE_ITEM,
+      description: '把冰箱里的一样东西拿掉（吃完了/扔了）。**会真的写库**。'
+        + `必须先调 ${TOOL_READ_FRIDGE} 拿到 id，且要能对上用户说的那一样——`
+        + '用户没点名具体哪样时先问清，不要替他挑一个。',
+      parameters: {
+        type: 'object',
+        properties: {
+          itemId: { type: 'string', description: `${TOOL_READ_FRIDGE} 返回的 id` },
+        },
+        required: ['itemId'],
         additionalProperties: false,
       },
     },
@@ -230,4 +317,136 @@ export function searchResult(hits: DishHit[], query: string): string {
       tags: dish.tags.slice(0, 4),
     })),
   })
+}
+
+// ---------- 冰箱四件（A 档：真的写库，但每笔都记下来可撤）----------
+
+/**
+ * 模型给的"要记进冰箱"的一张条。
+ *
+ * 刻意**只做形状收敛，不做业务校验**（名字长度/数量上限/日期是否存在那些在
+ * `fridge.rules` 里，写库时再走一遍）：这一层的职责是"别让模型给的畸形状掉进写库路径"，
+ * 而业务规则只能有一份——两处各写一套必然分叉（那边改了校验，这边还是旧口径）。
+ *
+ * `zone` 落到四个合法值之外时**退回"冷藏"而不是拒绝整条**：模型偶尔会把"冰箱"
+ * 当成存放区写进来，为这个丢掉用户说的一样东西不值得。**但 expiresOn 不猜**——
+ * 写一个错的保质期会让用户以为那天真的坏，宁可当没写（用户之后可以自己补）。
+ */
+export interface FridgeDraft {
+  name: string
+  amount?: string
+  zone?: string
+  expiresOn?: string
+  note?: string
+}
+
+/**
+ * 模型给的保质期能不能收。
+ *
+ * 光看形状（`\d{4}-\d{2}-\d{2}`）是不够的——实测模型会写出 `2026-13-45` 这种
+ * "形状对、日子不存在"的东西。这里**反查一遍**（同 `fridge.rules.parseExpiry` 的手法），
+ * 不存在的日期就当没写：存进去会让用户以为那天真的坏，而"没写"他随时能自己补。
+ */
+function readableDate(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const text = raw.trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null
+  const [year, month, day] = text.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  const real = date.getUTCFullYear() === year && date.getUTCMonth() + 1 === month && date.getUTCDate() === day
+  return real ? text : null
+}
+
+export function readAddItems(rawArguments: string): { drafts: FridgeDraft[]; rejected: string[] } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return { drafts: [], rejected: ['（参数不是合法 JSON）'] }
+  }
+  const items = (parsed as { items?: unknown })?.items
+  if (!Array.isArray(items)) return { drafts: [], rejected: ['（缺少 items 数组）'] }
+
+  const drafts: FridgeDraft[] = []
+  const rejected: string[] = []
+  for (const item of items) {
+    if (drafts.length >= FRIDGE_ADD_MAX) {
+      rejected.push('（超过一次能记的上限，剩下的请分下一批）')
+      break
+    }
+    const record = item as Record<string, unknown>
+    const name = typeof record?.name === 'string' ? record.name.trim() : ''
+    if (!name) {
+      rejected.push('(空名字)')
+      continue
+    }
+    const draft: FridgeDraft = { name }
+    if (typeof record.amount === 'string' && record.amount.trim()) draft.amount = record.amount.trim()
+    if (typeof record.zone === 'string' && record.zone.trim()) draft.zone = record.zone.trim()
+    const expiresOn = readableDate(record.expiresOn)
+    if (expiresOn) draft.expiresOn = expiresOn
+    if (typeof record.note === 'string' && record.note.trim()) draft.note = record.note.trim()
+    drafts.push(draft)
+  }
+  return { drafts, rejected }
+}
+
+/**
+ * 解析"要改哪条 + 改成什么"。
+ *
+ * 返回的 `patch` **只含模型真的传了的字段**——没传的保持原样。
+ * 这一条很重要：模型经常把"只改数量"写成把名字也带一遍，若把那当成"改名字"，
+ * 用户会看到菜名莫名其妙变了（而它恰好和原名一样时又看不出来，问题更隐蔽）。
+ */
+export function readUpdateItem(rawArguments: string): { itemId: string; patch: Partial<FridgeDraft> } | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return null
+  }
+  const record = parsed as Record<string, unknown>
+  const itemId = typeof record?.itemId === 'string' ? record.itemId.trim() : ''
+  if (!itemId) return null
+
+  /*
+   * 逐个"传了才带上"地拼，而不是先放一个默认值再 delete：
+   * `patch` 的字段是可选的，`delete` 只对可选属性合法（默认值那种写法 TS 会拦）。
+   * 语义上也更直白——**只带模型真的传了的字段**（见函数说明里"只改数量"那个坑）。
+   */
+  const patch: Partial<FridgeDraft> = {}
+  if (typeof record.name === 'string' && record.name.trim()) patch.name = record.name.trim()
+  if (typeof record.amount === 'string') patch.amount = record.amount.trim()
+  if (typeof record.zone === 'string' && record.zone.trim()) patch.zone = record.zone.trim()
+  const expiresOn = readableDate(record.expiresOn)
+  if (expiresOn) patch.expiresOn = expiresOn
+  if (typeof record.note === 'string') patch.note = record.note.trim()
+  return { itemId, patch }
+}
+
+export function readRemoveItem(rawArguments: string): string | null {
+  try {
+    const parsed = JSON.parse(rawArguments) as { itemId?: unknown }
+    const itemId = typeof parsed?.itemId === 'string' ? parsed.itemId.trim() : ''
+    return itemId || null
+  } catch {
+    return null
+  }
+}
+
+/** 给模型看的冰箱现状（紧凑文本：它只要知道"有什么、叫什么、id 是多少"） */
+export function fridgeText(items: {
+  id: string
+  name: string
+  amount: string | null
+  zone: string
+  expiryLabel: string | null
+}[]): string {
+  if (items.length === 0) return '（冰箱是空的）'
+  return items
+    .map((item) => {
+      const parts = [item.name, item.amount, item.zone, item.expiryLabel].filter(Boolean)
+      return `${parts.join(' · ')}（id: ${item.id}）`
+    })
+    .join('\n')
 }

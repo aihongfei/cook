@@ -1,0 +1,234 @@
+/*
+ * 全局 AI 助手（F16-10 / D-052）自己的样式：回执卡 + 「新对话」。
+ *
+ * **为什么单独一个文件、而不是接着往 discover.scss 里写**：那是「问 AI」/「AI 帮你想」
+ * 两个抽屉的样式表，而助手在外壳层（任意页都在）。这里只放助手独有的两样东西：
+ * 回执卡（只有它才有"AI 真的写了库"这件事）与「新对话」。
+ *
+ * ⚠️ 助手复用的那套对话语汇（`.ai__thread` / `.ai__turn` / `.ai__ask` / `.ai__hint` 等）
+ * **定义在 `pages/discover/discover.scss`**，三个抽屉共用一套。现在能生效是因为
+ * `router/index.tsx` 里的页面全是静态 import（启动时就全部加载，那份样式表一定在）。
+ * 将来若把路由改成懒加载，这里要跟着把共用语汇抽成一份单独的表——否则助手会变成裸样式。
+ */
+
+/*
+ * 回执卡：AI 真的写进库之后的证据 + 「撤」。
+ *
+ * 视觉上**比正文重一档**（描边 + 纸底），因为它是"已经发生的事"：
+ * 用户扫一眼对话流时要能立刻分清"哪些是它说的、哪些是它做的"。
+ * 撤过的那行划掉但**不删**——撤了什么也该看得见（见 AiReceiptCard 的说明）。
+ */
+.ai__receipt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 9px;
+  padding: 9px 10px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  /* 与正文同一个入场语气（新内容轻轻浮上来，不要"啪"地出现） */
+  animation: ai-in 0.2s ease-out;
+}
+
+.ai__receipt-head {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+.ai__receipt-mark {
+  font-size: 11px;
+}
+
+.ai__receipt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.ai__receipt-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+
+  /* 撤过的：划掉、退到背景里，但**留着**（说清这一笔被撤了） */
+  &.is-undone {
+    opacity: 0.6;
+  }
+
+  &.is-undone .ai__receipt-summary {
+    color: var(--color-ink-3);
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+  }
+}
+
+.ai__receipt-summary {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--color-ink);
+}
+
+.ai__receipt-undo {
+  flex: 0 0 auto;
+  min-width: 52px;
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: #a4552a;
+  background: transparent;
+  border: 1px solid #e2b590;
+  border-radius: 999px;
+
+  &:disabled {
+    opacity: 0.6;
+  }
+}
+
+.ai__receipt-undone {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+/*
+ * 底部两个轻入口（「新对话」/「以前的对话」）并排。
+ *
+ * 都做成小字描边而不是实心按钮：它们是**次要动作**（大多数时候用户是接着说的），
+ * 抢眼会把输入框挤下去。右边那个带条数，让人一眼知道攒了多少场。
+ */
+.ai-assistant__foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.ai-assistant__new,
+.ai-assistant__history {
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  background: transparent;
+  border: 1px dashed var(--color-line);
+  border-radius: 999px;
+}
+
+/*
+ * 「以前的对话」（用户 2026-10-13：「会话历史也要保留啊，还有开启新会话这些」）。
+ *
+ * 列表按**最近说话的时间**由近到远（store 里就是那个顺序）：想找"昨天让它记的那批"
+ * 时，最近聊的必然在最上面，不必先想它是星期几。每一行给时间的人话（刚刚/昨天/10月12日），
+ * 而不是一串 ISO——用户看的是"多久以前"。
+ */
+.ai-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-history__head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ai-history__title {
+  font-size: 13px;
+  color: var(--color-ink-2);
+}
+
+.ai-history__back {
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  background: transparent;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.ai-history__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.ai-history__item {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+
+  /* 当前正在看的这场标出来：不然点进去之后分不清自己站在哪儿 */
+  &.is-active {
+    border-color: #e2b590;
+    background: #fffaf4;
+  }
+}
+
+/* 整行可点（除了右边那个删除）：命中区大一点，拇指不容易点空 */
+.ai-history__pick {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+}
+
+.ai-history__name {
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--color-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-history__when {
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.ai-history__del {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--color-ink-3);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+
+  &:active {
+    background: var(--color-cream-2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai__receipt {
+    animation: none;
+  }
+}

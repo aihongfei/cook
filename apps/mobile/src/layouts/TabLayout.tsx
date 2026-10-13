@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { LeafSprig } from '@/components/icons/TabIcons'
+import AiAssistantBall from '@/components/ai/AiAssistantBall'
+import AiAssistantSheet from '@/components/ai/AiAssistantSheet'
+import { useAiAssistantSession } from '@/stores/ai-assistant-session'
 import { tabs } from '@/config/tabs'
 import { tabOf } from '@/pages/back-link'
 import './TabLayout.scss'
@@ -13,6 +16,7 @@ export default function TabLayout() {
   const location = useLocation()
   const { pathname } = location
   const bodyRef = useRef<HTMLElement>(null)
+  const assistantOpen = useAiAssistantSession((state) => state.open)
   useEffect(() => { bodyRef.current?.scrollTo?.({ top: 0 }) }, [pathname])
 
   /*
@@ -64,6 +68,15 @@ export default function TabLayout() {
         <LeafSprig className="tab-bar__deco tab-bar__deco--left" />
         <LeafSprig className="tab-bar__deco tab-bar__deco--right" />
       </nav>
+
+      {/*
+        全局 AI 助手（F16-10 / D-052）：入口与抽屉都放在外壳这一层——
+        它要**任意页都在**，写在页面里迟早漏一个，而新页面会忘。
+        对话状态在 store 里、且落盘（见 stores/ai-assistant-session），所以收起抽屉、换页、
+        甚至刷新页面都不丢；抽屉本身按开合挂载（与发现页那两个抽屉同一做法）。
+      */}
+      <AiAssistantBall />
+      {assistantOpen && <AiAssistantSheet />}
     </div>
   )
 }

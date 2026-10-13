@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth, type AuthUser } from '@/stores/auth'
+import { useAiAssistantSession } from '@/stores/ai-assistant-session'
 import { apiClient, refreshSession } from './client'
 
 export type { AuthUser }
@@ -46,6 +47,15 @@ export async function logout(): Promise<void> {
     // 网络不通/令牌已失效都视为已退出
   } finally {
     useAuth.getState().clear()
+    /*
+     * **AI 助手的对话也一起清掉**（用户 2026-10-13：「会话历史也要保留」的对价）。
+     *
+     * 那些对话里有**这家冰箱的内容**（"记了酸奶""牛奶快到期了"）——同一台手机上换个账号
+     * 登录就该是空白的。不清的话，上一个人退出了、下一个人点开悬浮球就看见别人家里有什么，
+     * 这是实打实的隐私事故（比"历史丢了"严重得多）。所以这里不是"顺手清一下"，
+     * 而是持久化这份历史的前提。
+     */
+    useAiAssistantSession.getState().clearAll()
   }
 }
 

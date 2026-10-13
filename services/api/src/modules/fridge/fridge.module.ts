@@ -21,5 +21,7 @@ import { FridgeService } from './fridge.service'
   ],
   controllers: [FridgeController],
   providers: [PrismaService, FridgeService, JwtAuthGuard],
+  // 导出给 AI 助手用：它要经**这一套**（而不是自己再写一份）往冰箱里写（D-052 的 A 档）
+  exports: [FridgeService],
 })
 export class FridgeModule {}

@@ -120,6 +120,131 @@ const server = http.createServer((req, res) => {
       return
     }
 
+    // ---------- 冰箱（F16-10 / D-052 的 A 档：真的写库）----------
+    /*
+     * 演法与菜单那条**刻意不同**：冰箱这一档模型是**真的会写进去**的，
+     * 所以 stub 也走真实的两轮——先 `read_fridge` 看清现状（拿真实 id），再动手。
+     * 这正好压住两件会出事的地方：
+     * ① **不许凭记忆操作**：删的时候那个 id 必须来自上一轮的读结果（stub 也一样，从读结果里现取）；
+     * ② **一批里有一条失败时，成的那条仍要落库并出回执**——所以"加"那轮的 items 里
+     *    第一样故意是"已经记过的"（验收脚本会先手记一条鸡蛋），它必然 409，
+     *    而第二样（牛奶）必须仍然记进去。
+     */
+    /*
+     * 只有用户**真的在说冰箱**时才演这条：`read_fridge` 永远在工具清单里，
+     * 若只看"工具在不在"就会对每句话都去写冰箱（第一版就是这样，于是普通问一句
+     * "今晚吃什么"也把冰箱写了，验收里的批次全乱）。真实模型是靠语义判断的，
+     * stub 只能靠关键词——判据写成 stub 内部约定，产品代码不依赖它。
+     */
+    const mentionsFridge = /冰箱|记一下|记下|拿掉|吃完了|扔了|放进去/.test(user)
+    const fridgeMode = mentionsFridge && tools.some((t) => t.function?.name === 'read_fridge')
+    /*
+     * 要记的食材**从用户那句话里取**（真实模型也是这么理解"记一下鸡蛋和牛奶"的）。
+     * 写死成"鸡蛋+牛奶"的话，验收脚本没法构造"两样都是新的"与"其中一样已存在"
+     * 这两种情形，而它们正是这条路的两个关键分支。
+     */
+    const KNOWN_FOODS = ['鸡蛋', '牛奶', '西红柿', '黄瓜', '猪肉', '豆腐', '苹果', '盐', '酸奶', '白菜']
+    const saidFoods = KNOWN_FOODS.filter((food) => user.includes(food))
+    const fridgeRead = toolResults.find((m) => /（id: |冰箱是空的/.test(String(m.content)))
+    const fridgeWrote = toolResults.some((m) => /已记下|已拿掉|已改|没记成|没找到/.test(String(m.content)))
+    const wantsRemove = /拿掉|删掉|吃完了|扔了/.test(user)
+    /*
+     * 「改成…」= 改一条已有的（`update_fridge_item`）。这是四个冰箱工具里唯一
+     * 没被端到端走过的一个（加/删/查都在验收里），而"改"恰恰是最容易出事的那条：
+     * 它要**先读到 id 再动**，且撤销时要能"改回去"。
+     * 判据写成"说了'改成'且点得出名字"——真实模型也是这么理解的。
+     */
+    const wantsUpdate = /改成|改成|变为|换成|改一下/.test(user) && !wantsRemove
+    /** 想动的那条叫什么（删与改都要点名：D-052 要求"删除必须点名"） */
+    const named = /(牛奶|鸡蛋|西红柿|黄瓜|猪肉|豆腐|苹果|酸奶|白菜|盐)/.exec(user)?.[1] ?? ''
+    const wantedName = wantsRemove || wantsUpdate ? named : ''
+    // 从上一轮读到的现状里**现取 id**（真实模型也只能这么干）
+    /*
+     * 工具结果的 content 是 `toolResult()` 序列化后的 **JSON 字符串**，那串 `\n` 在
+     * 正则眼里不是换行符——所以不能拿 `[^\n]*` 去卡行边界：它一路跨过好几条记录，
+     * 再加上贪婪量词，取到的是**想要的食材之后最后一条**的 id（验收现场就是这么错的：
+     * 明说"把牛奶拿掉"，删掉的却是苹果，牛奶一直留在冰箱里）。
+     * 正确做法是先把那层 JSON 解开，再按行找名字**完全相等**的那条。
+     */
+    const readText = (() => {
+      const raw = String(fridgeRead?.content ?? '')
+      try { return String(JSON.parse(raw).fridge ?? '') } catch { return '' }
+    })()
+    const readId = wantedName
+      ? readText.split('\n')
+        // 行形如「牛奶 · 两盒 · 冷藏（id: xxx）」；数量缺失时名字后面直接就是「（id: 」
+        .map((line) => /^(.+?)(?: · .*?)?（id: ([^）]+)）$/.exec(line))
+        .find((hit) => hit?.[1] === wantedName)?.[2] ?? ''
+      : ''
+    // 保质期只给牛奶带上，其余不带——顺带验"没说的字段不要编"（见 tools 里那条断言）。
+    // 日期**不能写死 2099**：`parseExpiry` 会拒"年份太远"（十年外），那是刻意的护栏——
+    // 第一版 stub 就写死在 2099，于是批量里两样都失败、回执一张也出不来（验收当场抓到）。
+    const soon = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10)
+    const addArgs = {
+      items: (saidFoods.length ? saidFoods : ['鸡蛋']).map((food) => ({
+        name: food,
+        amount: food === '牛奶' ? '两盒' : '一盒',
+        zone: '冷藏',
+        ...(food === '牛奶' ? { expiresOn: soon } : {}),
+      })),
+    }
+    /*
+     * 「改成…」要改成的数量：从句子里取（"改成一盒"→ 一盒）。
+     * 取不到就不带这个字段——**不许编一个**（与"没说的字段不要编"同一条规矩，
+     * 产品侧那条断言就是盯这个的）。区域同理：说"放到冷冻"才带 zone。
+     */
+    const updateAmount = /改成([一二两三四五六七八九十半\d]+[盒个袋斤把瓶包]?)/.exec(user)?.[1] ?? ''
+    const updateZone = /(冷藏|冷冻|常温|干货)/.exec(user)?.[1] ?? ''
+    const updateArgs = {
+      itemId: readId,
+      ...(updateAmount ? { amount: updateAmount } : {}),
+      ...(updateZone ? { zone: updateZone } : {}),
+    }
+    const fridgePlan = !fridgeMode ? null
+      : !fridgeRead ? { calls: [{ id: 'call_fridge_1', name: 'read_fridge', args: {} }] }
+        : !fridgeWrote ? {
+            calls: [wantsRemove && readId
+              ? { id: 'call_fridge_2', name: 'remove_fridge_item', args: { itemId: readId } }
+              // 要改但**没从读结果里拿到 id**：和删除同一条规矩——不硬猜、更不退成"记一条"
+              : wantsUpdate && readId ? { id: 'call_fridge_6', name: 'update_fridge_item', args: updateArgs }
+                : wantsUpdate ? { id: 'call_fridge_7', name: 'read_fridge', args: {} }
+                  // 想删但**没从读结果里拿到 id**：不硬猜一个去删（真实模型也该在这儿停下问一句），
+                  // 更**不能退成"记一条"**——那会让验收里出现"让它拿掉它却记了一条"这种诡异结果
+                  : wantsRemove ? { id: 'call_fridge_5', name: 'read_fridge', args: {} }
+                    // 已经读过一次还是找不到：说明真的没有，直说
+                    : { id: 'call_fridge_3', name: 'add_fridge_items', args: addArgs }],
+          }
+        : {
+            text: wantsRemove ? '已经从冰箱里拿掉了，要是点错了可以撤回来。'
+              : wantsUpdate ? '改好了，回执卡上有「改回去」，点错了能还原。'
+                : '记好了，回执卡上有「撤」，点错了能撤回来。',
+          }
+    if (fridgeMode) {
+      console.log(`[stub] 冰箱分支：wantsRemove=${wantsRemove} wantsUpdate=${wantsUpdate} 想找=${wantedName || '-'} `
+        + `读到的 id=${readId || '(空)'} 已读=${Boolean(fridgeRead)} 已写=${fridgeWrote} `
+        + `→ ${fridgePlan?.calls?.map((c) => c.name).join(',') ?? '(收尾)'}`)
+    }
+
+    if (fridgePlan?.calls) {
+      res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' })
+      const frame = (delta, finish) => `data: ${JSON.stringify({
+        id: 'chatcmpl-stub', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+        model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }],
+      })}\n\n`
+      res.write(frame({ role: 'assistant', content: wantsRemove ? '我看看冰箱里有什么。' : '我记一下。' }, null))
+      fridgePlan.calls.forEach((call, index) => {
+        const json = JSON.stringify(call.args)
+        res.write(frame({ tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.name, arguments: '' } }] }, null))
+        for (const piece of json.match(/.{1,8}/gs) ?? []) {
+          res.write(frame({ tool_calls: [{ index, function: { arguments: piece } }] }, null))
+        }
+      })
+      res.write(frame({}, 'tool_calls'))
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
+    }
+
     // ---------- 快问/示例问题（用户 2026-10-12：「内置的这些不够用」）----------
     // 提示词要的是 {"hints":[...],"examples":[...]}。stub 故意回**一份脏数据**：
     // 一条重复的、一条超长的、一条非字符串的 —— 服务端必须清洗掉它们并且仍然凑够一屏，
@@ -188,7 +313,9 @@ const server = http.createServer((req, res) => {
 
     // 真实服务在 stream:false 时回普通 JSON；STUB_FORCE_STREAM=1 时强制走 SSE，
     // 用来验客户端的"网关不听话照样回 SSE"降级路径
-    const finalContent = toolPlan?.text ?? content
+    // ⚠️ 冰箱那条的收尾话也要在这儿兜住：漏掉它的话走的是通用兜底文案
+    // （第一版就漏了，症状是"工具都跑了、正文却在答非所问"，验收里看着像产品坏了）
+    const finalContent = toolPlan?.text ?? fridgePlan?.text ?? content
     const useSse = parsed.stream === true || process.env.STUB_FORCE_STREAM === '1'
     if (!useSse) {
       res.writeHead(200, { 'content-type': 'application/json' })

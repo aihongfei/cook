@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/stores/auth'
 import { apiClient } from './client'
 
@@ -70,6 +70,33 @@ export interface MenuProposal {
   note: string
   /** 按钮上的人话，如「今天晚餐」 */
   when: string
+}
+
+/**
+ * 一张回执上的一笔（F16-10 / D-052 的 A 档）。
+ *
+ * **它是"AI 真的写进库了"这句话的证据**：模型说"记好了"却拿不出一张卡，那就是在骗人。
+ * 所以前端只在收到 `receipts` 事件时才把卡画出来（不去猜"它大概写了吧"）。
+ *
+ * `id` 是服务端那条写入记录的 id，「撤」拿它去调 `/ai/actions/:id/undo`——
+ * **撤销的判断全在服务端**（用户改过、那条已不在、已经撤过了，三种都要给出人话），
+ * 前端不做也不该做这类判断：让客户端决定服务端写什么，等于把护栏交出去。
+ */
+export interface AiReceipt {
+  /** 写入记录的 id（撤销要用） */
+  id: string
+  kind: string
+  /** 一笔写的是什么，如「鸡蛋 · 一盒 · 冷藏」 */
+  summary: string
+  /** 撤销按钮上的字：「撤掉」/「改回去」/「放回去」 */
+  label: string
+  /** 被写的那条 target id（撤「删除」重建时要用，前端只当不透明值） */
+  target: string
+  /**
+   * **前端自己打的标**：这一笔已经撤过了（服务端不返回它）。
+   * 撤过的卡不删掉而是划掉——撤了什么也该看得见，否则用户回头会以为自己没点过。
+   */
+  undone?: boolean
 }
 
 export async function fetchAiStatus(): Promise<AiStatus> {
@@ -156,6 +183,11 @@ export async function streamAiChat(
     onStatus?: (label: string) => void
     /** 全部建议（可选）：流结束时一次性给出 */
     onProposals?: (items: MenuProposal[]) => void
+    /**
+     * AI 真写进库的那几笔（可选）：**只在这一轮真的写了时才调**。
+     * 收到它才画回执卡——卡片是"它办成了事"的证据，不能靠猜。
+     */
+    onReceipts?: (items: AiReceipt[]) => void
     signal?: AbortSignal
   },
 ): Promise<void> {
@@ -204,14 +236,18 @@ export async function streamAiChat(
         if (data === '[DONE]') return
         try {
           const payload = JSON.parse(data) as {
-            type?: string; text?: string; label?: string; items?: MenuProposal[]; error?: string
+            type?: string; text?: string; label?: string
+            items?: MenuProposal[] | AiReceipt[]; error?: string
           }
           // 头已经发出去了，中途失败是以 error 事件回来的（见后端 chatStream）
           if (payload.error) throw new StreamError(payload.error, 502)
-          // 按 type 分派而不是"猜有哪些字段"：三种事件共用一套解析（见具名事件的说明）
+          // 按 type 分派而不是"猜有哪些字段"：四种事件共用一套解析（见具名事件的说明）
           if (payload.type === 'status' && payload.label) handlers.onStatus?.(payload.label)
-          else if (payload.type === 'proposals' && Array.isArray(payload.items)) handlers.onProposals?.(payload.items)
-          else if (payload.text) handlers.onChunk(payload.text)
+          else if (payload.type === 'proposals' && Array.isArray(payload.items)) {
+            handlers.onProposals?.(payload.items as MenuProposal[])
+          } else if (payload.type === 'receipts' && Array.isArray(payload.items)) {
+            handlers.onReceipts?.(payload.items as AiReceipt[])
+          } else if (payload.text) handlers.onChunk(payload.text)
         } catch (error) {
           if (error instanceof StreamError) throw error
           // 半截 JSON：跳过（下一块会补全成新的一段）
@@ -230,4 +266,28 @@ export class StreamError extends Error {
     this.name = 'StreamError'
     this.status = status
   }
+}
+
+/**
+ * 撤一笔 AI 写库。
+ *
+ * **成功之后必须让冰箱那页也跟着变**：用户撤完很可能就是回冰箱页看结果
+ * （那正是他会点「撤」的场景），如果那页还显示着他刚撤掉的那条，
+ * 他会以为撤销坏了——真去再看一次接口就会自己发现，但那一瞬间的困惑是白搭的。
+ * 所以这里 `invalidateQueries(['fridge'])`：它会让冰箱页重新取一次。
+ *
+ * 不用 `setQueryData` 直接改（写接口才那么干）：撤销接口回的是"一句话"，
+ * 手里没有新的板子，硬拼一个只会拼出与后端不一致的缓存。
+ */
+export function useUndoAiAction() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await apiClient.post<{ message: string; undone: boolean }>(`/ai/actions/${id}/undo`)
+      return data
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['fridge'] })
+    },
+  })
 }

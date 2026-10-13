@@ -4,10 +4,14 @@ import {
   AI_TOOLS,
   PROPOSALS_MAX,
   SEARCH_RESULTS_MAX,
+  TOOL_ADD_FRIDGE_ITEMS,
   TOOL_PROPOSE_MENU_ITEMS,
+  TOOL_READ_FRIDGE,
   TOOL_READ_PLAN,
+  TOOL_REMOVE_FRIDGE_ITEM,
   TOOL_ROUNDS_MAX,
   TOOL_SEARCH_DISHES,
+  TOOL_UPDATE_FRIDGE_ITEM,
   allowedDates,
   clampMealDate,
   describeWhen,
@@ -30,9 +34,19 @@ const LIBRARY = new Map([
 ])
 
 test('工具声明本身要合法：名字、必填、additionalProperties', () => {
-  assert.equal(AI_TOOLS.length, 3)
-  const names = AI_TOOLS.map((tool) => tool.function.name)
-  assert.deepEqual(names, [TOOL_SEARCH_DISHES, TOOL_PROPOSE_MENU_ITEMS, TOOL_READ_PLAN])
+  /*
+   * 断言的是**每一个声明的工具**而不是一个写死的条数：原来这里写 `length === 3`，
+   * 加了冰箱四件之后它红了——但红的原因是"数量变了"，不是"声明不合法"，
+   * 那种断言会在每次扩工具时白挡一次，而它该守的东西（描述够长、形状严格）跟数量无关。
+   * 名单仍然逐一点名，防止某个工具被误删而测试还绿。
+   */
+  const names: string[] = AI_TOOLS.map((tool) => tool.function.name)
+  for (const expected of [
+    TOOL_SEARCH_DISHES, TOOL_PROPOSE_MENU_ITEMS, TOOL_READ_PLAN,
+    TOOL_READ_FRIDGE, TOOL_ADD_FRIDGE_ITEMS, TOOL_UPDATE_FRIDGE_ITEM, TOOL_REMOVE_FRIDGE_ITEM,
+  ]) {
+    assert.ok(names.includes(expected), `工具 ${expected} 不见了`)
+  }
   for (const tool of AI_TOOLS) {
     // 模型按 description 决定调不调；空描述等于这个工具不存在
     assert.ok(tool.function.description.length > 10, `${tool.function.name} 的描述太短`)
@@ -40,6 +54,21 @@ test('工具声明本身要合法：名字、必填、additionalProperties', () 
     // strict 风格：不让模型自由加字段，否则参数形状不确定，执行前得多写一堆防御
     assert.equal(tool.function.parameters.additionalProperties, false)
   }
+})
+
+test('写库的工具必须在描述里**明说会真的写库**（模型据此决定要不要先问一句）', () => {
+  /*
+   * 这不是文案洁癖：D-052 把工具分了两档，模型唯一的判据就是 description。
+   * 写库的那几件若不说清，模型会给用户一个含糊的回答（"我看看"），
+   * 而它其实已经写进去了——用户以为没记，下次又说一遍。
+   */
+  for (const name of [TOOL_ADD_FRIDGE_ITEMS, TOOL_UPDATE_FRIDGE_ITEM, TOOL_REMOVE_FRIDGE_ITEM]) {
+    const tool = AI_TOOLS.find((item) => item.function.name === name)
+    assert.match(tool?.function.description ?? '', /会真的写库/)
+  }
+  // 只提名的那件反过来必须说清"不会直接加"，否则用户会以为它已经加好了
+  const propose = AI_TOOLS.find((item) => item.function.name === TOOL_PROPOSE_MENU_ITEMS)
+  assert.match(propose?.function.description ?? '', /用户点了才会真的加/)
 })
 
 test('模型编造的 id 一律丢掉，并在工具结果里点名（不是静默丢）', () => {

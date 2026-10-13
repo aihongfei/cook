@@ -10,10 +10,13 @@ import {
   type AiConfig, type AiPrompts, type CandidateDish, type ChatMessage, type SuggestedPick,
 } from './ai.rules'
 import {
-  AI_TOOLS, PROPOSALS_MAX, SEARCH_RESULTS_MAX, TOOL_PROPOSE_MENU_ITEMS, TOOL_READ_PLAN, TOOL_ROUNDS_MAX, TOOL_SEARCH_DISHES,
-  readProposals, searchResult, todayKey, toolResult,
+  AI_TOOLS, FRIDGE_ADD_MAX, PROPOSALS_MAX, SEARCH_RESULTS_MAX, TOOL_ADD_FRIDGE_ITEMS, TOOL_PROPOSE_MENU_ITEMS,
+  TOOL_READ_FRIDGE, TOOL_READ_PLAN, TOOL_REMOVE_FRIDGE_ITEM, TOOL_ROUNDS_MAX, TOOL_SEARCH_DISHES, TOOL_UPDATE_FRIDGE_ITEM,
+  fridgeText, readAddItems, readProposals, readRemoveItem, readUpdateItem, searchResult, todayKey, toolResult,
   type MenuProposal, type ToolCall,
 } from './ai.tools'
+import { AiActionService, type AiReceipt } from './ai-action.service'
+import { FridgeService } from '../fridge/fridge.service'
 
 /**
  * AI 推荐与问答（用户 2026-10-12 的新需求；口径见 D-026）。
@@ -28,7 +31,11 @@ import {
  */
 @Injectable()
 export class AiService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly actions: AiActionService,
+    private readonly fridge: FridgeService,
+  ) {}
 
   /** 前端据此决定"显示 AI 入口"还是"提示去配置"（只回是否配置与模型名，不回密钥） */
   status(config: AiConfig | null = readAiConfig()) {
@@ -275,12 +282,25 @@ export class AiService {
         + '界面上会出现确认按钮，用户点了才会真的加进菜单，所以不要对用户说"已经加好了"。',
       '如果你提到了具体的菜（不管有没有提议），在回答的最后顺带问一句要不要加进菜单，例如'
         + '「要我把这两道加进今天晚餐吗？」——这是用户明确要的：他希望在对话里就能直接点菜。',
+      /*
+       * 冰箱那一档（D-052 的 A 档）：与加菜**不是同一种**，必须让模型分清，
+       * 否则它会把"直接写"的谨慎程度套到冰箱上（每次都反问一遍，用户要的
+       * "对话里顺手记一下"就变成了填表单），或者反过来把菜单也直接写掉。
+       */
+      `冰箱是**可以直接帮你记的**：用户说"记一下冰箱里有什么"或明确要改/删冰箱里的东西时，`
+        + `用 ${TOOL_READ_FRIDGE} 看清楚现状，再调 ${TOOL_ADD_FRIDGE_ITEMS} / ${TOOL_UPDATE_FRIDGE_ITEM} / ${TOOL_REMOVE_FRIDGE_ITEM}。`
+        + '这几件**会真的写库**，界面上会给用户一张可撤销的回执卡，所以你可以说"记好了"——'
+        + '但**只说你真的记成的那些**（工具结果里会列出成没成），没记成的照实说原因。',
+      `要让用户明白哪些事你能直接做、哪些要他自己点：冰箱可以（有回执可撤）；菜单不行（只能提建议等他点）；`
+        + '家庭管理（改角色、转让、退家庭）你没有工具，用户问起就告诉他去"我的 → 家庭"里做。',
       '如果被问到与下厨、食材、营养无关的事，礼貌地把话题带回来。',
     ].filter(Boolean).join('\n')
 
     const wire: WireMessage[] = messages.map((message) => ({ role: message.role, content: message.content }))
     const proposals: MenuProposal[] = []
     const proposed = new Set<string>()
+    /** AI 这一轮真写进库的那些（回执卡）：前端据此长出「撤」 */
+    const receipts: AiReceipt[] = []
     let seenCalls = false
     // 模型"不再要工具了"就是正常收尾。**这里用 break 而不是 return**：
     // return 会让下面的 proposals 永远发不出去（实测验收时就是这么红的——
@@ -311,7 +331,7 @@ export class AiService {
 
       for (const call of calls) {
         yield { type: 'status', label: statusLabel(call.name) }
-        const outcome = await this.executeTool(call, userId, proposals, proposed)
+        const outcome = await this.executeTool(call, userId, proposals, proposed, receipts)
         wire.push({ role: 'tool', tool_call_id: call.id, content: outcome })
       }
     }
@@ -329,20 +349,26 @@ export class AiService {
       }
     }
     if (proposals.length) yield { type: 'proposals', items: proposals }
+    // 回执卡在**最后**发：它证明前面那些"记好了"是真话，且带着撤销要用的 id
+    if (receipts.length) yield { type: 'receipts', items: receipts }
   }
 
   /**
    * 执行一次工具调用，返回**给模型看的结果**（紧凑 JSON）。
    *
-   * 这里一个字节都不往菜单里写：`propose_menu_items` 只是把建议攒起来交给界面。
+   * **菜单一个字都不写**：`propose_menu_items` 只是把建议攒起来交给界面，
    * 真写库的动作在用户点"加入菜单"之后走 `/orders/items`（与手点同一条路），
    * 这样"AI 建议"与"用户点菜"在数据上没有任何区别，也就不需要额外的一套权限口径。
+   *
+   * **冰箱真的写**（D-052 的 A 档）：走 `AiActionService` → `FridgeService`（与手写同一条路），
+   * 每笔留一条 `AiAction` 以便撤销。分档的判据见 D-052：只影响自己家、代价小、看得见、撤得回来。
    */
   private async executeTool(
     call: ToolCall,
     userId: string,
     proposals: MenuProposal[],
     proposed: Set<string>,
+    receipts: AiReceipt[],
   ): Promise<string> {
     if (call.name === TOOL_SEARCH_DISHES) {
       const query = readStringArg(call.arguments, 'query')
@@ -390,6 +416,56 @@ export class AiService {
     if (call.name === TOOL_READ_PLAN) {
       const days = readNumberArg(call.arguments, 'days') ?? 3
       return toolResult({ plan: await this.currentPlan(userId, Math.max(1, Math.min(7, Math.round(days)))) })
+    }
+
+    /*
+     * 冰箱四件（A 档）。读的那件不写库；写的那三件都经 AiActionService——
+     * **不在控制器/服务里各写一套**：那套东西要同时管"与手写同一条路"和"留撤销记录"，
+     * 复制一份必然有一边先改。
+     */
+    if (call.name === TOOL_READ_FRIDGE) {
+      const board = await this.fridge.board(userId)
+      const items = board.zones.flatMap((group) => group.items)
+      return toolResult({
+        fridge: fridgeText(items.map((item) => ({
+          id: item.id,
+          name: item.name,
+          amount: item.amount,
+          zone: item.zone,
+          expiryLabel: item.expiryLabel,
+        }))),
+        hint: items.length ? '要改或要删就用上面的 id' : '冰箱是空的，可以直接用 add_fridge_items 记',
+      })
+    }
+
+    if (call.name === TOOL_ADD_FRIDGE_ITEMS) {
+      const { drafts, rejected } = readAddItems(call.arguments)
+      if (drafts.length === 0) {
+        return toolResult({ error: '没有解析出要记的食材，请按 items 数组再试一次' })
+      }
+      const result = await this.actions.addFridgeItems(userId, drafts)
+      receipts.push(...result.actions)
+      return toolResult({
+        result: result.summary,
+        rejected: rejected.length ? rejected : undefined,
+        hint: '回执卡已经给用户了，他随时可以撤。照着这里的结果如实回答，没记成的要说原因。',
+      })
+    }
+
+    if (call.name === TOOL_UPDATE_FRIDGE_ITEM) {
+      const parsed = readUpdateItem(call.arguments)
+      if (!parsed) return toolResult({ error: '没解析出 itemId，请先调 read_fridge 拿准确 id' })
+      const result = await this.actions.updateFridgeItem(userId, parsed.itemId, parsed.patch)
+      receipts.push(...result.actions)
+      return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以撤。' })
+    }
+
+    if (call.name === TOOL_REMOVE_FRIDGE_ITEM) {
+      const itemId = readRemoveItem(call.arguments)
+      if (!itemId) return toolResult({ error: '没解析出 itemId，请先调 read_fridge 拿准确 id' })
+      const result = await this.actions.removeFridgeItem(userId, itemId)
+      receipts.push(...result.actions)
+      return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以撤。' })
     }
 
     // 模型偶尔会自己发明工具名：回一句"没有这个工具"让它换个说法，而不是崩掉整轮
@@ -559,6 +635,8 @@ export type ChatEvent =
   | { type: 'text'; text: string }
   | { type: 'status'; label: string }
   | { type: 'proposals'; items: MenuProposal[] }
+  /** AI 真写进库的那些（D-052 A 档）：前端据此长出「撤」——**它是"记好了"那句话的证据** */
+  | { type: 'receipts'; items: AiReceipt[] }
 
 /**
  * 工具执行期间给用户看的短句。
@@ -570,6 +648,10 @@ export type ChatEvent =
 function statusLabel(toolName: string): string {
   if (toolName === TOOL_SEARCH_DISHES) return '正在翻菜谱…'
   if (toolName === TOOL_PROPOSE_MENU_ITEMS) return '正在核对这几道菜…'
+  if (toolName === TOOL_READ_FRIDGE) return '正在看冰箱里有什么…'
+  if (toolName === TOOL_ADD_FRIDGE_ITEMS) return '正在记进冰箱…'
+  if (toolName === TOOL_UPDATE_FRIDGE_ITEM) return '正在改冰箱里那条…'
+  if (toolName === TOOL_REMOVE_FRIDGE_ITEM) return '正在把那样拿出来…'
   if (toolName === TOOL_READ_PLAN) return '正在看家里这几天的安排…'
   return '正在处理…'
 }

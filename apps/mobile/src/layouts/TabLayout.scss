@@ -118,3 +118,88 @@
   right: 6px;
   transform: scaleX(-1);
 }
+
+/*
+ * 全局 AI 助手的悬浮球（F16-10 / D-052）。
+ *
+ * 三件位置上的讲究：
+ * ① **让开 Tab 栏**（`--spacing-tabbar`）：压在最后一个 Tab（「我的」）上是最坏的情况——
+ *    用户想切页却点开了助手，而那一块正是拇指最常落的地方；
+ * ② **让开安全区**：手势条机型上贴底会跟系统手势打架；
+ * ③ 用 `position: fixed` 而不是绝对定位：它要**在滚动时原地不动**（页面滚到哪它都在那儿），
+ *    那正是"悬浮"这个词的意思。
+ *
+ * 视觉上做成贴纸/印章的感觉（描边 + 一点纸色渐变 + 轻投影），与全局笔绘素材一套语汇；
+ * 别做成纯色实心圆——那是"系统按钮"，和这个 App 的手作感不搭。
+ */
+.ai-ball {
+  position: fixed;
+  right: 14px;
+  bottom: calc(var(--spacing-tabbar) + var(--safe-bottom) + 14px);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  background: linear-gradient(160deg, #fff8ee 0%, #fbe9d2 100%);
+  border: 1.5px solid #e8c9a4;
+  border-radius: 50%;
+  box-shadow:
+    0 6px 16px rgb(160 110 60 / 22%),
+    inset 0 1px 0 #fff;
+  transition: transform 0.12s ease;
+
+  &:active {
+    transform: scale(0.92);
+  }
+}
+
+/*
+ * 起伏动画套在这里（按钮里面那层），**不是按钮本身**：
+ * 按钮是命中区，跟着上下动的话拇指落点就飘了（±3px 足够点空），
+ * 而且它的 bounding box 永远不稳定——浏览器自动化点不着它（第一次就是用真浏览器
+ * 撞上的：Playwright 等 "not-stable" 等到超时）。外层静止、里面图案轻轻起伏，
+ * 动感一样在，点击是确定的。
+ */
+.ai-ball__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  animation: ai-ball-float 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.ai-ball__face {
+  font-size: 21px;
+  line-height: 1;
+}
+
+.ai-ball__hint {
+  margin-top: 1px;
+  font-size: 9px;
+  color: #a4552a;
+  letter-spacing: 0.5px;
+}
+
+@keyframes ai-ball-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+/* 关掉动效的偏好下别晃：这个圆圈对前庭敏感的人是不适的来源（装饰性动画一律听这个设置） */
+@media (prefers-reduced-motion: reduce) {
+  .ai-ball__inner {
+    animation: none;
+  }
+}

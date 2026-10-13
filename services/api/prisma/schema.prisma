@@ -47,6 +47,8 @@ model User {
   favorites      Favorite[]
   /// 这个账号放进冰箱的食材（M6 / F6-01）
   fridgeItems    FridgeItem[]
+  /// 这个账号让 AI 干过的写库动作（F16-10 / AI 助手）——撤销要认人
+  aiActions      AiAction[]
 
   @@index([createdAt])
 }
@@ -84,6 +86,8 @@ model Family {
   combos      Combo[]
   /// 这一家的冰箱食材（M6 / F6-01）
   fridgeItems FridgeItem[]
+  /// 这一家的 AI 写库记录（F16-10）
+  aiActions   AiAction[]
 
   @@index([createdAt])
 }
@@ -375,3 +379,44 @@ model FridgeItem {
 
 /// 冰箱的"存放区"是固定四档（F6-04），不建表：它是由 3D 预览的摆位与人的直觉共同定死的，
 /// 允许自定义会让"这盒牛奶在哪儿"变成一道需要回忆的选择题。
+
+/// AI 助手写库的记录（F16-10 / D-052；用户 2026-10-13 拍板"加表"）。
+///
+/// 为什么值得单独一张表（而不是像最初设想的"撤销所需的值随回执卡回前端就行"）：
+/// 撤销要**由服务端核对**才敢做——A 档允许 AI 直接写库，那"撤"就必须经得起三种意外：
+/// ① 那条已经被用户自己改过（撤销会覆盖掉他的改动）；② 那条已经被删了（撤销是在凭空造数据）；
+/// ③ 会话里回执卡还挂着，但服务端早就不该接受了。没有记录表，这三件事一件都判不了。
+///
+/// **不存旧值的完整快照**（虽然审计上更完备）：存了就等于在库里留一份"用户数据的影子副本"，
+/// 而这块数据是私人的。改为存**反向动作**——撤销需要的信息在写的那一刻就已经知道了，
+/// 把它记成"再执行一次就能回到原样"的动作，不需要把整行复制过来。
+model AiAction {
+  id       String @id @default(cuid())
+  familyId String
+  family   Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  /// 谁让 AI 干的（撤销要认人：别人不能撤你的）
+  actorId  String
+  actor    User   @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  /// 干了什么。v1 只有 `fridge.create` / `fridge.update` / `fridge.remove`（A 档）
+  kind String @db.VarChar(32)
+  /// 人话摘要（回执卡上那句"鸡蛋 · 一盒 · 冷藏"直接用它，前端不必自己拼）
+  summary String @db.VarChar(120)
+
+  /// 撤销所需的反向动作。形状由 `kind` 决定，见 ai-action.rules 的 undoPlan——
+  /// **不在这里做 JSON 的语义校验**（那是 rules 的活），这里只存
+  undoData Json
+
+  /// 撤销的痕迹。三态用一个可空时间戳表达，不另立枚举：
+  /// `null` = 还能撤；有值 = 已经撤过（再撤就拒绝，而不是撤两次）
+  undoneAt DateTime?
+  /// 结果对象（如冰箱那条的 id）。**不做外键**：撤销会把那个对象删掉，
+  /// 外键会让"已撤销"的记录连带消失——而它恰恰是要留下来证明撤过的
+  targetId String? @db.VarChar(40)
+
+  createdAt DateTime @default(now())
+
+  /// 撤销按"这一家最近几条"找，以及"这条是否已经撤过"的判定
+  @@index([familyId, createdAt])
+  @@index([actorId, createdAt])
+}

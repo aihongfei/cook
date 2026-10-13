@@ -1,9 +1,10 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpException, Post, Req, Res, UseGuards } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpException, Param, Post, Req, Res, UseGuards } from '@nestjs/common'
 import { Throttle } from '@nestjs/throttler'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import type { Request, Response } from 'express'
 import { CurrentUserId, JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { AiService, type ChatEvent } from './ai.service'
+import { AiActionService } from './ai-action.service'
 
 interface SuggestBody { hint?: string; mealKey?: string }
 interface ChatBody { messages?: unknown }
@@ -11,13 +12,53 @@ interface ChatBody { messages?: unknown }
 @ApiTags('ai')
 @Controller('ai')
 export class AiController {
-  constructor(private readonly ai: AiService) {}
+  constructor(
+    private readonly ai: AiService,
+    private readonly actions: AiActionService,
+  ) {}
 
   // 免登录可读：前端据此决定显示"AI 帮你想"还是"先去配置"（不含密钥）
   @Get('status')
   @ApiOperation({ summary: 'AI 是否已配置（M16 子集；不含密钥）' })
   status() {
     return this.ai.status()
+  }
+
+  /**
+   * AI 还没撤的那些写库动作（F16-10）。
+   *
+   * ⚠️ **前端目前不调它**：回执卡随对话一起落盘在本地（用户 2026-10-13 要求"会话历史也要保留"），
+   * 所以重开抽屉/刷新页面时卡片直接来自本地那份，不必问服务端。
+   *
+   * 留着它有两个实在的用处：① 验收脚本靠它断言"写入记录真的进了库、撤销后被标记"
+   * （见 scripts/verify-ai-actions-http.cjs）；② 它是这张表的**服务端视角**——
+   * 本地那份是"这台设备上聊过什么"，而这里是"这个人在服务端还有哪些没撤的写入"，
+   * 将来要做多端同步或"AI 改过什么"的审计视图，读的就是这个（不是本地缓存）。
+   */
+  @Get('actions')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'AI 可撤销的写库动作（最近若干笔）' })
+  async listActions(@CurrentUserId() userId: string) {
+    return { items: await this.actions.recent(userId) }
+  }
+
+  /**
+   * 撤销一笔 AI 写库。
+   *
+   * **用 POST 不用 DELETE**：撤销不是"删掉那条记录"，而是"执行一个反向动作"
+   * （撤销一次新建 = 删；撤销一次删除 = 重建）。DELETE 语义表达不了重建。
+   *
+   * 三种拒绝都由服务端判定并给出人话（已在别处改过 / 已经不在了 / 已经撤过），
+   * 见 `ai-action.rules` 的 `planUndo`——不给"猜一个最像的"的机会。
+   */
+  @Post('actions/:id/undo')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '撤销一笔 AI 写库动作' })
+  async undo(@CurrentUserId() userId: string, @Param('id') id: string) {
+    if (!id?.trim()) throw new BadRequestException('缺一个要撤销的 id')
+    return this.actions.undo(userId, id.trim())
   }
 
   /**

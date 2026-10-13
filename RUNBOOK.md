@@ -1977,3 +1977,82 @@ pnpm --dir apps/mobile run dev                              # http://127.0.0.1:5
 **后端新增 10 条**（`fridge.rules.test.ts`）：四区、名字/数量/备注解析、保质期解析（含 2026-02-31 拒绝）、日历天算术、三种状态与文案、attention 边界、`toView`。
 
 **反证**：冰箱 11 组、抽屉 9 组，逐组只让对应断言红；另对"拖关弹回"单独验了老写法会红。
+
+## R-042 全局 AI 助手：对话里真的写冰箱 + 回执卡可撤 + 会话历史（D-053，F16-10）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：
+
+- **后端**
+  - `prisma/schema.prisma` 加 `AiAction`（`familyId` / `actorId` / `kind` / `summary` / `undoData`(JSON) / `undoneAt` / `targetId`）+ 迁移 `20261013052525_ai_actions`；`User`/`Family` 加反向关系。
+  - 新增 `src/modules/ai/ai-action.rules.ts`（**纯函数**：`planUndo` 四条判定、`readUndo` 只认形状、`removedItemKey`、`describeFridgeItem`、`undoLabel`）、`ai-action.service.ts`（走 `FridgeService` 写库 + 记 `AiAction` + `undo`/`recent`/`runPlan`）。
+  - `ai.tools.ts` 加四个工具（`read_fridge`/`add_fridge_items`/`update_fridge_item`/`remove_fridge_item`、`FRIDGE_ADD_MAX = 8`）；`ai.service.ts` 注入两个服务、加 `receipts` 事件与四段工具执行、系统提示词按 A/B/C 分档重写；`ai.controller.ts` 加 `GET /ai/actions`、`POST /ai/actions/:id/undo`（**POST 不用 DELETE**：撤销可能是"重建"）。
+  - `scripts/ai-stub-upstream.cjs` 加冰箱分支（照真实模型"先读再动"两轮）；`scripts/verify-ai-actions-http.cjs` + `package.json` 的 `test:http:ai-actions`。
+- **前端**
+  - 新增 `components/ai/AiAssistantBall.tsx`（悬浮球）、`AiAssistantSheet.tsx`（抽屉）、`AiReceiptCard.tsx`（回执卡 + 「撤」）、`ai-assistant.scss`；`stores/ai-assistant-session.ts`（多场会话 + `persist`）、`stores/ai-assistant.rules.ts`（`wireMessages`/`pruneTurns`/`conversationTitle`/`chatTimeLabel`）。
+  - `layouts/TabLayout.tsx` 挂球与抽屉（**任意页都在**）；`api/ai.ts` 加 `AiReceipt`、`onReceipts` 事件分派、`useUndoAiAction`；`api/auth.ts` 的 `logout()` 里 `clearAll()`（隐私）。
+
+### 怎么验
+
+```bash
+# 后端
+cd services/api && pnpm run test; echo "exit=$?"            # 217/217
+cd services/api && npx tsc --noEmit; echo "exit=$?"         # exit 0
+docker compose build api && docker compose up -d --force-recreate api
+docker inspect --format '{{.Image}}' "$(docker compose ps -q api)"   # 与 cook-api:latest 的 ID 相同
+docker compose exec -T api grep -c removedItemKey /app/dist/modules/ai/ai-action.rules.js   # 新代码真的进镜像了
+
+# HTTP 验收（走真路：/ai/chat/stream + stub 上游，不是造记录）
+#   先把 stub 起在 18990，并让 API 指向它（.env 里是真实上游；这一行只覆盖本次容器）
+node services/api/scripts/ai-stub-upstream.cjs 18990 &
+AI_API_BASE=http://host.docker.internal:18990/v1 docker compose up -d --force-recreate api
+cd services/api && pnpm run test:http:ai-actions; echo "exit=$?"   # 30/30
+
+# 前端
+pnpm --dir apps/mobile exec vitest run; echo "exit=$?"      # 347/347
+pnpm --dir apps/mobile exec tsc -b; echo "exit=$?"          # 仅 2 条既有错误（CombosPage.test / PrepPage.test，与本轮无关）
+pnpm --dir apps/mobile run dev                              # http://127.0.0.1:5173/fridge
+```
+
+浏览器（悬浮球在任意页右下角，让开 Tab 栏）：
+
+1. 点悬浮球 → 抽屉里给三条**动作式**示例（"记一下冰箱里有酸奶"）；
+2. 说一句"记一下冰箱里有苹果和豆腐" → 出现一句"正在看冰箱里有什么…"（不是干等光标）→ 回执卡列出**两笔**、每笔一个「撤掉」；
+3. **抽屉不关**，底下的冰箱页就该多出这两样（缓存已作废）；
+4. 点某一笔的「撤掉」→ 那行划掉并显示"已撤掉"、弹一句"已撤销：…"，冰箱页那条跟着消失；
+5. 收起抽屉 → 切到别的 Tab → 再点悬浮球：对话、回执、按钮都还在；
+6. **刷新整页**（F5）：对话与回执仍在（落盘），点「以前的对话」能看到多场、可翻回去、可单场删除。
+
+### 实测结果（2026-10-13）
+
+| 项 | 结果 |
+| --- | --- |
+| 后端单测 / 类型 | **217/217**；`tsc --noEmit` exit 0 |
+| 镜像核实 | 容器镜像 ID == latest；镜像内 `removedItemKey` 出现 2 次（新代码确实进去了） |
+| HTTP 验收 | **30/30**（真路）：普通问答不受影响；一句"记一下"真写库且**只回成功的那些**；批量里一条失败不带走另一条；唯一条约束仍守着；撤「增」→ 真删；撤「删」→ 按原样重建；**用户又自己记回来了 → 如实说"还在，没被删"**；撤「改」→ 写回原值且**不碰用户改过的另一个字段**；409 已经撤过 / 403 家里别人 / 403 别家 / 404 不存在 / 401 未登录 |
+| 前端全量 | **347/347**（助手 20 条 + 会话规则 6 条为新增） |
+| 前端类型 | 仅 2 条既有错误（与本轮无关） |
+| **浏览器完整闭环** | 说"记一下冰箱里有苹果和豆腐" → 回执卡两笔 → 冰箱页**不刷新**就从 4 样变 6 样 → 再写"两盒鸡蛋" → 回执「撤掉」→ 点击 → 行划掉、toast「已撤销：鸡蛋 · 一盒 · 冷藏」、冰箱页回到 6 样（无鸡蛋） |
+| **DB 与界面一致** | 查库确认：苹果/豆腐在、鸡蛋已删；`AiAction` 里 `fridge.create 鸡蛋` 的 `undoneAt` 非空 |
+| 刷新持久化 | 刷新后冰箱页 6 样、`localStorage` 里 2 场对话；「以前的对话 · N」入口可翻旧账 |
+| 悬浮球命中区 | 连测两次 `getBoundingClientRect` 完全相同（动画在内层，命中区静止） |
+| 反证 | 前端 **6 组各自精确变红**：`undone:false` 也划掉 / 没回执也画卡 / 撤错那一笔 / 新对话把旧场也清掉 / logout 不清历史 / 回执不作废冰箱缓存；**后端 6 组**：`removedItemKey` 猜一个键、`wireMessages` 不截断、`pruneTurns` 不剪空格（规则层与组件层各验一次）、不落盘、`planUndo` 各分支 |
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| 让它"把牛奶拿掉"，**删掉的却是苹果**，牛奶还在冰箱里 | stub 从工具结果里取 id 用了 `[^\n]*`——而工具结果是 `JSON.stringify` 过的，`\n` 是**两个字符**不是换行，正则一路跨过好几条记录 + 贪婪量词取到**最后一条** | 先 `JSON.parse` 解开那层 JSON，再按行找名字**完全相等**的；并加了反证证明旧写法确实取到苹果 |
+| "那条又回来了时撤销" → 用户看到「已经记了一条，直接改它就行」 | 撤「删除」时按 `targetId` 查现状，而那个 id 就是**被删掉那条**、必然查不到 → "用户又记回来了"的分支永远走不到，撤销照重建走、撞唯一约束 | 撤「删除」改按**同名同区**查（与唯一约束同一个键）；补 `removedItemKey` 纯函数与回归测试 |
+| 单测全绿但用户点「撤」是坏的 | 纯函数两边都用假数据（规则没错，**喂给它的现状错了**） | 所以有 `verify-ai-actions-http.cjs` 走真路；这正是不只写单测的理由 |
+| AI 说"记好了"、库里有，**冰箱页却没变** | react-query 的 `staleTime: 30s`：写入是真的，但页面那份缓存以为自己是新的 | 收到 `receipts` 时 `invalidateQueries(['fridge'])`；补了一条带 `useFridge` 探针的回归测试（数它取了几次） |
+| 发出去的消息 **11 条**（后端上限 10） | 写成"截十条历史 + 追加这一句" | 新问的这句**一起过筛**（同一个 `wireMessages`）；单测算出 11 条抓红 |
+| 浏览器**点不到悬浮球**（Playwright 等 not-stable 超时） | 起伏动画套在**按钮**上 → bounding box 永远在动 | 动画挪到内层 `.ai-ball__inner`，命中区静止；顺带这是真实可用性问题（拇指落点会飘） |
+| 抽屉里的按钮全点不动（Playwright） | 后台标签页 rAF 不跑 → antd-mobile 弹簧永远"不稳定"（已知环境事实，非产品 bug） | 验收用页内真实 DOM `click()`，按**结果**（回执/DB/列表）判定，不按"点击返回成功" |
+| `logout` 不清 AI 历史 | 首版没连起来 | 显式 `clearAll()` + 一条测试（对话里有这家冰箱的内容，换个人登录就看见别人家里有什么） |
+
+### 回归测试
+
+**后端新增 20 条**：`ai.actions.test.ts` 19（`planUndo` 四种 kind × 三种意外、`removedItemKey` 六种坏形状、`describeFridgeItem`、`undoLabel`）+ `ai.tools.test.ts` 改造（按名断言四个工具都在、写工具的描述必须说"会真的写库"）。
+**前端新增 26 条**：`ai-assistant.test.tsx` 20（回执卡是证据 / 没回执不画卡 / 撤对那一笔 / 划掉留着 / `undone:false` 照实说 / 409 透传 / 跨页 / 跨刷新 / 新对话留旧场 / 翻回旧场 / 剪空格 / 十条上限 / 删单场 / logout / 只发 id / 缓存作废 / B 档没被带跑 / 失败留住用户那句）+ `ai-assistant.rules.test.ts` 6。
+
+**反证**：后端 6 组、前端 6 组，逐组精确变红（清单见上表）。
