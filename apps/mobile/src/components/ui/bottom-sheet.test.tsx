@@ -227,6 +227,36 @@ it('跟随手指下拖：拖得够远就关掉（且拖动过程中面板真的�
   expect(atClose).toEqual({ visibility: 'hidden' })
 })
 
+it('从**面板顶边**起拖也能拖走——顶边是最容易抓的地方，不能是死区', async () => {
+  /*
+   * 用户 2026-10-14：「这个弹出窗用鼠标拖不动」。
+   *
+   * 死区是这么来的：面板（`.adm-popup-body`）比内容外壳（`.sheet__shell`）多两圈内边距
+   * （上面 18px、下面再叠一份 `--safe-bottom`），而监听原先只挂在外壳上。
+   * 逐点实测（模拟器 + 系统输入）：从顶边起拖「无位移、关不掉」，从标题行与内容中段起拖都能拖走。
+   * 抓顶边往下拉是面对底部抽屉最自然的动作——它必须有效，所以监听挪到整个面板上。
+   *
+   * 这条测试盯的就是那个位置关系：起拖点取**面板本身**（外壳之外的那圈），断言面板跟手。
+   */
+  const onClose = vi.fn()
+  render(
+    <BottomSheet visible title="问 AI" onClose={onClose}>
+      <p>内容</p>
+    </BottomSheet>,
+  )
+  await screen.findByText('内容')
+  await waitFor(() => expect(offsetPercent(body())).toBeLessThan(1), { timeout: 3000 })
+
+  const panel = body() as HTMLElement
+  const shell = screen.getByText('内容').closest('.sheet__shell') as HTMLElement
+  // 起拖点必须在**外壳之外、面板之内**，否则这条测试就退化成"拖内容"（那本来就通）
+  expect(shell.parentElement).toBe(panel)
+
+  const frames = dragDown(panel, 300, 16, 10) // 从面板顶边那圈往下拖 160px
+  expect(Math.max(...frames)).toBe(160)
+  await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: 2000 })
+})
+
 it('拖得不够远就弹回去（抽屉不关）——慢慢拖到一半也是弹回', async () => {
   const onClose = vi.fn()
   render(

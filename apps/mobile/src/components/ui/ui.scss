@@ -392,11 +392,14 @@
  * 共用 toast（见 components/ui/toast.tsx）。
  * 定位在底部 Tab 栏**上方**：不挡内容、离拇指近；认证页没有 Tab 栏时略高一点，也不影响阅读。
  * 外观与页面同一套 token，像一张贴在屏幕上的小纸条。
+ *
+ * 让开的高度 = 设计高 + **手势条安全区**：Tab 栏自己长高了（见 TabLayout.scss 的说明），
+ * 这里少加那一份的话，在 APK 里 toast 会落进 Tab 栏里、被它盖住。
  */
 .toaster {
   position: fixed;
   right: 0;
-  bottom: calc(var(--spacing-tabbar) + 16px);
+  bottom: calc(var(--spacing-tabbar) + var(--safe-bottom) + 16px);
   left: 0;
   z-index: 60;
   display: flex;

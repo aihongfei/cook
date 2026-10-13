@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { registerBackCloser } from '@/lib/android-back'
 import './ui.scss'
 
 /**
@@ -77,6 +78,16 @@ export default function ConfirmDialog({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open, pending, onCancel])
+
+  /*
+   * 系统返回键（安卓）等同按「取消」（F14-01 / R-13 ①）：与 Esc 同一条语义——
+   * 确认框是"必须回应才能继续"的一层，按返回该先关它，而不是把背后的页面一起带走。
+   * 执行中（pending）不登记：那会儿 Esc 也不响应，返回键更不该让用户以为"取消掉了"。
+   */
+  useEffect(() => {
+    if (!open || pending) return
+    return registerBackCloser(onCancel)
   }, [open, pending, onCancel])
 
   if (!open) return null

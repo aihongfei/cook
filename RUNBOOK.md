@@ -2831,3 +2831,107 @@ SELECT 'Recipe' t, COUNT(*) c FROM `Recipe` UNION ALL SELECT 'OrderItem', COUNT(
 5. **`docker compose config` 会打印含密钥的完整配置**，要过滤后再输出。
 6. **`GROUP_CONCAT` 默认 1024 字符**会截断生成的长 SQL（表多时少几张表且不报错），先 `SET SESSION group_concat_max_len=1000000`。
 7. **Prisma 存 UTC，MySQL 的 `NOW()` 是本地时间**（容器 `TZ=Asia/Shanghai` 差 8 小时）。按时间删测试数据要用 `UTC_TIMESTAMP()`，否则 `ROW_COUNT()` 为 0、看着像删成功了其实没删。
+
+## R-057 Android 打包与模拟器验收：出 APK、装进去、逐条验 R-13（F14-01，✅ 已验证，2026-10-14）
+
+配套决策见 `DECISIONS.md` **D-067**（为什么这么选、六个装上去才看得见的问题）。本条只记**怎么跑**。
+
+### 0. 一次性环境准备
+
+**JDK 21**（Gradle 8.14.3 不支持 JDK 25/26）：
+
+```bash
+# 清华 Adoptium 镜像；sha256 与官方 GitHub release 对照过（3623…9998）
+curl -LO https://mirrors.tuna.tsinghua.edu.cn/Adoptium/21/jdk/aarch64/mac/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.12.1_1.tar.gz
+# 解出来放到 ~/Library/Java/JavaVirtualMachines/temurin-21.0.12.1.jdk/Contents/Home
+# ⚠️ 必须补 Info.plist（见 D-067 §一），否则 /usr/libexec/java_home 找不到
+```
+
+**Maven 镜像**（`dl.google.com` 握手失败时用）：`~/.gradle/init.d/aliyun-mirrors.gradle`，仓库外，不进版本控制。
+
+**签名**（一次性，密钥不入库）：
+
+```bash
+keytool -genkeypair -v -keystore apps/mobile/android/keystore/yushan-release.jks \
+  -alias yushan -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Yushan, OU=Cook, O=Yushan, C=CN"
+# 密码写进 ~/.gradle/gradle.properties（仓库外）：
+#   YUSHAN_KEYSTORE_FILE / YUSHAN_KEYSTORE_PASSWORD / YUSHAN_KEY_ALIAS / YUSHAN_KEY_PASSWORD
+```
+
+### 1. 出包
+
+```bash
+export JAVA_HOME="$HOME/Library/Java/JavaVirtualMachines/temurin-21.0.12.1.jdk/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+
+pnpm --dir apps/mobile run build          # web 资源 → dist/
+pnpm --dir apps/mobile exec cap sync android   # 同步进 android/app/src/main/assets/public
+cd apps/mobile/android
+./gradlew assembleDebug                   # 20MB，带 DevTools 端口
+./gradlew assembleRelease                 # 19MB，已签名（缺签名会提前报错，见 D-067 §五）
+```
+
+**改动 web 代码后必须重跑 `cap sync`**，否则 APK 里还是旧的网页资源（改了半天没生效就是这个）。
+
+### 2. 模拟器
+
+```bash
+emulator -avd Medium_Phone_API_37.0 -no-snapshot-save -no-boot-anim &
+adb wait-for-device && while [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" != 1 ]; do sleep 3; done
+
+# 后端与图片走宿主：模拟器里 127.0.0.1 是模拟器自己，用 reverse 把宿主端口映射进去
+adb reverse tcp:3000 tcp:3000
+adb reverse tcp:9000 tcp:9000
+
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -n com.yushan.cook/.MainActivity
+```
+
+**AVD 名字是 `Medium_Phone_API_37.0`**（不是 `.ini` 文件名 `Medium_Phone`，后者会报 `Unknown AVD name`）。
+
+### 3. 看 APK 里的真实界面（WebView 没有可访问性树）
+
+`uiautomator dump` 在 WebView 上**只能拿到一个空节点**，看不到任何页面内容。要"看"APK 里渲染了什么，连它的 DevTools 协议：
+
+```bash
+PID=$(adb shell pidof com.yushan.cook | tr -d '\r')
+adb forward tcp:9222 localabstract:webview_devtools_remote_$PID
+curl -s http://127.0.0.1:9222/json/list     # 列出页面目标
+# 然后连 webSocketDebuggerUrl 跑 Runtime.evaluate（脚本见 /tmp/cdp.mjs、/tmp/drive.mjs 的做法）
+```
+
+- **`adb forward` 会在 app 重启后失效**（socket 名带新 PID），要重新转发；
+- **release 包不开这个端口**——这是**正确的安全行为**，不是 bug；验 release 包只能靠截图与 `adb input`。
+- 派发真实输入：**触摸事件要带 `id` 字段**（`touchPoints:[{x,y,id:1}]`），不带的话 `touchmove` 送不到（第一次就是这么假绿的）。鼠标用 `Input.dispatchMouseEvent`。
+
+### 4. R-13 五条怎么验
+
+| # | 怎么验 | 判据 |
+| --- | --- | --- |
+| ① | 在二级页（如 `/taste`）按 `adb shell input keyevent KEYCODE_BACK`；再在弹层开着时按一次；再在根页面按一次 | 分别：回上一页 / 只关弹层（路径不变）/ 退到桌面（`dumpsys window \| grep mCurrentFocus` 变成 launcher） |
+| ② | `am force-stop` 后连拍冷启动（`screencap` 每 0.3s 一张） | 逐帧都是首屏米色，没有白帧 |
+| ③ | 聚焦一个输入框，读 `innerHeight` 与焦点框的 `getBoundingClientRect()` | 视口变小（resize）且焦点框仍在可视区内；按返回先收键盘、不离开页面 |
+| ④ | 读 `.tab-layout__body` 的 `overflow-y` / `-webkit-overflow-scrolling`，写一次 `scrollTop` | `auto` + `touch`；`scrollTop` 可写且生效 |
+| ⑤ | 切 Tab 前后读 `performance.getEntriesByType('navigation').length` | 不变（= SPA 内部转场，没有整页重载） |
+
+**抽屉拖拽的死区怎么扫**（D-067 §四那条）：用 `adb shell input mouse swipe` 从**四个高度各拖一次**（面板顶边 / 标题行 / 内容中段 / 面板底边），每次挂一个 `touchmove` 探针读 `panel.style.transform`。判据是"有没有像素位移"，不是"抽屉关没关"——顶边那次以前是**完全无位移**。
+
+### 5. 页面里的安全区与边到边
+
+- WebView 里 `env(safe-area-inset-top/bottom)` **实测 24px**（浏览器里是 0）——**验证布局问题必须在 APK 里做**，浏览器里看不出来；
+- Android 15+ 强制 edge-to-edge，`targetSdk 36` 退不出去，WebView 铺满整屏；
+- 规矩：安全区在**外壳**（`.tab-layout`）让开，页面不要自己加（重复加会多一份）；认证页在外壳之外，自己加。
+
+### 6. 踩过的坑（按撞上的顺序）
+
+1. **JDK 25 跑 Gradle**：`Unsupported class file major version 69`。装 JDK 21，别升 AGP（Capacitor 模块硬编码 8.13.0）。
+2. **`dl.google.com` 握手失败**：14 分钟白等。加镜像（`~/.gradle/init.d/`），或开代理。
+3. **CORS 没放行 APK 的 Origin**：页面能开、数据全空。logcat 里搜 `CORS policy` 能直接看到。APK 的 Origin 是 **`http://localhost`**（不是 `capacitor://`）。
+4. **改了网页但 APK 没变**：忘了 `cap sync`。
+5. **`adb forward` 失效**：app 重启后 PID 变了，重新转发。
+6. **release 包连不上 DevTools**：正常，调试端口只在 debug 包开。
+7. **`uiautomator dump` 在 WebView 上是空的**：改走 CDP。
+8. **XML 注释里不能出现 `--`**（我写了 `--color-cream`），AAPT 报 `The string "--" is not permitted within comments`——注释里提到 CSS 变量时去掉前缀。
+9. **拖拽测试的触摸事件要带 `id`**，否则 `touchmove` 不触发（假绿）。
+10. **别拿 `handleBackPress` 当清栈用**：它只调用最上面那层的 `close`，**不负责出栈**（出栈是组件卸载时调注销函数）。写进 `while (count>0)` 循环里会死循环——本地真跑出过一次 heap OOM。

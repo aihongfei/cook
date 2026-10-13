@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  启动窗口与首屏的衔接色（R-13 ②）。
+
+  ⚠️ 这个值必须与前端 `apps/mobile/src/styles/tailwind.css` 里的 `color-cream`
+  （#fcf1da，首屏背景）**保持一致**：启动窗口消失、WebView 第一帧画出来时，
+  两者颜色一样用户就看不到接缝；不一致就会出现"闪一下别的颜色"。
+  改主题时这两处一起改（要真机/模拟器冷启动复看，浏览器里看不到启动窗口）。
+
+  另注：这里**不覆盖** Capacitor 的 colorPrimary 等（那些在 colors.xml）。
+-->
+<resources>
+    <color name="splashBackground">#fcf1da</color>
+</resources>

@@ -1687,3 +1687,82 @@ M5 剩 F5-06（减脂/饮品专区，P2）与 F5-07 里"用上了什么食材"�
 - 浏览器实测：我的页 5 节 → **3 节**、整页 1315px → **998px**；口味入口唯一且 `href="/taste"`；「改一改」抽屉实测 101→844 弹出、标题与已选词正确、「先不改」关掉且**不发请求**；口味页返回键 `top=18` 与其它页一致。
 
 **范围外**：抽屉用的是 antd-mobile `Popup`，它**不带 `role="dialog"`**（本项目所有抽屉都如此，FridgeItemSheet 的测试同样按类名断言）。给共享 `BottomSheet` 补完整弹层语义是另一件事，这一刀没做。
+
+## D-067 Capacitor 打包 Android：先把 APK 装进模拟器跑起来，再修它暴露的六件事（F14-01，✅ 已实现）
+
+用户 2026-10-14：「继续吧，打包看看，模拟器我也有，你自己启动」——把**主目标**（F14-01）从"环境已就绪"推进到"APK 在模拟器里真跑起来"，并在过程中把 R-13 的五条逐条实测、把装上去才看得见的六个问题修掉。
+
+### 一、环境：卡在两处，都是本机特有的
+
+- **JDK**：Gradle 8.14.3（Capacitor 生成的 wrapper）**跑不了 JDK 25/26**（`Unsupported class file major version 69`），而本机只有 Android Studio 的 JBR 25、IDEA 的 JBR 25、Homebrew 的 26。装 **Temurin 21**（清华 Adoptium 镜像，sha256 与官方 GitHub release 校验一致）到 `~/Library/Java/JavaVirtualMachines/`——只有 `bin/java` 不够，还得有 `Contents/Info.plist`，否则 `/usr/libexec/java_home` 认不出这套 JDK。
+- **Maven 源**：首次构建在 `dl.google.com` 上报 `Remote host terminated the handshake`，**14 分钟后失败**（重试成本太高）。写 `~/.gradle/init.d/aliyun-mirrors.gradle` 加阿里云镜像（`google`/`central`/`public` 三个仓库），官方源作为兜底留在后面。**镜像装在仓库外**，不进版本控制。（用户随后开了 TUN，官方源也通了；两条路都留着。）
+
+**为什么不升 AGP 9 绕开 JDK**：`@capacitor/android` 的内建模块在 `build.gradle` 里**硬编码 `com.android.tools.build:gradle:8.13.0`**，升 AGP 会与它冲突。补一个 JDK 21 是更忠实的路线——保住官方工具链。
+
+### 二、APK 的 Origin 是 `http://localhost`，不是 `capacitor://`
+
+CORS 白名单里原本只有 `127.0.0.1:5173` 与 `localhost:5173`，于是 APK 装上去**页面能开、数据全空**。logcat 原文：
+
+```
+Access to fetch at 'http://127.0.0.1:3000/api/health' from origin 'http://localhost'
+has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present
+```
+
+修：`CORS_ORIGIN` 加 `http://localhost`（`.env` / `.env.example` / `docker-compose.yml` 三处）。
+
+**顺带订正了一处文档错误**：`docker-compose.yml` 的注释原写「移动端 APK 走 WebView，Origin 为 `capacitor://`」——那是 **iOS 与 `androidScheme:'https'`** 的形态。本项目刻意设了 `androidScheme: 'http'`，理由与代价：
+
+- 默认的 `https://localhost` 会让 WebView 里的页面变成 https，去请求开发期的 http 后端就是**混合内容**，被直接拦掉（表现同样是"数据全空"，且报错更难懂）；
+- 改成 `http` 后两条同源协议，`localhost` 本身算安全来源，摄像头/剪贴板这些要安全上下文的 API 不受影响；
+- 代价：APK 的 Origin 是明文 http，**内网联调可以、将来上 https 后端时要一起改回来**（改 `capacitor.config.ts` + `CORS_ORIGIN`，两处）。
+
+### 三、R-13 五条：全部在模拟器上实测过
+
+| # | 项目 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| ① | 返回键 | **不接线就真的没反应**，已修 | 修前：在 `/taste` 按 KEYCODE_BACK，路径不动、`history.length` 不变（logcat 也没有任何回调注册）。修后三档实测：弹层开着 → 只关弹层（`/taste` 不动）；二级页 → 回 `/mine`；根页（`idx=0`）→ 退到桌面（`mCurrentFocus` 变成 launcher） |
+| ② | 启动白屏 | **确认存在**，已修 | 连拍冷启动：第一帧纯白（WebView 还没画），第二帧才是米色首屏。把启动窗口背景改成本项目米色 `#fcf1da`（与首屏 `background` 同值）后，连拍全是米色，接缝消失 |
+| ③ | 键盘遮挡 | **不遮挡** | 注册页聚焦「怎么称呼你」时视口 914→578（resize 而非覆盖），焦点框仍在可视区内；按返回**先收键盘**、不离开页面 |
+| ④ | 滚动手感 | 原生滚动容器可用 | `.tab-layout__body` `overflow-y:auto` + `-webkit-overflow-scrolling:touch`，`scrollTop` 可写、`overscroll-behavior-y` 生效；`user-select`/点击高亮均已按需处理 |
+| ⑤ | 页面转场 | 无整页重载 | 切 Tab 前后 `performance.getEntriesByType('navigation').length` 恒为 1（SPA 内部转场，不存在整页白屏） |
+
+①的修法：`src/lib/android-back.ts` —— 一档**弹层优先**（后进先出的关闭栈）、二档**回退历史**、三档**退出 App**。"还能不能回退"读 **`history.state.idx`**（react-router 每条记录里的序号），**不用 `history.length`**：后者退回去之后也不减，会让返回键永远不退出 App（本项目已在 store 里踩过同源的坑）。`BottomSheet` / `ConfirmDialog` / `ImageViewer` 三个弹层接进关闭栈；`main.tsx` 装一次。
+
+### 四、装上去才看得见的六个问题（用户当场报的）
+
+WebView 与浏览器有**两处根本差异**，这批问题几乎都源于它们：
+
+- **浏览器里 `env(safe-area-inset-*)` 是 0，WebView 里是 24px**；
+- **Android 15+ 强制 edge-to-edge**（`targetSdk 36` 无法退出），WebView 铺满整屏（含状态栏与手势条）。
+
+| 用户说 | 真相 | 修法 |
+| --- | --- | --- |
+| 「顶部和菜单栏重叠了」 | 状态栏（12:01 / 5G / 电量）压在 hero 图上。全站只有菜谱页加过 `--safe-top`，其余页面全靠"浏览器里它是 0"蒙混 | 安全区在**外壳**（`.tab-layout`）统一让开，不在滚动区（滚动容器的 padding 属于内容，会跟着滚走）。菜谱页那处 `+ var(--safe-top)` 一并去掉，否则 24+24=48 比别页低一截 |
+| 「底部菜单栏错位了」 | `height: 76px` + `padding-bottom: calc(24+9)` 在 `border-box` 下，留给图标文字的只剩 43px——内容挤在上半截、下面空一大块 | 高度改成 `calc(内容 + var(--safe-bottom))` |
+| 「下方空白可以不要吧，使用安全区域当做空白就行」 | 76px 的 token 是设计稿里**含 9px 下内边距**的旧高度，手势条机型上等于多垫一层 | token 76 → **58**（纯内容高），下方留白只剩安全区本身；`toast`/悬浮球/草枝三处跟着改成同一算式 |
+| 「登录页需要纵向居中」 | 认证页在 Tab 外壳之外，原本顶部对齐 | `.auth` 加 `justify-content: center` + `min-height`（**不能写 `height`**：内容比屏幕高时会把顶部裁掉且滚不上去） |
+| 「口味忌口这块文案上下间距不一致」 | `margin: 0 … 4px`——上面贴着副标题（0），下面 4+20=24 | 上面 20px、下面 0（下面那 20 由 `.section-title` 自带的上内边距出，别重复补） |
+| 「这个弹出窗用鼠标拖不动」 | **顶边与底边是拖拽死区**。面板（`.adm-popup-body`）比内层外壳多两圈内边距（上 18px、下再叠一份安全区），而监听只挂在外壳上——实测从顶边起拖「无位移、关不掉」，从标题行/内容中段起拖都能拖走。而抓顶边往下拉恰恰是最自然的动作 | 监听从 `.sheet__shell` 挪到整个面板 |
+
+**"拖不动"这条的排查过程值得记**：先分别用 CDP 注入的触摸、CDP 鼠标、系统 `input mouse swipe` 三种路径各拖一次——**三种都能拖走**，说明逻辑本身是通的；再用系统输入**逐点扫**起拖位置，才定位到是"起拖点落在内边距上"。差一点就写成"没有 bug"，而用户明明拖不动。
+
+### 五、签名：keystore 与密码都不入库
+
+- keystore `android/keystore/yushan-release.jks`（4096 位 RSA，10000 天），**已加入 `.gitignore`**（Capacitor 模板默认把这两行注释着，等于默认允许入库——已启用）；
+- 四个签名参数写在**仓库外**的 `~/.gradle/gradle.properties`（`YUSHAN_KEYSTORE_*` / `YUSHAN_KEY_*`）；
+- `app/build.gradle` 读这四项，**缺项时跳过签名而不报错**（别人克隆下来仍能 `assembleDebug`），但真要出 release 包时在 `taskGraph.whenReady` **提前**报出"缺哪一个属性"，不等到打包最后一步才炸个看不懂的错。
+- 产物：debug 20MB / **release 19MB（已签名）**，证书指纹 `SHA-256: 5cdba7b7…6dbd31`。release 包实测可装、可登录、数据与图片正常。
+
+**为什么值得这么小心**：Android **认签名不认人**，丢了它就不能再给已装机的用户发更新。它该进密码管理器，不是仓库。
+
+### 六、验证
+
+- 前端 **515/515**（新增 `android-back.test.ts` 7 条 + `bottom-sheet.test.tsx` 1 条"顶边起拖"回归）；`tsc -b` **0 错**（顺带修掉了打包路径上挡路的既有 2 条——`CombosPage.test.tsx` / `PrepPage.test.tsx` 的测试自身类型写窄了）；lint 9 warnings / 0 errors 基线未变。
+- 模拟器（Medium_Phone_API_37，Android 17 / API 37）实测：`adb install` 成功；CDP 连 WebView 读真实 DOM；**注册 → 登录 → 菜谱列表 → 6 张 MinIO 图片全部解码（naturalWidth 230）**；R-13 五条见上表；六个用户报的问题逐条复验（截图 + `getBoundingClientRect` 数值）。
+- 两个包都跑过：debug（含 DevTools 端口）与 release（**不开**调试端口，符合预期）。
+
+### 七、这一刀没做的
+
+- **应用图标与启动图仍是 Capacitor 默认素材**（蓝白 X）——那是 F14-04「应用图标与启动页」，P1 未开工。启动**窗口**背景已按 §三 ② 改成米色，与首屏衔接；但图标本身没换。`styles.xml` 里已把 `windowSplashScreenAnimatedIcon` 指向 `@mipmap/ic_launcher`，F14-04 换图标时启动图会一起跟上。
+- **真机**：全部结论来自模拟器（API 37 的系统行为与真机一致，但推送、厂商 ROM 的后台策略、真实键盘都要真机才准，见 RISKS R-11）。
+- **iOS / Electron**：F14-02 / F14-03，P2 暂停中。

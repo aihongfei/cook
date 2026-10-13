@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  本项目品牌色（覆盖 Capacitor 默认的 #3F51B5 蓝紫）。
+
+  为什么要有这个文件：Capacitor 库自带一份 colors.xml，`AppTheme` 里的
+  `colorPrimary/colorPrimaryDark/colorAccent` 都指向它。不改的话，任何用到主题色的系统
+  UI（启动窗口、部分对话框、状态栏过渡）都是那套蓝紫，与这套暖橙手绘风不搭。
+
+  三个值都取自前端 token（`src/styles/tailwind.css`），改主题时两边要一起改：
+  - colorPrimary / colorPrimaryDark：品牌橙 #e07b39（对应前端的 `color-brand`）
+  - colorAccent：纸色 #fcf1da（对应 `color-cream`，用于次要强调）
+-->
+<resources>
+    <color name="colorPrimary">#e07b39</color>
+    <color name="colorPrimaryDark">#e07b39</color>
+    <color name="colorAccent">#fcf1da</color>
+</resources>

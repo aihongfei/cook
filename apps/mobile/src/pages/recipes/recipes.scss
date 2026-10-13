@@ -1,6 +1,11 @@
 .recipes-page {
   max-width: 760px;
-  padding: calc(18px + var(--safe-top)) var(--spacing-page) 24px;
+  /*
+   * 顶部**不再自己加 `--safe-top`**：安全区已由外壳（`.tab-layout`）统一让开，
+   * 这里再加一次就是 24 + 24 = 48px，这一页的头会比别的页低一截（同一批修的就是这个）。
+   * 18px 是页头自己的呼吸，与 `.pscreen` 的 padding-top 同一个数。
+   */
+  padding: 18px var(--spacing-page) 24px;
   margin: 0 auto;
   /* 右上角插画的锚点（其他页是 .pscreen，见 ui.scss 的 `.corner-art`）。
      锚在容器而不是 .recipes-heading，是为了让插画落在与别的页**同一个高度**上 */

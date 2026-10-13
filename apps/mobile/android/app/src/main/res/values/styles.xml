@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base application theme. -->
+    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+    </style>
+
+    <!--
+      启动窗口（R-13 ②：WebView 就绪前会闪一下）。
+
+      现象（模拟器实测连拍）：冷启动时先是**纯白**一帧（WebView 还没画出来），
+      紧接着才是米色的应用首屏——白→米色那一下就是用户能看到的"闪白"。
+
+      做法：
+      - `windowBackground` 直接给首屏的米色（`@color/splashBackground`，与前端
+        `color-cream` 同一个值 #fcf1da），白帧消失，启动窗口与首屏无缝衔接；
+      - `postSplashScreenTheme` 指回 `AppTheme.NoActionBar`，启动窗口结束后正常换回来；
+      - Capacitor 自带的 `Theme.SplashScreen` 还会画 `@drawable/splash`（那张带蓝色图标的
+        默认占位图，与本项目视觉无关）。下面把它的图标与背景都指到本项目自己的色/图上，
+        不然会在米色底上又冒出一个蓝色图标。
+    -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="android:windowBackground">@color/splashBackground</item>
+        <item name="windowSplashScreenBackground">@color/splashBackground</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <item name="android:background">@color/splashBackground</item>
+    </style>
+</resources>

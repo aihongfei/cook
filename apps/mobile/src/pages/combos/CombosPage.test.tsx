@@ -236,7 +236,8 @@ it('一个组合都没有时指路怎么建（这一页自己不能凭空造组�
 })
 
 it('没加入家庭时给引导，并且不请求组合接口', async () => {
-  const get = mockApi({ family: null }).del && apiClient.get
+  mockApi({ family: null })
+  const get = apiClient.get
   renderPage()
 
   expect(await screen.findByText(/组合是家里人一起用的/)).toBeTruthy()

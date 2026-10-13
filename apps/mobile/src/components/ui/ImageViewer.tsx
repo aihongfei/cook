@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { CloseIcon } from '@/components/icons/TabIcons'
+import { registerBackCloser } from '@/lib/android-back'
 
 /**
  * 全屏看大图（F16-05；用户 2026-10-13：「图片需要能点击全屏看」）。
@@ -40,6 +41,12 @@ export default function ImageViewer({
       window.removeEventListener('keydown', onKey)
       document.body.style.overflow = previous
     }
+  }, [onClose])
+
+  useEffect(() => {
+    /* 系统返回键（安卓）也关掉大图（F14-01 / R-13 ①）：与 Esc 同一条语义。
+       它是从抽屉里点开的、压在抽屉之上，所以登记在最上面，返回时先关它。 */
+    return registerBackCloser(onClose)
   }, [onClose])
 
   return createPortal(

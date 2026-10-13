@@ -4,8 +4,23 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
+  /*
+   * **纵向居中**（用户 2026-10-13：「登录页需要纵向居中」）。
+   * 用 `justify-content: center` 而不是给某一段加 margin：
+   * 四个认证页（登录/注册/忘记密码/重设密码）的卡片高度各不相同，居中要逐个对齐的是"整块"，
+   * 交给 flex 一个判断，以后哪页加减字段都不用回来重算。
+   *
+   * ⚠️ 这里必须是 `min-height`（下面那行）而不是 `height`：内容比屏幕高时（注册页字段多、
+   * 或键盘弹起把视口压短），`height` + 居中会把**顶部裁掉且滚不上去**；`min-height` 让容器
+   * 随内容长高，居中失效、退化成正常滚动，这正是想要的行为。
+   *
+   * 上下留白里的 `--safe-top` / `--safe-bottom` 是本页自己要加的：认证页在 Tab 外壳之外
+   * （见 router 的说明，它们在 RequireAuth 守卫之外），拿不到 `.tab-layout` 那份安全区。
+   * 34px 是原设计里卡片离顶的距离，加上安全区后与外壳里的页面视线高度一致。
+   */
+  justify-content: center;
   min-height: 100%;
-  padding: 34px var(--spacing-page) calc(var(--spacing-page) + 24px);
+  padding: calc(34px + var(--safe-top)) var(--spacing-page) calc(var(--spacing-page) + 24px + var(--safe-bottom));
   background:
     radial-gradient(120% 60% at 50% 0%, var(--color-cream-2) 0%, transparent 62%),
     var(--color-cream);

@@ -1,4 +1,5 @@
 import { Popup } from 'antd-mobile'
+import { registerBackCloser } from '@/lib/android-back'
 import {
   forwardRef,
   useCallback,
@@ -133,6 +134,20 @@ const BottomSheet = forwardRef<BottomSheetHandle, PropsWithChildren<BottomSheetP
 
     useImperativeHandle(ref, () => ({ close }), [close])
 
+    /**
+     * 系统返回键先关抽屉（F14-01 / R-13 ①）：安卓用户按返回时的第一预期是"退掉眼前这一层"，
+     * 而 WebView 不会替我们做这件事（不接管的话返回键在二级页上毫无反应）。
+     *
+     * 登记的是 `close` 而不是 `onClose`：`close` 会先播退场动画、再由 afterClose 回调 onClose，
+     * 走 onClose 会让抽屉"啪"地消失（与点遮罩关掉的手感不一致）。
+     * 依赖 `shown`：只有真开着的时候才该抢返回键——收起过程中（shown=false）还登记着的话，
+     * 用户连按两次返回，第二次会被这个正在消失的抽屉吃掉。
+     */
+    useEffect(() => {
+      if (!shown) return
+      return registerBackCloser(close)
+    }, [shown, close])
+
     // 渲染期记下"现在开着没"（ref 回调早于 effect 跑，写在 effect 里会慢一拍）
     shownRef.current = shown
 
@@ -160,6 +175,16 @@ const BottomSheet = forwardRef<BottomSheetHandle, PropsWithChildren<BottomSheetP
     const attachDrag = useCallback((shell: HTMLElement): (() => void) => {
       // 真正要位移的是面板本体（`.adm-popup-body`）：拖外壳的话背板不动，会露出下面的页面
       const panel = (shell.closest('.adm-popup-body') as HTMLElement | null) ?? shell
+      /*
+       * 监听**挂在整个面板上**，不是挂在内层 `.sheet__shell` 上（用户 2026-10-14：
+       * 「这个弹出窗用鼠标拖不动」）。
+       *
+       * 死区是实测出来的：面板比内容外壳多两圈内边距（上面 18px、下面再叠一份
+       * `--safe-bottom` 的 44px），而监听原先只在外壳上——于是**顶边那条最容易抓的地方
+       * 恰恰拖不动**。逐点测过：从顶边起拖「无位移、关不掉」，从标题行与内容中段起拖都能拖走。
+       * 抓顶边往下拖是用户面对底部抽屉最自然的动作，它必须有效。
+       */
+      const dragSurface = panel
 
       let startX = 0
       let startY = 0
@@ -298,12 +323,12 @@ const BottomSheet = forwardRef<BottomSheetHandle, PropsWithChildren<BottomSheetP
       }
       const onMouseMove = (event: MouseEvent) => move(event.clientX, event.clientY)
 
-      shell.addEventListener('touchstart', onTouchStart, { passive: true })
+      dragSurface.addEventListener('touchstart', onTouchStart, { passive: true })
       // touchmove 必须 passive: false，否则 preventDefault 无效
-      shell.addEventListener('touchmove', onTouchMove, { passive: false })
-      shell.addEventListener('touchend', end)
-      shell.addEventListener('touchcancel', end)
-      shell.addEventListener('mousedown', onMouseDown)
+      dragSurface.addEventListener('touchmove', onTouchMove, { passive: false })
+      dragSurface.addEventListener('touchend', end)
+      dragSurface.addEventListener('touchcancel', end)
+      dragSurface.addEventListener('mousedown', onMouseDown)
       // 鼠标的 move/up 挂在 window 上：拖到面板外面（鼠标很容易甩出去）也要继续跟手
       window.addEventListener('mousemove', onMouseMove)
       window.addEventListener('mouseup', end)
@@ -311,11 +336,11 @@ const BottomSheet = forwardRef<BottomSheetHandle, PropsWithChildren<BottomSheetP
         if (settleTimer !== null) window.clearTimeout(settleTimer)
         // 拖关那条路不清样式：面板已经藏起来等着退场，清掉会让它露出来（见 end() 里那段 ⚠️）
         if (!closedByDrag) reset()
-        shell.removeEventListener('touchstart', onTouchStart)
-        shell.removeEventListener('touchmove', onTouchMove)
-        shell.removeEventListener('touchend', end)
-        shell.removeEventListener('touchcancel', end)
-        shell.removeEventListener('mousedown', onMouseDown)
+        dragSurface.removeEventListener('touchstart', onTouchStart)
+        dragSurface.removeEventListener('touchmove', onTouchMove)
+        dragSurface.removeEventListener('touchend', end)
+        dragSurface.removeEventListener('touchcancel', end)
+        dragSurface.removeEventListener('mousedown', onMouseDown)
         window.removeEventListener('mousemove', onMouseMove)
         window.removeEventListener('mouseup', end)
       }

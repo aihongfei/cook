@@ -2,6 +2,16 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  /*
+   * 顶部安全区（状态栏）在**外壳**这一层让开，而不是各页面自己加：
+   * - 之前只有菜谱页加过（`.recipes-page` 的 `+ var(--safe-top)`），其余页面全靠浏览器里
+   *   `env(safe-area-inset-top)` 为 0 蒙混过去。APK 里它是 24px，于是 hero 图、页头、
+   *   返回键全被状态栏压住（用户 2026-10-13：「顶部和菜单栏重叠了」）。
+   * - 放在 `.tab-layout` 而不是滚动区（`.tab-layout__body`）：滚动容器的 padding 属于
+   *   **内容**，往下滚时它会跟着滚走，内容照样从状态栏底下穿过去。外壳的 padding 则一直有效。
+   *   代价是 hero 图不再通到屏幕最顶端（顶部留一条与页面同色的纸色），这正是"让开状态栏"的意思。
+   */
+  padding-top: var(--safe-top);
   background: var(--color-cream);
   /* 页面背景加一点纸感颗粒，与笔绘素材统一 */
   background-image: radial-gradient(rgb(190 160 120 / 10%) 1px, transparent 1px);
@@ -50,8 +60,20 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  height: var(--spacing-tabbar);
-  padding-bottom: calc(var(--safe-bottom) + 9px);
+  /*
+   * 高度 = 内容（`--spacing-tabbar`，58px）+ 手势条安全区。
+   *
+   * 这条算式与 token 的配合有两处踩过：
+   * - **安全区必须加进来**：全局 `box-sizing: border-box` 下，高度写死 58px 再扣掉 24px 的
+   *   `padding-bottom`，留给图标文字的只剩 34px，内容被挤到上半截、下半截空一大块
+   *   （用户 2026-10-13：「底部菜单栏错位了」，APK 实测）。加回安全区后内容重新拿到 58px。
+   * - **不再自带下内边距的"呼吸"**：原先 token 是 76px（设计稿里含 9px 下内边距），
+   *   于是标签下面永远空着一条，手势条机型上更像"多垫了一层"（用户 2026-10-14：
+   *   「下方空白可以不要吧，使用安全区域当做空白就行」）。现在下方留白**只有安全区本身**。
+   * - `padding-bottom: var(--safe-bottom)` 这条不能省：那是让内容整体上移、不落到手势条底下。
+   */
+  height: calc(var(--spacing-tabbar) + var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
   background: var(--color-paper);
   border-top: 1px solid var(--color-line);
 }
@@ -104,7 +126,11 @@
 /* 两角的手绘草枝 */
 .tab-bar__deco {
   position: absolute;
-  bottom: calc(var(--safe-bottom) + 24px);
+  /*
+   * 竖直居中在**内容区**（不含安全区那条）上：`(58 − 24) / 2 ≈ 17`。
+   * 不再用原来的 24px —— 那是按 76px 高的旧底栏配的，底栏收短后草枝会贴到顶边上去。
+   */
+  bottom: calc(var(--safe-bottom) + 17px);
   color: #c7a97e;
   opacity: 0.75;
   pointer-events: none;

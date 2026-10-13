@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { AxiosRequestConfig } from 'axios'
 import { apiClient } from '@/api/client'
 import type { PlanBoard } from '@/api/orders'
 import { useAuth } from '@/stores/auth'
@@ -105,8 +106,11 @@ function planFixture(): PlanBoard {
 
 let planParams: Record<string, unknown> | undefined
 
+/** 取 spy 期望的配置类型本身：自己手写一个更窄的（`{ params?: ... }`）tsc 会判"参数不兼容" */
+type GetConfig = AxiosRequestConfig
+
 function mockGet({ plan, family = FAMILY }: { plan: PlanBoard; family?: typeof FAMILY | null } = { plan: planFixture() }) {
-  return vi.spyOn(apiClient, 'get').mockImplementation((url: string, config?: { params?: Record<string, unknown> }) => {
+  return vi.spyOn(apiClient, 'get').mockImplementation((url: string, config?: GetConfig) => {
     if (url === '/family') {
       if (!family) return Promise.reject({ isAxiosError: true, response: { status: 404, data: { message: '还没有加入家庭' } } })
       return Promise.resolve({ data: family } as never)

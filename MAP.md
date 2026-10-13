@@ -98,6 +98,10 @@ cook/
 | 数据库 | 容器 `cook-mysql-1` · MySQL 8.4 · `127.0.0.1:3306` · 库名 `cook` | ✅ 已建库建表（迁移 init / recipe_image_mirror / auth_users / family_and_password_reset），数据在命名卷 `cook_mysql-data` |
 | 对象存储（菜谱图 + 打卡照片） | 容器 `cook-minio-1`（**自建镜像 `cook-minio`**，源码 `services/minio/Dockerfile`）· S3 API `http://127.0.0.1:9000` · 控制台 `http://127.0.0.1:9001` · 数据卷 `minio-data` 挂在 `/data` · 桶：`cook-media`（菜谱图，公开只读）/ `cook-checkins`（打卡照片，**私有、无公开读策略，只给签名短链**） | ✅ 已验证：健康检查 healthy、`cook-media` 598 对象 / 8.9 MiB、匿名读 200；`cook-checkins` 匿名读 **403**、带签名 + 令牌 200 |
 | 容器网络 | compose 网络 `cook_default`；容器内互访用服务名 `mysql` / `api` / `minio` | ✅ |
+| **安卓 App（F14-01）** | `apps/mobile/android/`（Capacitor 生成）· `appId com.yushan.cook` · 启动器名「御膳」· 网页资源在 `app/src/main/assets/public`（`cap sync` 拷进去） | ✅ 已验证：debug 20MB / 签名 release 19MB，装机跑通（2026-10-14，D-067） |
+| **APK 运行时从哪里拿数据** | WebView 挂在 **`http://localhost`**（`androidScheme:'http'`，见 `apps/mobile/capacitor.config.ts`）；接口与图片地址仍写 `127.0.0.1:3000` / `127.0.0.1:9000`，靠 `adb reverse tcp:3000` / `tcp:9000` 映射到宿主机 | ✅ 模拟器已验证；**换真机时 `adb reverse` 不适用**，要把 `VITE_API_BASE_URL` 与 `MEDIA_BASE_URL` 改成服务器地址（见下方「部署」） |
+| APK 调试通道 | `adb forward tcp:9222 localabstract:webview_devtools_remote_<PID>` → CDP 连 WebView 读真实 DOM | ✅ 已用（**只有 debug 包开这个端口**，release 包不开是正确行为） |
+| 签名密钥 | keystore `apps/mobile/android/keystore/yushan-release.jks`（**已 gitignore**）· 四项参数在 `~/.gradle/gradle.properties`（仓库外） | ✅ 密钥未入库；证书 `SHA-256: 5cdba7b7…6dbd31` |
 
 ## 配置
 

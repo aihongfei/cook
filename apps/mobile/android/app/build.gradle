@@ -1,0 +1,98 @@
+apply plugin: 'com.android.application'
+
+/*
+ * release 签名（F14-01）。
+ *
+ * 密钥与密码**都不在这个仓库里**（约定见 android/.gitignore 与 RUNBOOK）：
+ * keystore 在 android/keystore/（已忽略），四个参数写在仓库外的
+ * `~/.gradle/gradle.properties`。这样做的原因：
+ * - 丢了签名就不能再给已装机的 App 发更新（Android 认签名不认人），它该进密码管理器；
+ * - 仓库有可能被分享/克隆，密钥一旦进去就洗不干净了。
+ *
+ * 没配齐时**跳过** release 签名而不是报错：别人克隆下来仍能 `assembleDebug`，
+ * 而要出 release 包时会明确停在"缺哪一个属性"上（见下面那条错误信息）。
+ */
+def releaseKeystoreFile = project.findProperty('YUSHAN_KEYSTORE_FILE')
+def releaseKeystorePassword = project.findProperty('YUSHAN_KEYSTORE_PASSWORD')
+def releaseKeyAlias = project.findProperty('YUSHAN_KEY_ALIAS')
+def releaseKeyPassword = project.findProperty('YUSHAN_KEY_PASSWORD')
+def hasReleaseSigning = releaseKeystoreFile && releaseKeystorePassword && releaseKeyAlias && releaseKeyPassword
+
+android {
+    namespace = "com.yushan.cook"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.yushan.cook"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseKeystoreFile)
+                storePassword releaseKeystorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+// 出 release 包时签名缺失要在**开始构建前**说清楚，而不是等打包到最后一步才报个看不懂的错
+gradle.taskGraph.whenReady { graph ->
+    def wantsRelease = graph.allTasks.any { it.name.toLowerCase().contains('release') && it.name.toLowerCase().contains('assemble') }
+    if (wantsRelease && !hasReleaseSigning) {
+        throw new GradleException(
+            "缺少 release 签名配置（YUSHAN_KEYSTORE_FILE / YUSHAN_KEYSTORE_PASSWORD / " +
+            "YUSHAN_KEY_ALIAS / YUSHAN_KEY_PASSWORD）。\n" +
+            "它们应写在仓库外的 ~/.gradle/gradle.properties，keystore 放 android/keystore/（都不入库）。\n" +
+            "首次生成的做法见 RUNBOOK 的打包一节。"
+        )
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
