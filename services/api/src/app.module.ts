@@ -14,6 +14,7 @@ import { HealthModule } from './modules/health/health.module'
 import { OrdersModule } from './modules/orders/orders.module'
 import { RecipesModule } from './modules/recipes/recipes.module'
 import { ShoppingModule } from './modules/shopping/shopping.module'
+import { TasteModule } from './modules/taste/taste.module'
 
 /**
  * 应用根模块。
@@ -36,6 +37,7 @@ import { ShoppingModule } from './modules/shopping/shopping.module'
     CombosModule,
     FavoritesModule,
     FridgeModule,
+    TasteModule,
     DiscoverModule,
     ShoppingModule,
     CheckInsModule,

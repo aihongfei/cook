@@ -3,6 +3,8 @@ import { MealSlot, OrderStatus, Prisma } from '@prisma/client'
 import { CAPABILITIES, FamilyRole, can } from '../family/family.roles'
 import { publicImageUrl } from '../media/media.storage'
 import { PrismaService } from '../recipes/prisma.service'
+import { TasteService } from '../taste/taste.service'
+import { judgeDish, type TasteJudgement } from '../taste/taste.rules'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
   aggregateItems, canAddItem, canRepeatFrom, confirmStampFor, dateKey, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
@@ -71,6 +73,32 @@ export interface MealCardView {
   submittedAt: string
 }
 
+/**
+ * 点完一道菜的结果 = 那张餐卡 + **这一笔的提醒**（F3-08）。
+ *
+ * 为什么不把提醒塞进 `MealCardView`：卡片是"这一餐现在什么样"，从列表、今日安排、
+ * 计划页都会下发——在那几处算一遍口味判据既是白算，也会让"提醒"出现在用户没点菜的
+ * 时刻。提醒属于**这一笔动作**，所以只挂在 addItem 的返回上。
+ */
+export interface AddItemResult extends MealCardView {
+  /**
+   * 有人过敏或忌口时才有（见 `judgeDish`）。
+   *
+   * **只是提醒，不拦**：这是用户自己的选择（他可能就是给全家人之外的那位做），
+   * 拦下来会让人以为菜谱库坏了。但要在**加入的那一刻**说，晚了就只剩添堵。
+   */
+  tasteWarning?: { verdict: 'warn' | 'block'; text: string }
+}
+
+/** Prisma 的 `ingredients` 是 Json 列：读成判据要的形状，脏数据丢掉而不是抛（见 ai.service 的同名工具） */
+function ingredientNamesOf(raw: unknown): { name: string }[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item) => (item && typeof item === 'object' && 'name' in item ? String((item as { name: unknown }).name) : ''))
+    .filter((name) => name.trim() !== '')
+    .map((name) => ({ name }))
+}
+
 type MealOrderRow = Prisma.MealOrderGetPayload<{ include: typeof MEAL_ORDER_INCLUDE }>
 
 /** 卡片组装要用的关联（列表与单卡共用，避免两处 include 漂移） */
@@ -83,7 +111,16 @@ const MEAL_ORDER_INCLUDE = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    /*
+     * 口味判据（F3-08）：点菜时提醒"这家有人对这个过敏/忌口"。
+     * **提醒而不是拦截**——这是用户自己的选择，拦下来会让人以为菜谱库坏了
+     * （"我明明想点这道"）。但它必须是**加入之前**的那一步：加进去之后再说，
+     * 用户已经把这顿饭安排好了，提醒就只剩下添堵。
+     */
+    private readonly taste: TasteService,
+  ) {}
 
   /**
    * 点菜（`order.create`，人人可点）：点菜谱里的，或者自己写一道（F3-10）。
@@ -92,7 +129,7 @@ export class OrdersService {
   async addItem(
     userId: string,
     input: { recipeId?: string; dishName?: string; mealDate?: string; meal?: string; note?: string },
-  ): Promise<MealCardView> {
+  ): Promise<AddItemResult> {
     const { familyId } = await this.requireCapability(userId, CAPABILITIES.ORDER_CREATE)
 
     const slot = parseSlot(input.meal)
@@ -123,7 +160,49 @@ export class OrdersService {
     await this.prisma.orderItem.create({
       data: { mealOrderId: mealOrder.id, userId, ...item, note },
     })
-    return this.card(mealOrder.id, userId)
+    const card = await this.card(mealOrder.id, userId)
+    return { ...card, ...await this.tasteWarningFor(userId, item.recipeId, item.recipeName) }
+  }
+
+  /**
+   * 这道菜合不合这一家人的口味（F3-08）。
+   *
+   * **点完再说**而不是"点之前先弹一个确认框"：多一步确认会把点菜这件小事变成两下，
+   * 而绝大多数菜本来就没问题。用户看到提醒时那道菜已经在菜单里了——他可以顺手撤掉
+   * （「撤掉这一道」就在那张卡上），这比"先拦住他问一遍"更顺。
+   *
+   * 判据的来源是**全家填过的档案**：没人填过就什么都不说（不假装有保护，
+   * 见 taste.rules 文件头 ③）。
+   */
+  private async tasteWarningFor(
+    userId: string,
+    recipeId: string | null,
+    dishName: string,
+  ): Promise<{ tasteWarning?: { verdict: 'warn' | 'block'; text: string } }> {
+    const profiles = (await this.taste.family(userId)).active
+    if (profiles.length === 0) return {}
+
+    /*
+     * 自己写的那道菜（`recipeId` 为 null）没有配料表——**只能什么都不说**。
+     * 按菜名匹配是不行的：那正是判据刻意避开的做法（"鱼香肉丝"里没有鱼）。
+     * 少提醒一次，好过说错一次（用户会因此不再信这个提醒）。
+     */
+    if (!recipeId) return {}
+
+    const recipe = await this.prisma.recipe.findUnique({
+      where: { id: recipeId },
+      select: { name: true, spiciness: true, ingredients: true },
+    })
+    if (!recipe) return {}
+
+    const judgement: TasteJudgement = judgeDish({
+      name: recipe.name,
+      spiciness: recipe.spiciness,
+      ingredients: ingredientNamesOf(recipe.ingredients),
+    }, profiles)
+
+    if (judgement.verdict === 'ok') return {}
+    return { tasteWarning: { verdict: judgement.verdict, text: judgement.text || `「${dishName}」可能有人吃不了` } }
   }
 
   /**

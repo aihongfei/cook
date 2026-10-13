@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
+import type { FridgeScanDraft } from '@/api/ai'
 import * as checkins from '@/api/checkins'
 import { useAuth } from '@/stores/auth'
 import { Toaster } from '@/components/ui/toast'
@@ -45,7 +46,12 @@ function mockScan({
   summary = '看着像是一格冷藏 + 一包零食。',
   /** 连入库那一口也桩上（只关心"发出去的是什么"的用例用） */
   writes = false,
-} = {}) {
+  /*
+   * 显式标注参数类型：默认值那两条把 `note` 推成了 `null`，于是"模型给了备注"那些
+   * 用例传进去的字符串会被判成类型错误（写测试时才发现的——那正是"默认值当类型"的坑）。
+   * 用 `FridgeScanDraft[]` 才是这一路的真实契约。
+   */
+}: { items?: FridgeScanDraft[]; summary?: string; writes?: boolean } = {}) {
   const post = vi.spyOn(apiClient, 'post').mockImplementation((url: string) => {
     if (url === '/ai/attachments') return Promise.resolve({ data: { id: 'att-1', mimeType: 'image/jpeg' } } as never)
     if (url === '/ai/scan-fridge') return Promise.resolve({ data: { items, summary } } as never)

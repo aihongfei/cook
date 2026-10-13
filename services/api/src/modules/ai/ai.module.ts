@@ -7,6 +7,7 @@ import { FavoritesModule } from '../favorites/favorites.module'
 import { FridgeModule } from '../fridge/fridge.module'
 import { OrdersModule } from '../orders/orders.module'
 import { RecipesModule } from '../recipes/recipes.module'
+import { TasteModule } from '../taste/taste.module'
 import { PrismaService } from '../recipes/prisma.service'
 import { AiActionService } from './ai-action.service'
 import { AiAttachmentService } from './ai-attachment.service'
@@ -32,6 +33,7 @@ import { AiService } from './ai.service'
       signOptions: { expiresIn: Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 7200) },
     }),
     FridgeModule,
+    TasteModule,
     // 自建菜谱的写走 RecipesModule 导出的 RecipeWriteService（F1-12）；
     // 收藏走用户自己的 FavoritesService（F1-09）——与冰箱同一条规矩：AI 不另写一套写入逻辑
     RecipesModule,

@@ -47,6 +47,14 @@ export const AI_ACTION_MEAL_STATUS = 'meal.status'
 export const AI_ACTION_COMBO_CREATE = 'combo.create'
 export const AI_ACTION_COMBO_UPDATE = 'combo.update'
 export const AI_ACTION_COMBO_REMOVE = 'combo.remove'
+/**
+ * 口味与忌口档案（M8 / F8-01/02，用户 2026-10-12 要求"AI 也能写"）。
+ *
+ * 与冰箱/菜单同档（A 档：直接写 + 回执可撤）——**这一项不能例外**：
+ * 模型可能把"微辣"听成"不吃辣"，而这项会立刻改变推荐过滤与点菜提醒，
+ * 改错了要能一键回到原样。
+ */
+export const AI_ACTION_TASTE_UPDATE = 'taste.update'
 
 export type AiActionKind =
   | typeof AI_ACTION_FRIDGE_CREATE
@@ -64,6 +72,7 @@ export type AiActionKind =
   | typeof AI_ACTION_COMBO_CREATE
   | typeof AI_ACTION_COMBO_UPDATE
   | typeof AI_ACTION_COMBO_REMOVE
+  | typeof AI_ACTION_TASTE_UPDATE
 
 /**
  * 存进 `undoData` 的形状（按 kind 区分）。
@@ -107,6 +116,7 @@ export type UndoData =
   | ComboCreateUndo
   | ComboUpdateUndo
   | ComboRemoveUndo
+  | TasteUpdateUndo
 
 /** 撤「新建菜谱」= 把那条删掉 */
 export interface RecipeCreateUndo {
@@ -212,6 +222,37 @@ export interface ComboState {
   name: string
   note: string | null
   recipeIds: string[]
+}
+
+/**
+ * 撤「改口味档案」= 把**动过的那几项**写回原值。
+ *
+ * 与冰箱/菜谱/组合同一条讲究（见 `FridgeUpdateUndo`）：只记 AI 动过的字段。
+ * 全字段都记的话，"用户后来自己加了句备注"会被误判成"与 AI 写下时不一致"而拒绝撤销。
+ *
+ * `before` 里的 `null` / `[]` 是**有意义的值**（"那项本来是空的"），不能当成"没改过"。
+ */
+/**
+ * 一份口味档案的当前样子（撤销判"改没改过"用）。
+ *
+ * 字段与 `TasteProfile` 对齐，但**不 import 那个类型**：这个文件刻意不依赖
+ * taste 模块（它是"判据"层，被 ai-action.service 与 ai.service 共用；反向依赖
+ * 会让将来把口味拆成独立服务时多一条要斩的线）。结构性类型在这里足够了——
+ * 形状对不上是编译期就会报的错。
+ */
+export interface TasteSnapshot {
+  spicyLevel: number | null
+  flavors: string[]
+  diet: string | null
+  allergies: string[]
+  dislikes: string[]
+  note: string | null
+}
+
+export interface TasteUpdateUndo {
+  userId: string
+  before: Record<string, unknown>
+  after: Record<string, unknown>
 }
 
 /** 撤「新建组合」= 删掉它（删之前同样要核对用户没改过，见 `comboTouched`） */
@@ -333,6 +374,14 @@ export type UndoContext =
   | { entity: 'menuOrder'; order: MenuOrderSnapshot }
   /** 一个组合（`null` = 已经不在了） */
   | { entity: 'combo'; combo: ComboSnapshot | null }
+  /**
+   * 一份口味档案（`null` = 不在了）。
+   *
+   * 给的是**这个人自己的那一行**（不是全家的）：档案一人一条、`userId` 唯一，
+   * 所以判"改没改过"只需看他自己那份。给全家的反而要在这里再挑一次，
+   * 而挑错的后果是"撤回盖掉别人写的东西"。
+   */
+  | { entity: 'taste'; taste: TasteSnapshot | null }
 
 /** 撤销的判定结果。三态**都带一句人话**——界面上要原样显示给用户 */
 export type UndoVerdict =
@@ -377,6 +426,8 @@ export type UndoPlan =
   | { op: 'updateCombo'; comboId: string; patch: Partial<ComboState> }
   /** 按原样重建一个组合（撤"删组合"）。**带 id 与组里的菜** */
   | { op: 'restoreCombo'; combo: ComboRemoveUndo['combo'] }
+  /** 把口味档案里 AI 动过的那几项写回原值（撤"改口味"） */
+  | { op: 'updateTaste'; userId: string; patch: Record<string, unknown> }
 
 /**
  * 这一步的判断顺序是刻意的，**先判"能不能撤"再判"该撤什么"**：
@@ -626,6 +677,32 @@ export function planUndo(record: AiActionRecord, context: UndoContext): { plan?:
     return { plan: { op: 'restoreCombo', combo: undo.combo }, verdict: { type: 'ok' } }
   }
 
+  /*
+   * 口味档案（M8）。**不依赖 `context`**：这份档案就是这个人自己的那一行（一人一条），
+   * 不需要像冰箱/菜谱那样先查"那条现在是啥样"——`userId` 已经定位到唯一一行。
+   *
+   * 两个边界仍然要判：
+   * - **用户自己后来改过**：拒绝撤销（撤回会盖掉他的改动）。判据与别处一致：
+   *   只比 AI 动过的那几项；
+   * - **那份档案已经不在了**（他手动清空了整行，或换了家庭被级联删）：结果已经达成 →
+   *   `already`，不算失败。
+   */
+  if (record.kind === AI_ACTION_TASTE_UPDATE) {
+    const undo = readUndo<TasteUpdateUndo>(record.undoData, ['userId', 'before', 'after'])
+    if (!undo) return { verdict: { type: 'refused', reason: '这笔记录的格式不认识，撤不了' } }
+    if (context.entity !== 'taste') return { verdict: { type: 'refused', reason: '这笔记录的格式不认识，撤不了' } }
+    const current = context.taste
+    if (!current) return { verdict: { type: 'already', message: '这份档案已经不在了' } }
+    // 只比 AI 动过的那几项（同一套 sameValue：数组按内容比、null 与空数组不同）
+    const moved = Object.keys(undo.after).filter((field) => (
+      !sameValue((current as unknown as Record<string, unknown>)[field], undo.after[field])
+    ))
+    if (moved.length > 0) {
+      return { verdict: { type: 'refused', reason: '这份口味档案你自己改过了，撤回会把你的改动也盖掉——直接改它吧' } }
+    }
+    return { plan: { op: 'updateTaste', userId: undo.userId, patch: undo.before }, verdict: { type: 'ok' } }
+  }
+
   return { verdict: { type: 'refused', reason: '这笔操作不支持撤销' } }
 }
 
@@ -760,6 +837,7 @@ export function undoLabel(kind: string): string {
   // 收藏是一个开关，两个方向的按钮说的是同一件事：把收藏状态按回去
   if (kind === AI_ACTION_FAVORITE_ON || kind === AI_ACTION_FAVORITE_OFF) return '收回去'
   // 菜单与组合沿用同一套（加菜撤掉、撤菜放回去、改组合/改人数改回去、删组合放回去）
+  if (kind === AI_ACTION_TASTE_UPDATE) return '改回去'
   if (kind === AI_ACTION_MENU_ADD) return '撤掉'
   if (kind === AI_ACTION_MENU_REMOVE) return '放回去'
   if (kind === AI_ACTION_MEAL_DINERS) return '改回去'

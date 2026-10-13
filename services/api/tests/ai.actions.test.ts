@@ -4,6 +4,7 @@ import {
   AI_ACTION_FRIDGE_CREATE,
   AI_ACTION_FRIDGE_REMOVE,
   AI_ACTION_FRIDGE_UPDATE,
+  AI_ACTION_TASTE_UPDATE,
   describeFridgeItem,
   planUndo,
   removedItemKey,
@@ -393,4 +394,87 @@ test('撤「收藏」：状态与目标相反时才真的反一下', () => {
   )
   assert.equal(verdict.type, 'ok')
   assert.deepEqual(plan, { op: 'setFavorite', recipeId: 'r1', favorited: true })
+})
+
+/*
+ * 口味档案的撤销（M8 / F8-01、F8-02）。
+ *
+ * 这一项与冰箱/菜单同档（A 档），所以撤销那三条意外必须同样判得住——
+ * 尤其是"用户自己后来又改了"那条：档案会立刻影响推荐过滤与点菜提醒，
+ * 撤回时盖掉他刚写的东西，后果比盖掉一条冰箱食材严重。
+ */
+
+function tasteAction(over: Partial<AiActionRecord> = {}): AiActionRecord {
+  return {
+    id: 'a9',
+    kind: AI_ACTION_TASTE_UPDATE,
+    undoData: {
+      userId: 'u1',
+      before: { dislikes: ['香菜'] },
+      after: { dislikes: ['香菜', '芹菜'] },
+    },
+    undoneAt: null,
+    targetId: 'u1',
+    ...over,
+  }
+}
+
+const tasteNow: UndoContext = {
+  entity: 'taste',
+  taste: { spicyLevel: null, flavors: [], diet: null, allergies: [], dislikes: ['香菜', '芹菜'], note: null },
+}
+
+test('撤销"改口味"：只把 AI 动过的那几项写回原值', () => {
+  const { plan, verdict } = planUndo(tasteAction(), tasteNow)
+  assert.equal(verdict.type, 'ok')
+  assert.deepEqual(plan, { op: 'updateTaste', userId: 'u1', patch: { dislikes: ['香菜'] } })
+})
+
+test('**用户自己改过那一项**时拒绝撤销（撤回会盖掉他的改动）', () => {
+  const moved: UndoContext = {
+    entity: 'taste',
+    taste: { spicyLevel: null, flavors: [], diet: null, allergies: [], dislikes: ['香菜'], note: null },
+  }
+  const { verdict } = planUndo(tasteAction(), moved)
+  assert.equal(verdict.type, 'refused')
+  assert.match(verdict.type === 'refused' ? verdict.reason : '', /你自己改过了/)
+})
+
+test('**他只改别的项**时撤销照常（AI 动过的那项没变）', () => {
+  // 这是"只记 AI 动过的字段"那个设计的实质：他新加了"不吃苦瓜"，
+  // 而 AI 加的那项（芹菜）还在——撤销只该把芹菜拿掉，不该因为他动过别的就拒绝
+  const other: UndoContext = {
+    entity: 'taste',
+    taste: { spicyLevel: 2, flavors: ['清淡'], diet: null, allergies: [], dislikes: ['香菜', '芹菜'], note: '医生说要少盐' },
+  }
+  const { plan, verdict } = planUndo(tasteAction(), other)
+  assert.equal(verdict.type, 'ok')
+  assert.deepEqual(plan, { op: 'updateTaste', userId: 'u1', patch: { dislikes: ['香菜'] } })
+})
+
+test('档案已经不在了（他清空了整行）→ already，不算失败', () => {
+  const { plan, verdict } = planUndo(tasteAction(), { entity: 'taste', taste: null })
+  assert.equal(verdict.type, 'already')
+  assert.equal(plan, undefined)
+  // 与冰箱那条同一个口径：结果已经是用户要的，但不能假装"撤成功"
+  assert.match(verdict.type === 'already' ? verdict.message : '', /档案已经不在了/)
+})
+
+test('已经撤过一次 → 拒绝（再撤会去动一条不该动的记录）', () => {
+  const { verdict } = planUndo(tasteAction({ undoneAt: new Date() }), tasteNow)
+  assert.equal(verdict.type, 'refused')
+  assert.match(verdict.type === 'refused' ? verdict.reason : '', /已经撤过了/)
+})
+
+test('undoData 形状不认识 → 拒绝而不是猜', () => {
+  const broken = tasteAction({ undoData: { userId: 'u1' } })
+  assert.equal(planUndo(broken, tasteNow).verdict.type, 'refused')
+})
+
+test('上下文类型对不上（拿冰箱的快照来撤口味）→ 拒绝，不按错误的理解改数据', () => {
+  assert.equal(planUndo(tasteAction(), snapshot()).verdict.type, 'refused')
+})
+
+test('撤销按钮上写的是"改回去"（这一档的语言是"这一步能反悔"）', () => {
+  assert.equal(undoLabel(AI_ACTION_TASTE_UPDATE), '改回去')
 })

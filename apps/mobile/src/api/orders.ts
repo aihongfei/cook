@@ -81,6 +81,14 @@ export interface MealCard {
   canRepeat: boolean
   nextActions: NextAction[]
   submittedAt: string
+  /**
+   * 这一笔点菜的**口味提醒**（F3-08）：有人过敏或忌口时后端才给（见 orders.service 的
+   * `tasteWarningFor`）。**不拦，只提醒**——这是用户自己的选择，拦下来会让人以为菜谱库坏了。
+   *
+   * 只挂在「点这道」的返回上，不在列表/今日安排里：提醒属于**这一笔动作**，
+   * 出现在用户没点菜的时刻只会变成噪音。
+   */
+  tasteWarning?: { verdict: 'warn' | 'block'; text: string }
 }
 
 export interface OrderBoard {

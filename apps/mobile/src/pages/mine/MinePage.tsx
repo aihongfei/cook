@@ -5,6 +5,7 @@ import { logout, useAuthOptions, useMe, useUpdateProfile } from '@/api/auth'
 import { useCheckInStats } from '@/api/checkins'
 import { useFamily } from '@/api/family'
 import { useFavorites } from '@/api/favorites'
+import { useTasteFamily } from '@/api/taste'
 import { useRecipes } from '@/api/recipes'
 import Heatmap from '@/components/ui/Heatmap'
 import PageHeader from '@/components/ui/PageHeader'
@@ -38,6 +39,7 @@ export default function MinePage() {
   const checkins = useCheckInStats({ enabled: Boolean(family.data) })
   // 收藏数只用于入口那一行的副标题（F1-09）；没登录时后端 401，hook 自己不发请求
   const favorites = useFavorites()
+  const taste = useTasteFamily()
   /*
    * 「我的菜谱」那一行的数量（F1-12）：借列表接口的第一页要 `total`，**不另开统计接口**——
    * 一行副标题不值得一个新端点与一套新的失效逻辑。没登录/没家庭时它自然为空。
@@ -181,6 +183,20 @@ export default function MinePage() {
           <span className="me-entry__arrow">›</span>
         </Link>
 
+        {/*
+          口味与忌口（M8 / F8-01、F8-02）：放在"我的菜"之后、"我的打卡"之前。
+          它属于**设置**（写下来影响别处的行为），所以挨着下面那一段设置类入口。
+        */}
+        <SectionTitle title="口味" />
+        <Link className="me-entry" to="/taste" state={{ from: '/mine' }}>
+          <span className="me-entry__icon">🌶️</span>
+          <span className="me-entry__text">
+            口味与忌口
+            <small>{tasteText(taste.data)}</small>
+          </span>
+          <span className="me-entry__arrow">›</span>
+        </Link>
+
         <SectionTitle title="我的打卡" />
 
         {family.data && checkins.data ? (
@@ -274,4 +290,22 @@ export default function MinePage() {
       </div>
     </Page>
   )
+}
+
+/**
+ * 那一行副标题说什么（M8）。
+ *
+ * 三态都要说人话，尤其**第二态**：写过但"不限"的人不少（他填了备注或口味偏好），
+ * 显示"已设置"会让人以为有忌口保护；显示"还没写"又是假的。所以按"有没有硬判据"分。
+ */
+function tasteText(data: { me: { filled: boolean; allergies: string[]; dislikes: string[]; spicyLevel: number | null } | null; missing: string[] } | undefined): string {
+  if (!data) return '谁能吃什么，写下来才会提醒'
+  const me = data.me
+  if (!me?.filled) return '还没写 · 写了才会按忌口提醒'
+  const hard = me.allergies.length + me.dislikes.length
+  const missing = data.missing.length
+  const parts: string[] = []
+  parts.push(hard > 0 ? `${hard} 项忌口` : '不限')
+  if (missing > 0) parts.push(`${missing} 位家人还没写`)
+  return parts.join(' · ')
 }

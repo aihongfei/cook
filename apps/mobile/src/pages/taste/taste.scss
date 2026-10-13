@@ -1,0 +1,231 @@
+/* 口味与忌口（M8 / F8-01、F8-02）。形态与家庭页同族：卡片 + 行内字段 + 可点的小词 */
+
+.taste__hint {
+  padding-inline: var(--spacing-page);
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--color-ink-3);
+}
+
+/*
+ * 「还有 X 人没写」：这一页最要紧的一句话（见页面头注 ②），所以给它描边与底色，
+ * 不做成一行灰字——用户看到"口味已设置"会以为全家都护上了。
+ */
+.taste__missing {
+  padding: 10px 12px;
+  margin: 0 var(--spacing-page) 4px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #8a4a24;
+  background: var(--color-cream);
+  border: 1.5px dashed #de9057;
+  border-radius: 14px;
+}
+
+.taste__card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px var(--spacing-page);
+}
+
+/* 每一行本身是一颗按钮（点它就进编辑），所以要把按钮的默认外观全摁掉 */
+.taste__field {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+}
+
+.taste__field--danger {
+  background: #fdf3ec;
+  border-color: var(--color-focus-line);
+}
+
+.taste__label {
+  flex: 0 0 44px;
+  font-size: 13px;
+  color: var(--color-ink-3);
+}
+
+.taste__value {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-ink);
+
+  small {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--color-ink-3);
+  }
+}
+
+.taste__empty {
+  padding: 0 12px;
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.taste__edit {
+  display: block;
+  margin: 4px auto 0;
+}
+
+.taste__family {
+  padding: 0 var(--spacing-page);
+  margin: 0;
+  list-style: none;
+}
+
+.taste__member {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px dashed var(--color-line);
+}
+
+.taste__avatar { font-size: 20px; }
+
+.taste__who {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--color-ink);
+
+  small {
+    display: block;
+    margin-top: 2px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--color-ink-3);
+  }
+}
+
+.taste__mine {
+  padding: 2px 7px;
+  font-size: 10px;
+  color: #a8785a;
+  background: var(--color-cream-2);
+  border-radius: 999px;
+}
+
+.taste__foot {
+  padding-inline: var(--spacing-page);
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+/* 编辑面板：贴在页面下方的一块（不是抽屉——这一页本身就只有这件事，不必再套一层） */
+.taste-editor {
+  padding: 4px var(--spacing-page) 20px;
+  border-top: 1px dashed var(--color-line);
+}
+
+.taste-editor__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0 var(--spacing-page);
+  margin-top: 8px;
+}
+
+.taste-chip {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: #8a4a24;
+  cursor: pointer;
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 999px;
+}
+
+/* 选中的那颗：实心 + 品牌色，与"没选"一眼分得开 */
+.taste-chip.is-active {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+.taste-editor__warn {
+  padding: 0 var(--spacing-page);
+  margin: 7px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-3);
+}
+
+.taste-editor__custom {
+  display: flex;
+  gap: 8px;
+  padding: 0 var(--spacing-page);
+  margin-top: 8px;
+}
+
+.taste-editor__input,
+.taste-editor__note {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-ink);
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 12px;
+  outline: none;
+
+  &:focus {
+    border-color: var(--color-focus-line);
+    box-shadow: var(--shadow-focus);
+  }
+}
+
+.taste-editor__note {
+  display: block;
+  width: calc(100% - var(--spacing-page) * 2);
+  margin: 8px var(--spacing-page) 0;
+}
+
+.taste-editor__confirm {
+  flex: 0 0 auto;
+  padding: 9px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: #fff;
+  cursor: pointer;
+  background: var(--color-brand);
+  border: none;
+  border-radius: 12px;
+
+  &:disabled { opacity: 0.5; }
+}
+
+.taste-editor__actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+
+  .recipe-button { flex: 1; margin-top: 0; }
+}
+
+.taste-editor__save {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}

@@ -70,6 +70,16 @@ export default function OrderDishSheet({
         onSuccess: (card) => {
           const dayLabel = days.find((option) => option.value === card.date)?.label ?? card.date
           toast.success(`已加入${dayLabel}${card.mealLabel}，等掌勺人安排`)
+          /*
+           * 口味提醒（F3-08）：**加进去了才提醒**，不是先拦一道。
+           * 用 toast 而不是原生 confirm：不打断、可忽略，而且用户想撤的话
+           * 「撤掉这一道」就在那一餐的卡上（比"先问一遍再点一次"顺）。
+           * 过敏（block）用 error 色，忌口（warn）用普通提示——轻重不一样。
+           */
+          if (card.tasteWarning) {
+            if (card.tasteWarning.verdict === 'block') toast.error(card.tasteWarning.text)
+            else toast.success(card.tasteWarning.text)
+          }
           closeSheet()
         },
         onError: (error) => toast.error(apiErrorMessage(error)),

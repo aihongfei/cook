@@ -18,19 +18,21 @@ import {
   TOOL_ADD_FRIDGE_ITEMS, TOOL_ADD_MENU_ITEMS, TOOL_CREATE_COMBO, TOOL_CREATE_RECIPE, TOOL_DELETE_COMBO,
   TOOL_DELETE_RECIPE, TOOL_PROPOSE_MENU_ITEMS, TOOL_READ_COMBOS, TOOL_READ_FRIDGE, TOOL_READ_MENU,
   TOOL_READ_PLAN, TOOL_READ_RECIPES, TOOL_REMOVE_FRIDGE_ITEM, TOOL_REMOVE_MENU_ITEM, TOOL_REPEAT_MEAL,
-  TOOL_ROUNDS_MAX, TOOL_SEARCH_DISHES, TOOL_SET_DINERS, TOOL_SET_MEAL_STATUS, TOOL_TOGGLE_FAVORITE,
-  TOOL_UPDATE_COMBO, TOOL_UPDATE_FRIDGE_ITEM, TOOL_UPDATE_RECIPE,
+  TOOL_READ_TASTE, TOOL_ROUNDS_MAX, TOOL_SEARCH_DISHES, TOOL_SET_DINERS, TOOL_SET_MEAL_STATUS,
+  TOOL_TOGGLE_FAVORITE, TOOL_UPDATE_COMBO, TOOL_UPDATE_FRIDGE_ITEM, TOOL_UPDATE_RECIPE, TOOL_UPDATE_TASTE,
   comboText, fridgeText, menuText, readAddItems, readComboDraft, readDiners, readIdArg, readMealStatus,
   readMealTarget, readMenuAdds, readProposals, readRecipeDraft, readRecipePatch, readRemoveItem,
-  readUpdateItem, recipeText, searchResult, todayKey, toolResult,
+  readTastePatch, readUpdateItem, recipeText, searchResult, todayKey, toolResult,
   type MenuProposal, type ToolCall,
 } from './ai.tools'
 import { AiActionService, humanError, type AiReceipt } from './ai-action.service'
 import { CombosService } from '../combos/combos.service'
 import { FridgeService } from '../fridge/fridge.service'
+import { TasteService } from '../taste/taste.service'
 import { OrdersService } from '../orders/orders.service'
 import { MEAL_LABEL, STATUS_LABEL } from '../orders/orders.rules'
 import { sourceLabel } from '../recipes/recipe.rules'
+import { SPICY_LEVELS, judgeDish, type TasteProfile } from '../taste/taste.rules'
 
 /**
  * AI 推荐与问答（用户 2026-10-12 的新需求；口径见 D-026）。
@@ -49,6 +51,7 @@ export class AiService {
     private readonly prisma: PrismaService,
     private readonly actions: AiActionService,
     private readonly fridge: FridgeService,
+    private readonly taste: TasteService,
     // 组合的读走用户自己那套（`list` 里有"家庭内共用 + canEdit"的判定，AI 不该另写一份）
     private readonly combosService: CombosService,
     // 对话里的图片（F16-05）：字节在服务端，消息里只传 id
@@ -87,7 +90,13 @@ export class AiService {
     const hint = parseHint(input.hint)
     const config = this.requireConfig()
     const context = await this.familyContext(userId)
-    const candidates = await this.candidates(hint)
+    /*
+     * 口味过滤（F5-03）：**必须在"交给模型之前"排掉**，而不是拿到结果再删。
+     * 拿到结果再删的话模型已经推荐了那道菜、理由也写好了，删掉之后用户看到的是
+     * "少了几个"（它可能还会说"我给你挑了 5 道"而屏幕上是 3 道）；
+     * 而排掉的菜它压根没见过，"别推荐这些"就不需要靠提示词去求它。
+     */
+    const candidates = await this.candidates(hint, await this.tasteProfiles(userId))
     if (candidates.length === 0) {
       // 库里一道菜都没有时让模型"从候选里挑"只会得到编造结果，直接说清楚
       return { picks: [], hint, candidates: 0 }
@@ -314,7 +323,7 @@ export class AiService {
     config: AiConfig,
     userId: string,
     messages: ChatMessage[],
-    context: { meal: string | null; note: string; summary: string; familyId: string | null },
+    context: { meal: string | null; note: string; summary: string; familyId: string | null; taste: string | null },
     signal?: AbortSignal,
   ): AsyncGenerator<ChatEvent> {
     const systemPrompt = [
@@ -356,6 +365,19 @@ export class AiService {
         + '所以只能在他明确说出要改到哪个状态时调，不确定就先问他；'
         + `- 常用组合：${TOOL_READ_COMBOS} 看、${TOOL_CREATE_COMBO} / ${TOOL_UPDATE_COMBO} / ${TOOL_DELETE_COMBO} / ${TOOL_ADD_COMBO_TO_MEAL} 改；`
         + `- 再点一次（照抄某一餐到另一天）：${TOOL_REPEAT_MEAL}。`,
+      /*
+       * 口味档案（F8-01/02）。**每一轮都带**（用户 2026-10-12 的原话：
+       * 「后续每一轮对话都必须带上这些数据」）——不是"要推荐时才带"：
+       * 用户可能在任何一句话里问"这个我能吃吗"，而模型必须当场就知道
+       * 家里有谁对什么过敏。带的是 `tasteText(context.taste)` 那份人话摘要。
+       */
+      context.taste
+        ? `这家人的口味与忌口（**每句话都要照着它**，推菜时绝不能挑有人过敏的）：\n${context.taste}`
+        : '',
+      context.taste
+        ? `用户说"我不吃辣""我对花生过敏""少放盐"这类话时，用 ${TOOL_UPDATE_TASTE} 写进他自己的档案`
+          + `（${TOOL_READ_TASTE} 可以随时看清现在写了什么）。只写他说的那些，不要替他补充。`
+        : '',
       `自家菜谱也能直接改：用户口述自家做法就 ${TOOL_CREATE_RECIPE} 存进「我家的菜谱」；`
         + `改/删之前先 ${TOOL_READ_RECIPES} 看清哪道是**自己上传的**（标了「可改」的）。`
         + '库里的公共菜谱（极速数据那些）谁都改不了，用户想改就帮他新建一道自己的。'
@@ -549,6 +571,44 @@ export class AiService {
       const result = await this.actions.removeFridgeItem(userId, itemId)
       receipts.push(...result.actions)
       return toolResult({ result: result.summary, hint: '回执卡已经给用户了，他随时可以撤。' })
+    }
+
+    /*
+     * 口味与健康档案（F8-01/02）。用户 2026-10-12 明确要求"AI 对话里也能直接说，
+     * 由 AI 写进档案，不是只在设置页手填"。
+     *
+     * 读那件不写库；写的那件经 `AiActionService`（与别的 A 档一样留一条可撤的记录）——
+     * **档案改错了也要能撤**：模型可能把"微辣"听成"不吃辣"，而这一项会立刻
+     * 影响推荐过滤与点菜提醒，不比冰箱里那条轻。
+     */
+    if (call.name === TOOL_READ_TASTE) {
+      const result = await this.taste.family(userId)
+      return toolResult({
+        profiles: tasteText(result.active) ?? '（还没人写过口味档案）',
+        missing: result.missing.length ? result.missing : undefined,
+        hint: result.missing.length
+          ? `这几位还没写档案：${result.missing.join('、')}。可以在合适的时候提一句让他们去"我的 → 口味与忌口"写一下。`
+          : '全家都写过了。',
+      })
+    }
+
+    if (call.name === TOOL_UPDATE_TASTE) {
+      const patch = readTastePatch(call.arguments)
+      if (!patch) return toolResult({ error: '没解析出要改什么，请按字段再试一次' })
+      try {
+        const result = await this.actions.updateTaste(userId, patch)
+        receipts.push(...result.actions)
+        return toolResult({
+          result: result.summary,
+          hint: '回执卡已经给用户了，他随时可以撤。照着这里的结果如实回答。',
+        })
+      } catch (error) {
+        /*
+         * 校验失败（比如辣度给了 4）要**把服务端那句人话回给模型**，
+         * 而不是让它编一句"我记好了"——那会让用户以为写进去了。
+         */
+        return toolResult({ error: humanError(error) })
+      }
     }
 
     /*
@@ -862,7 +922,11 @@ export class AiService {
    * 关键词本身也修了：原来「剩饭怎么处理」这种没有标点的句子切出来是一个六字整词，
    * 库里搜不到 → 每次都落兜底。现在由 `extractKeywords` 切成二元组，能真匹配上（见那里的说明）。
    */
-  private async candidates(hint: string): Promise<CandidateDish[]> {
+  private async candidates(
+    hint: string,
+    /** 这一家填过的口味档案（空 = 没人填过，那就不过滤：见 taste.rules 文件头 ③） */
+    profiles: { userId: string; nickname: string; profile: TasteProfile }[] = [],
+  ): Promise<CandidateDish[]> {
     const keywords = extractKeywords(hint)
 
     const rows = keywords.length
@@ -891,9 +955,23 @@ export class AiService {
       }
     }
 
+    /*
+     * 口味过滤（F5-03）。放在**抽样之前**：先排掉不合适的，再从剩下的里面挑，
+     * 否则"抽了 30 道、排掉 12 道"会让每次推荐的道数忽多忽少。
+     * 池子空了也无所谓——那说明这家能吃的菜库里确实没有（比如全员对鸡蛋过敏），
+     * 上层会照实说"没挑出来"，而不是硬塞一道不能吃的。
+     */
+    const allowed = profiles.length
+      ? pool.filter((recipe) => judgeDish({
+          name: recipe.name,
+          spiciness: recipe.spiciness,
+          ingredients: readIngredientNames(recipe.ingredients),
+        }, profiles).verdict === 'ok')
+      : pool
+
     // 交给模型前**再打乱一次**：清单有序时模型明显偏爱前几条（实测它总挑清单开头那两道），
     // 顺序固定 = 推荐固定——这正是用户看到的"每次都是鱼香肉丝和素炒蘑菇"。
-    const picked = sampleList(pool, SUGGEST_CANDIDATES)
+    const picked = sampleList(allowed, SUGGEST_CANDIDATES)
 
     return picked.map((recipe) => ({
       id: recipe.id,
@@ -905,18 +983,37 @@ export class AiService {
   }
 
   /** 家庭上下文：今天/明天的安排 + 人数（让推荐与问答都贴着这个家真实的情况） */
+  /**
+   * 这家填过的口味档案（F5-03 / F3-08 的判据来源）。
+   *
+   * **只回填过的那些**（`active`）：空白档案不参与判据——"没说过"不是"没限制"，
+   * 也不是"什么都不能吃"。全员空白时返回空数组，调用方据此跳过过滤（不必自己判空）。
+   */
+  private async tasteProfiles(userId: string): Promise<{ userId: string; nickname: string; profile: TasteProfile }[]> {
+    const result = await this.taste.family(userId)
+    return result.active
+  }
+
   private async familyContext(userId: string): Promise<{
     meal: string | null
     note: string
     summary: string
     /** 这一家的 id；没有家庭时 null。**加载对话图片要用它**（附件按家庭放行） */
     familyId: string | null
+    /**
+     * 这一家人的口味与忌口（人话摘要，直接进提示词）；没人写过就是 null。
+     * **每一轮对话都带上**（用户 2026-10-12 明确要求），见提示词里的说明。
+     */
+    taste: string | null
   }> {
     const membership = await this.prisma.familyMember.findUnique({
       where: { userId },
       include: { family: { include: { members: true } } },
     })
-    if (!membership) return { meal: null, note: '', summary: '', familyId: null }
+    if (!membership) {
+      const solo = await this.taste.family(userId)
+      return { meal: null, note: '', summary: '', familyId: null, taste: tasteText(solo.active) }
+    }
 
     const now = new Date()
     const from = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
@@ -941,7 +1038,8 @@ export class AiService {
       diner ? `最近一餐按 ${diner} 人做` : '',
     ].filter(Boolean).join('，')
 
-    return { meal: null, note, summary, familyId: membership.familyId }
+    const profiles = await this.taste.family(userId)
+    return { meal: null, note, summary, familyId: membership.familyId, taste: tasteText(profiles.active) }
   }
 }
 
@@ -987,6 +1085,8 @@ function statusLabel(toolName: string): string {
   if (toolName === TOOL_UPDATE_FRIDGE_ITEM) return '正在改冰箱里那条…'
   if (toolName === TOOL_REMOVE_FRIDGE_ITEM) return '正在把那样拿出来…'
   if (toolName === TOOL_READ_PLAN) return '正在看家里这几天的安排…'
+  if (toolName === TOOL_READ_TASTE) return '正在看谁吃不了什么…'
+  if (toolName === TOOL_UPDATE_TASTE) return '正在记下你的口味…'
   // 菜单与组合（每一句都要像家里人在做事的口气，不能出现工具名与字段名）
   if (toolName === TOOL_READ_MENU) return '正在看菜单…'
   if (toolName === TOOL_ADD_MENU_ITEMS) return '正在往菜单里加菜…'
@@ -1039,6 +1139,45 @@ function readProposalIds(rawArguments: string): string[] {
   } catch {
     return []
   }
+}
+
+/**
+ * Prisma 的 `ingredients` 是 Json 列（形状不受类型系统保护），读成配料名给判据用。
+ * 脏数据一律丢掉而不是抛：一道菜谱的配料写坏了不该让整次推荐 500。
+ */
+function readIngredientNames(raw: unknown): { name: string }[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item) => (item && typeof item === 'object' && 'name' in item ? String((item as { name: unknown }).name) : ''))
+    .filter((name) => name.trim() !== '')
+    .map((name) => ({ name }))
+}
+
+/**
+ * 全家口味档案 → 人话（进提示词）。
+ *
+ * 为什么给人话而不是 JSON：模型读人话更不容易"照着字段名编"（给了 `{"allergies":["花生"]}`
+ * 它容易顺势补一个"dislikes":[] 然后开始猜）。人话里**明说哪些是硬拦**，
+ * 它才知道"花生过敏"与"不爱吃香菜"在推菜时不是一回事。
+ *
+ * 空档案返回 null（不产生"这家人没有忌口"这种话——那会让人以为查过了）。
+ */
+function tasteText(profiles: { nickname: string; profile: TasteProfile }[]): string | null {
+  if (profiles.length === 0) return null
+  const lines: string[] = []
+  for (const entry of profiles) {
+    const parts: string[] = []
+    if (entry.profile.allergies.length) parts.push(`对${entry.profile.allergies.join('、')}过敏（**绝对不能推荐含这些的菜**）`)
+    if (entry.profile.dislikes.length) parts.push(`不吃${entry.profile.dislikes.join('、')}`)
+    if (entry.profile.spicyLevel !== null) {
+      parts.push(entry.profile.spicyLevel === 0 ? '不吃辣' : `最多吃到${SPICY_LEVELS[entry.profile.spicyLevel]}`)
+    }
+    if (entry.profile.diet) parts.push(entry.profile.diet)
+    if (entry.profile.flavors.length) parts.push(`口味偏${entry.profile.flavors.join('、')}`)
+    if (entry.profile.note) parts.push(`备注：${entry.profile.note}`)
+    if (parts.length) lines.push(`- ${entry.nickname}：${parts.join('；')}`)
+  }
+  return lines.length ? lines.join('\n') : null
 }
 
 /** 月份 → 季节（给模型看的人话；它据此写"天冷了想喝汤"这类贴时令的句子） */

@@ -53,6 +53,10 @@ export const TOOL_UPDATE_COMBO = 'update_combo'
 export const TOOL_DELETE_COMBO = 'delete_combo'
 export const TOOL_ADD_COMBO_TO_MEAL = 'add_combo_to_meal'
 
+// 口味与健康档案（M8 / F8-01、F8-02）——用户 2026-10-12 明确要求"AI 对话里也能直接说"
+export const TOOL_READ_TASTE = 'read_taste'
+export const TOOL_UPDATE_TASTE = 'update_taste'
+
 /** 一次最多往冰箱里记几样（模型会一口气倒出十几条，见 D-052 的护栏） */
 export const FRIDGE_ADD_MAX = 8
 /** 一次最多往菜单里加几道（同上：模型偶尔会把整周菜单一口气倒出来） */
@@ -539,6 +543,39 @@ export const AI_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_READ_TASTE,
+      description: '读这家人的口味与忌口档案（谁吃不了辣、谁对什么过敏、谁不吃什么）。'
+        + '要推荐菜、要往菜单里加菜之前**先调它**——推荐那些有人过敏的菜是不可接受的。'
+        + '返回里也会列出"还没写档案的人"，那几位你要在合适的时候建议他们去写一下。',
+      parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_UPDATE_TASTE,
+      description: '把用户说的口味/忌口/过敏写进他自己的档案（**只会改他自己的**，不能替别人写）。'
+        + '用户说"我不吃辣""我对花生过敏""少放盐"时调它。'
+        + '`allergies` 是**食材级的词**（"花生""虾"），写进去会真的影响推荐过滤与点菜提醒，'
+        + '所以**只写他说的那些**，不要自己补充。',
+      parameters: {
+        type: 'object',
+        properties: {
+          spicyLevel: { type: 'integer', enum: [0, 1, 2, 3], description: '0 不吃辣 / 1 微辣 / 2 中辣 / 3 重辣；说"不限"就别给这个字段' },
+          allergies: { type: 'array', items: { type: 'string' }, description: '过敏原的食材名，如"花生"、"虾"' },
+          dislikes: { type: 'array', items: { type: 'string' }, description: '不爱吃的食材名，如"香菜"' },
+          flavors: { type: 'array', items: { type: 'string' }, description: '口味偏好，如"清淡"、"少盐"' },
+          diet: { type: 'string', enum: ['多吃素', '全素'], description: '荤素倾向；说"无偏好"就别给这个字段' },
+          note: { type: 'string', description: '一句备注（"医生说要少盐"）' },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
 ] as const
 
 /** 模型要求调用的一个工具（从回包里摘出来的形状） */
@@ -822,6 +859,27 @@ export function fridgeText(items: {
  * 抽出来是因为这几个工具的"取 id"部分**必须完全一样**：任何一处取错
  * （比如 trim 漏了、或把空串当有效）都是"操作了另一条"或者"操作了一条空的"。
  */
+/**
+ * 读口味档案的 patch（F8-01/02）。
+ *
+ * 返回 `Record<string, unknown>` 直接交给 `TasteService.update` 的解析器——
+ * **校验只有一份**（在 taste.rules 里）：这里再写一遍的话，"什么算合法辣度"
+ * 就会有两个说法，而 AI 与设置页走的是同一个入口，不该有两套标准。
+ * 模型给的不是对象（比如把参数写成字符串）就当"这次调用无效"。
+ */
+export function readTastePatch(rawArguments: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(rawArguments) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const body = parsed as Record<string, unknown>
+    // 一个字段都没给 = 不知道要改什么（模型应该被 READ 之后再决定）
+    if (Object.keys(body).length === 0) return null
+    return body
+  } catch {
+    return null
+  }
+}
+
 export function readIdArg(rawArguments: string, key: string): string | null {
   try {
     const parsed = JSON.parse(rawArguments) as Record<string, unknown>

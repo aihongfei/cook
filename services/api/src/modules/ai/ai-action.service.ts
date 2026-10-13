@@ -5,6 +5,8 @@ import { CombosService } from '../combos/combos.service'
 import { FavoritesService } from '../favorites/favorites.service'
 import { FridgeService } from '../fridge/fridge.service'
 import { OrdersService } from '../orders/orders.service'
+import { TasteService } from '../taste/taste.service'
+import { SPICY_LEVELS } from '../taste/taste.rules'
 import { RecipeWriteService } from '../recipes/recipe-write.service'
 import { STATUS_LABEL, dateKey, dateOnly, parseMealKey, visibleToMember } from '../orders/orders.rules'
 import { PrismaService } from '../recipes/prisma.service'
@@ -25,6 +27,7 @@ import {
   AI_ACTION_RECIPE_CREATE,
   AI_ACTION_RECIPE_REMOVE,
   AI_ACTION_RECIPE_UPDATE,
+  AI_ACTION_TASTE_UPDATE,
   describeFridgeItem,
   menuUndoTarget,
   planUndo,
@@ -34,6 +37,7 @@ import {
   type FridgeSnapshot,
   type MenuOrderSnapshot,
   type RecipeSnapshot,
+  type TasteSnapshot,
   type UndoContext,
   type UndoPlan,
 } from './ai-action.rules'
@@ -69,6 +73,7 @@ export class AiActionService {
     private readonly favorites: FavoritesService,
     // 菜单与组合同样走用户自己那套（"这一餐收不收新菜""只有自己点的能撤""canEditCombo"）
     private readonly orders: OrdersService,
+    private readonly taste: TasteService,
     private readonly combos: CombosService,
   ) {}
 
@@ -286,6 +291,24 @@ export class AiActionService {
     if (action.kind === AI_ACTION_MENU_REMOVE || action.kind === AI_ACTION_MEAL_DINERS) {
       return { entity: 'menuOrder', order: await this.menuOrderSnapshot(action.familyId, action.undoData) }
     }
+    if (action.kind === AI_ACTION_TASTE_UPDATE) {
+      // 这份档案一人一条（`userId` 唯一），按**行为人**查——不是按 targetId：
+      // 那个字段存的是 userId，但撤销要认的是"谁的档案"，直接以 actor 为准更不容易错
+      const row = await this.prisma.tasteProfile.findUnique({ where: { userId: action.actorId } })
+      return {
+        entity: 'taste',
+        taste: row
+          ? {
+            spicyLevel: row.spicyLevel,
+            flavors: readJsonTags(row.flavors),
+            diet: row.diet,
+            allergies: readJsonTags(row.allergies),
+            dislikes: readJsonTags(row.dislikes),
+            note: row.note,
+          }
+          : null,
+      }
+    }
     if (action.kind.startsWith('combo.')) {
       const row = action.targetId
         ? await this.prisma.combo.findUnique({
@@ -469,6 +492,51 @@ export class AiActionService {
    */
 
   /** AI 收藏/取消收藏一道菜。返回**动作之后的状态**，让模型能如实回话 */
+  /**
+   * 写口味与忌口档案（M8 / F8-01、F8-02；用户 2026-10-12 要求"AI 对话里也能直接说"）。
+   *
+   * **只写他自己的**（`TasteService.update(userId, ...)` 的第一个参数就是调用者）：
+   * 模型没有"替别人写"的能力，也不该有——"我对花生过敏"这件事只有本人说得准。
+   *
+   * 记一条可撤的动作：模型可能把"微辣"听成"不吃辣"，而这一项会立刻改变
+   * 推荐过滤与点菜提醒。`before` 只装 AI 真动过的那几项（不是整份档案）——
+   * 全装的话，用户之后自己补一句备注就会让撤销被误判成"他改过"而拒绝。
+   */
+  async updateTaste(userId: string, patch: Record<string, unknown>): Promise<{ summary: string; actions: AiReceipt[] }> {
+    const { familyId } = await this.requireMember(userId, '先加入家庭，才能把口味写进家里的档案')
+    const before = await this.prisma.tasteProfile.findUnique({ where: { userId } })
+
+    // 只在真正给了的字段上取旧值：没给的字段这次不动，也就不该出现在 before/after 里
+    const keys = Object.keys(patch)
+    const beforeValues: Record<string, unknown> = {}
+    for (const key of keys) {
+      beforeValues[key] = before ? (before as unknown as Record<string, unknown>)[key] ?? null : null
+    }
+
+    const updated = await this.taste.update(userId, patch)
+
+    const afterValues: Record<string, unknown> = {}
+    for (const key of keys) {
+      afterValues[key] = (updated as unknown as Record<string, unknown>)[key] ?? null
+    }
+
+    const summary = tasteSummary(updated)
+    const action = await this.prisma.aiAction.create({
+      data: {
+        familyId,
+        actorId: userId,
+        kind: AI_ACTION_TASTE_UPDATE,
+        summary,
+        undoData: { userId, before: beforeValues, after: afterValues } as unknown as Prisma.InputJsonValue,
+        targetId: userId,
+      },
+    })
+    return {
+      summary: `已记下：${summary}`,
+      actions: [{ id: action.id, kind: action.kind, summary, label: undoLabel(action.kind), target: userId }],
+    }
+  }
+
   async toggleFavorite(userId: string, recipeId: string): Promise<{ summary: string; actions: AiReceipt[]; favorited: boolean }> {
     const { familyId } = await this.requireMember(userId, '先加入家庭，才能收藏')
     /*
@@ -934,6 +1002,16 @@ export class AiActionService {
       await this.fridge.update(userId, plan.itemId, plan.item)
       return
     }
+    if (plan.op === 'updateTaste') {
+      /*
+       * 把动过的那几项写回原值。走 `TasteService.update`（用户自己那套解析与 upsert）——
+       * 但它的解析器要求"至少给一个字段"，而 `before` 里那些字段是**库里的值**，
+       * 形状一定合法（它们本来就是从库里读出来的），所以这里直接落库更稳：
+       * 再走一遍解析只会在"当年那版解析比现在宽松"时把旧值判成非法而撤不回去。
+       */
+      await this.prisma.tasteProfile.update({ where: { userId: plan.userId }, data: plan.patch })
+      return
+    }
     if (plan.op === 'deleteRecipe') {
       await this.recipes.remove(userId, plan.recipeId)
       return
@@ -1011,7 +1089,7 @@ export class AiActionService {
     })
   }
 
-  /** 这条现在长什么样（撤销要拿它核对）。`null` = 已经不在了 */
+/** 这条现在长什么样（撤销要拿它核对）。`null` = 已经不在了 */
   private async currentSnapshot(itemId: string | null): Promise<FridgeSnapshot | null> {
     if (!itemId) return null
     const row = await this.prisma.fridgeItem.findUnique({ where: { id: itemId } })
@@ -1140,4 +1218,37 @@ function favoriteRecipeId(raw: unknown): string | null {
   if (raw === null || typeof raw !== 'object') return null
   const value = (raw as { recipeId?: unknown }).recipeId
   return typeof value === 'string' && value ? value : null
+}
+
+/**
+ * Json 列读成字符串数组（脏数据当空数组而不是崩：这层读的是**历史写的档案**，
+ * 手工改库或降级回滚都可能塞进一个不是数组的值）。
+ */
+function readJsonTags(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.filter((item): item is string => typeof item === 'string') : []
+}
+
+/**
+ * 档案 → 回执卡上那行人话。
+ *
+ * 只列**这次真写下去的**内容里能一眼看懂的那几项。刻意不列全部字段（像"口味偏好"这种
+ * 一次可能六七个词）：回执卡是"它改了什么"的凭据，不是档案本身——
+ * 太长反而没人读，而「撤」就在旁边，用户可以自己点开看。
+ */
+function tasteSummary(profile: {
+  spicyLevel: number | null
+  allergies: string[]
+  dislikes: string[]
+  diet: string | null
+  flavors: string[]
+  note: string | null
+}): string {
+  const parts: string[] = []
+  if (profile.allergies.length) parts.push(`过敏：${profile.allergies.join('、')}`)
+  if (profile.dislikes.length) parts.push(`不吃：${profile.dislikes.join('、')}`)
+  if (profile.spicyLevel !== null) parts.push(profile.spicyLevel === 0 ? '不吃辣' : `辣度：最多${SPICY_LEVELS[profile.spicyLevel]}`)
+  if (profile.diet) parts.push(profile.diet)
+  if (profile.flavors.length) parts.push(`口味：${profile.flavors.join('、')}`)
+  if (profile.note) parts.push(profile.note)
+  return parts.join(' · ') || '口味档案'
 }
