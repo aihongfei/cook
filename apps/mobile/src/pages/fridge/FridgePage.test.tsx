@@ -7,6 +7,7 @@ import { apiClient } from '@/api/client'
 import { FRIDGE_ZONES, type CookableBoard, type FridgeBoard, type FridgeItem, type FridgeZone } from '@/api/fridge'
 import type { ShoppingList } from '@/api/shopping'
 import { useAuth } from '@/stores/auth'
+import { useFridgeView } from '@/stores/fridge-view'
 import FridgePage from './FridgePage'
 
 // 冰箱页（2026-10-13 信息架构改版 D-040；库存换成真数据 M6 / D-050）。要盯住的四件事：
@@ -163,6 +164,13 @@ function emptyCookable(fridge: FridgeBoard): CookableBoard {
 
 beforeEach(() => {
   localStorage.clear()
+  /*
+   * 冰箱页"看哪一格"的状态在 store 里（见 `stores/fridge-view.ts`：它必须活过路由跳转，
+   * 不然从菜谱详情返回时会跳回默认那一格）。store 是模块级的，会**跨用例留下来**——
+   * 上一个用例点了「冷冻」，下一个用例打开就还是冷冻，于是"找不到鸡蛋"。
+   * 所以每条用例开头都把它归零 = "重新打开这一页"（与用户冷启动时同一状态）。
+   */
+  useFridgeView.setState({ zone: null, recentOpen: false })
   useAuth.getState().setSession({
     token: 'test-token', refreshToken: 'test-refresh',
     user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🍳', email: null, createdAt: new Date().toISOString() },
@@ -189,7 +197,7 @@ it('主体是冰箱：空的时候说"还是空的"并指路，骨架话（"还�
   expect(screen.queryByText('食材会列在这里')).toBeNull()
 })
 
-it('有货时四个存放区都在：有东西的给样数，空的格子说"这格里没有东西"', async () => {
+it('有货时四个存放区都在段控里：有东西的给样数，空的给「空」', async () => {
   mockGet({
     fridge: fridgeBoard({
       冷藏: [stockItem({ name: '鸡蛋', amount: '一盒' })],
@@ -199,11 +207,64 @@ it('有货时四个存放区都在：有东西的给样数，空的格子说"这
   renderFridge()
 
   expect(await screen.findByText('鸡蛋')).toBeTruthy()
-  for (const zone of FRIDGE_ZONES) expect(screen.getByText(zone)).toBeTruthy()
-  expect(screen.getByText('一盒')).toBeTruthy()
-  // 空的是**确实**空（不是"还没做"）：常温、保鲜两格
-  expect(screen.getAllByText('这格里没有东西')).toHaveLength(2)
+  // 四颗段控都在（**空的那两颗也得在**，否则用户会以为家里没有"保鲜"这一格）
+  const chips = Array.from(document.querySelectorAll('.zchip')).map((node) => node.textContent)
+  expect(chips).toEqual(['常温空', '保鲜空', '冷藏1', '冷冻1'])
+  // 空的确实是空（不是"还没做"）：常温、保鲜两颗显示「空」
+  expect(screen.getAllByText('空')).toHaveLength(2)
   expect(screen.queryByText(/冰箱还是空的/)).toBeNull()
+})
+
+it('默认展开样数最多的那格（不是第一格）——"常温 2 样"会让人以为冰箱里就这么点', async () => {
+  /*
+   * 打开页面看见的那一格就是用户对"冰箱里有什么"的全部印象，
+   * 所以默认给信息量最大的那格（样数最多；并列取 `FRIDGE_ZONES` 靠前的）。
+   */
+  mockGet({
+    fridge: fridgeBoard({
+      常温: [stockItem({ name: '土豆', zone: '常温' })],
+      冷藏: [stockItem({ name: '鸡蛋' }), stockItem({ name: '牛奶' }), stockItem({ name: '白菜' })],
+    }),
+  })
+  renderFridge()
+
+  expect(await screen.findByText('鸡蛋')).toBeTruthy()
+  // 冷藏是样数最多的那格 → 它选中，且它那三样都画出来
+  expect(document.querySelector('.zchip.is-on')?.textContent).toBe('冷藏3')
+  // 常温只有 1 样，不该占着展开位
+  expect(screen.queryByText('土豆')).toBeNull()
+})
+
+it('点段控切到别的区：那一格的东西换过来，选中的那颗也换过来', async () => {
+  mockGet({
+    fridge: fridgeBoard({
+      常温: [stockItem({ name: '土豆', zone: '常温' })],
+      冷藏: [stockItem({ name: '鸡蛋' }), stockItem({ name: '牛奶' })],
+    }),
+  })
+  renderFridge()
+
+  expect(await screen.findByText('鸡蛋')).toBeTruthy()
+  ;(screen.getByRole('button', { name: /常温/ })).click()
+
+  expect(await screen.findByText('土豆')).toBeTruthy()
+  expect(screen.queryByText('鸡蛋')).toBeNull()
+  expect(document.querySelector('.zchip.is-on')?.textContent).toBe('常温1')
+})
+
+it('点空格子不报错，并且说清那一格确实是空的', async () => {
+  /*
+   * 段控把空格子显示成「空」而不是藏起来，所以它必须**点得动**——
+   * 不然它就是个只会变灰、点了没反应的死按钮。
+   */
+  mockGet({ fridge: fridgeBoard({ 冷藏: [stockItem({ name: '鸡蛋' })] }) })
+  renderFridge()
+
+  expect(await screen.findByText('鸡蛋')).toBeTruthy()
+  ;(screen.getByRole('button', { name: /冷冻/ })).click()
+
+  expect(await screen.findByText('冷冻格里没有东西。')).toBeTruthy()
+  expect(screen.queryByText('鸡蛋')).toBeNull()
 })
 
 it('顺序照接口给的（后端已按"临期先看"排好，前端不再排一遍）', async () => {

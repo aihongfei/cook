@@ -142,16 +142,16 @@ it('"不用买"与"还差几样"分开说，且差的**列名字**（不只是�
   renderCookable()
 
   // 不用买的那道：徽章说"不用买"，且**不说**"还差"
-  const ready = (await screen.findByText('蒸蛋')).closest('.cook__item') as HTMLElement
-  expect(ready.querySelector('.cook__badge')?.textContent).toBe('不用买')
-  expect(ready.querySelector('.cook__missing')).toBeNull()
+  const ready = (await screen.findByText('蒸蛋')).closest('.cook__card') as HTMLElement
+  expect(ready.querySelector('.cook__card-badge')?.textContent).toBe('不用买')
+  expect(ready.querySelector('.cook__card-missing')).toBeNull()
 
   // 差一样的那道：列的是**名字**（"番茄"），不是"差 1 样"
-  const almost = screen.getByText('番茄炒蛋').closest('.cook__item') as HTMLElement
-  expect(almost.querySelector('.cook__missing')?.textContent).toContain('番茄')
-  expect(almost.querySelector('.cook__badge')?.textContent).toBe('差 1 样')
+  const almost = screen.getByText('番茄炒蛋').closest('.cook__card') as HTMLElement
+  expect(almost.querySelector('.cook__card-missing')?.textContent).toContain('番茄')
+  expect(almost.querySelector('.cook__card-badge')?.textContent).toBe('差 1 样')
   // 两行"用上了什么"都要在（这是他最想看到的功劳）
-  expect(ready.querySelector('.cook__have')?.textContent).toContain('鸡蛋')
+  expect(ready.querySelector('.cook__card-have')?.textContent).toContain('鸡蛋')
 })
 
 it('调料不算，但**要把跳过的样数说出来**（不说用户会以为功能漏了东西）', async () => {
@@ -401,4 +401,49 @@ it('"还有 N 道"只在真有更多时说（与榜单那条同一规矩：不�
 
   expect(await screen.findByText(/还有 19 道能做/)).toBeTruthy()
   expect(screen.queryByText(/看全部/)).toBeNull()
+})
+
+it('B 方案：横滑条上只摆 5 道，多出来的由末尾那块说清（不再竖排 12 道）', async () => {
+  /*
+   * 这条钉住降高的那一刀（D-063）：竖排 12 道 = 694px，把整块推到首屏之外。
+   * 现在只摆 5 道，剩下的说"还有 N 道能做"。**数量不能悄悄变**：
+   * "还有 N 道"里的 N 必须是 total 减去**真的摆出来的那几道**，
+   * 否则用户看到 5 道卡 + "还有 15 道"，加起来 20 对得上，但若哪天改成只摆 3 道
+   * 而 N 还按 5 算，就会凭空少掉 2 道菜——所以这里按实际渲染的卡数算。
+   */
+  mockGet({
+    cookable: cookableBoard({
+      pantry: ['鸡蛋'], usable: 1, total: 20,
+      items: Array.from({ length: 8 }, (_, i) =>
+        dish({ id: `r${i}`, name: `菜${i}`, have: ['鸡蛋'] }),
+      ),
+    }),
+  })
+  renderCookable()
+
+  expect(await screen.findByText('菜0')).toBeTruthy()
+  await waitFor(() => expect(document.querySelectorAll('.cook__card-link')).toHaveLength(5))
+  // 5 道摆出来 + 还有 15 道 = 20（算式对得上）
+  expect(screen.getByText('还有 15 道能做')).toBeTruthy()
+  // 第 6 道（菜5）不摆
+  expect(screen.queryByText('菜5')).toBeNull()
+})
+
+it('B 方案：盘子（末尾那块"还有 N 道"）**不是链接**——没有"看全部"那个页面', async () => {
+  /*
+   * 它看着像一张卡，所以最容易被顺手做成 `<Link>`。但菜谱大全里没有"冰箱能做的全部"
+   * 这个筛选视图，点了就等于给死路（与 FamilyPicks 那条同一规矩）。
+   * 所以用 closest('a') 断言它不在任何链接里。
+   */
+  mockGet({
+    cookable: cookableBoard({
+      pantry: ['鸡蛋'], usable: 1, total: 20,
+      items: [dish({ id: 'r1', name: '蒸蛋', have: ['鸡蛋'] })],
+    }),
+  })
+  renderCookable()
+
+  const more = (await screen.findByText(/还有 19 道能做/)).closest('.cook__card--more') as HTMLElement
+  expect(more).toBeTruthy()
+  expect(more.closest('a')).toBeNull()
 })

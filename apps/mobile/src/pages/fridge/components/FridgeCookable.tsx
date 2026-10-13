@@ -12,7 +12,7 @@ import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
  * - F5-04："我今天就想用手边这几样"——给一个「挑几样」，勾自己想用的。
  * 默认是不勾（= 整个冰箱），因为那是用户 90% 时候想问的。
  *
- * 四件事刻意的：
+ * 五件刻意的：
  *
  * ① **"不用买就能做"与"还差一样"必须分开说**，而且差的**列名字**。它们对用户是两件完全不同的事：
  *    前者是"现在就能下厨"，后者是"顺路买一样就行"。混在一起报一个数字，用户还得点进去才知道要不要出门。
@@ -28,38 +28,43 @@ import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
  * ④ **口味挡掉的菜要说出来**（F5-03）。有人过敏被排掉的菜不能默默消失——不说的话，
  *    用户会以为"我冰箱里这些东西就只能做这么几道"，而其实是家里的档案在起作用。
  *
- * 不做"看全部"入口：这一块给的是"够决定今晚做什么"的一屏（默认 12 道），
- * 列表页是菜谱大全的事（与 FamilyPicks 那条"没有全部榜单就不编入口"同一规矩）。
+ * ⑤ **菜横着摆，不竖着列**（B 方案，见 D-063）。竖着列 12 道要 694px，把这一块整个推到
+ *    首屏之外（打开冰箱页只看得见"冰箱里有什么"）。现在是一条横滑卡：一屏 2 张整卡 +
+ *    第 3 张露出个边（**露出本身就是"还能滑"的信号**），只占 259px。
+ *    仍然只给 5 道 + 末尾一块「还有 N 道能做」——"够决定今晚做什么"的量没有变，
+ *    只是从"往下翻"换成"往右翻"。同样**不编"看全部"入口**（没有那个页面）。
  */
-function DishRow({ dish, from }: { dish: CookableDish; from: string }) {
+/** 横滑条上摆几道（够决定今晚做什么；剩下的由末尾那块说清有多少） */
+const STRIP_MAX = 5
+
+function DishCard({ dish, from }: { dish: CookableDish; from: string }) {
   const ready = dish.missing.length === 0
   return (
-    <li className="cook__item">
+    <li className="cook__card">
       <Link
-        className="cook__link"
+        className="cook__card-link"
         to={`/recipes/${encodeURIComponent(dish.id)}`}
         state={{ from }}
         aria-label={`查看${dish.name}菜谱`}
       >
-        <span className="cook__pic">
+        <span className="cook__card-pic">
           <RecipeImage src={dish.image} name={dish.name} />
-        </span>
-        <span className="cook__body">
-          <span className="cook__name">{dish.name}</span>
           {/*
-           * 两行都是"具体哪几样"，不是数字：
-           * 第一行说用掉了冰箱里的什么（这是他最想看到的功劳），第二行说还差什么。
+           * 徽章压在图左上角（原来占的是宽度：一行 327px 里那个"不用买"要吃掉 60px）。
+           * 它仍然只在**两件确定的事**上出现：能直接做 / 差几样。
            */}
-          <span className="cook__have">用上了 {dish.have.join('、')}</span>
-          {!ready && <span className="cook__missing">还差 {dish.missing.join('、')}</span>}
+          <span className={['cook__card-badge', ready && 'is-ready'].filter(Boolean).join(' ')}>
+            {ready ? '不用买' : `差 ${dish.missingCount} 样`}
+          </span>
         </span>
+        {/* 菜名最多两行：横滑卡宽 128px，不限的话「超级下饭的番茄炒蛋.西红柿炒鸡蛋」能撑到三行 */}
+        <span className="cook__card-name">{dish.name}</span>
         {/*
-         * 状态徽章只在**两件确定的事**上出现：能直接做 / 差几样。
-         * "不用买"是这一整块唯一敢下的结论（见 pantry.rules 文件头 ③）。
+         * 两行都是"具体哪几样"，不是数字：
+         * 第一行说用掉了冰箱里的什么（这是他最想看到的功劳），第二行说还差什么。
          */}
-        <span className={['cook__badge', ready && 'is-ready'].filter(Boolean).join(' ')}>
-          {ready ? '不用买' : `差 ${dish.missingCount} 样`}
-        </span>
+        <span className="cook__card-have">用上了 {dish.have.join('、')}</span>
+        {!ready && <span className="cook__card-missing">还差 {dish.missing.join('、')}</span>}
       </Link>
     </li>
   )
@@ -269,16 +274,22 @@ export default function FridgeCookable({ enabled }: { enabled: boolean }) {
       )}
 
       {dishes.length > 0 && (
-        <ul className="cook__list">
-          {dishes.map((dish) => (
-            <DishRow key={dish.id} dish={dish} from="/fridge" />
+        <ul className="cook__cards">
+          {dishes.slice(0, STRIP_MAX).map((dish) => (
+            <DishCard key={dish.id} dish={dish} from="/fridge" />
           ))}
+          {/*
+           * 横滑条的终点：只说"还有多少"，**不给入口**——没有"看全部"那个页面，
+           * 编一个点了没用的入口等于给死路（与 FamilyPicks 那条同一规矩）。
+           * 所以它不是一个链接，样式上也刻意是虚线的（看着就不像一道菜）。
+           */}
+          {data && data.total > Math.min(dishes.length, STRIP_MAX) && (
+            <li className="cook__card cook__card--more">
+              <span className="cook__card-more-arrow" aria-hidden>›</span>
+              <span className="cook__card-more-text">还有 {data.total - Math.min(dishes.length, STRIP_MAX)} 道能做</span>
+            </li>
+          )}
         </ul>
-      )}
-
-      {/* 只说"还有更多"，不给"看全部"——没有那个页面，编一个入口等于给死路（同 FamilyPicks） */}
-      {data && data.total > dishes.length && (
-        <p className="cook__more-line">还有 {data.total - dishes.length} 道能做，先把眼前这几道做了。</p>
       )}
     </section>
   )

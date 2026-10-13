@@ -157,42 +157,83 @@
   color: var(--color-ink-3);
 }
 
-/* 四个存放区（F6-04）：两列格子，每格列出该区的食材 */
-.stock__zones {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
-  margin-top: 11px;
+/* ---------------------------------------------------------------
+ * 四个存放区（F6-04）—— B 方案：一行段控 + 选中那格全宽两列（D-063）
+ *
+ * 改前是 2×2 铺开。它的问题是**空格子会跟着同行那一格一起高**：
+ * 实测「保鲜」「冷冻」两格各占 136 / 492px 只为说一句"这格里没有东西"，
+ * 整块 791px，把下面"能做点什么"顶到 y=969（首屏只有 768px）。
+ *
+ * 现在：一行段控（四颗都在，空的那颗虚线灰显 + 一个「空」字——**不能因为空就不显示**，
+ * 不然用户会以为家里没有"保鲜"这一格），下面只画选中那一格，全宽两列。
+ *
+ * 这一处也是**将来 3D 冰箱（F17-02）要占的位置**：3D 占位块 205px、
+ * 与段控共用同一份选中状态（点 3D 里的某一层 = 点上面那颗区）。
+ * 接上 3D 那天这格只长 49px（列表 156 → 3D 205），页面结构不用动。
+ * --------------------------------------------------------------- */
+.zchips {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
+  /* 四颗在 391px 宽下必须一屏放下；360px 时允许横滑，不挤成两行 */
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
-.stock__zone {
+.zchip {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 11px;
-  background: rgb(255 255 255 / 55%);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-tile);
-}
-
-.stock__zone-name {
-  display: flex;
+  flex: 0 0 auto;
   gap: 5px;
   align-items: center;
-  font-size: 13px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
   color: var(--color-ink-2);
-}
-
-.stock__zone-count {
-  padding: 0 5px;
-  font-size: 10px;
-  color: #fff;
-  background: var(--color-brand);
+  cursor: pointer;
+  background: rgb(255 255 255 / 70%);
+  border: 1px solid var(--color-line);
   border-radius: 999px;
 }
 
-.stock__zone-slot {
+/* 选中 = 实心 brand（与「挑几样」「只看不用买的」同一套语汇：开就是橙） */
+.zchip.is-on {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+/* 空的那一格：虚线 + 灰字，看着就知道"这一格今天没东西"，但点得动 */
+.zchip.is-empty {
+  color: var(--color-ink-3);
+  border-style: dashed;
+}
+
+.zchip__count {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.zchip__none {
   font-size: 10.5px;
+  opacity: 0.7;
+}
+
+.zpanel {
+  margin-top: 9px;
+  padding: 9px 10px;
+  background: rgb(255 255 255 / 55%);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+}
+
+.zpanel__empty {
+  margin: 0;
+  font-size: 11px;
   color: var(--color-ink-3);
 }
 
@@ -212,12 +253,22 @@
   list-style: none;
 }
 
+/*
+ * 选中那格里的两列（10 样排 5 行，比竖排省一半高度）。
+ * 单列是 `gap: 2px`，两列时列间距给 10px：竖着看是两列，横着看每一行也得有边界。
+ */
+.fitem-list--2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px 10px;
+}
+
 .fitem__main {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   width: 100%;
-  padding: 5px 4px;
+  padding: 3px 2px;
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -230,13 +281,17 @@
   background: rgb(224 123 57 / 8%);
 }
 
+/*
+ * 图 26px（原 32）：行高由 42/46 收到 32/37 —— 两列一屏能装下 10 样。
+ * **点得中的是整行**（`.fitem__main` 铺满，行高 32+），图本身是装饰，可以小。
+ */
 .fitem__pic {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
 }
 
 .fitem__pic img {
@@ -247,7 +302,7 @@
 
 /* 没有对应图的食材（用户自己打的字）：中性占位，不假装知道那是什么 */
 .fitem__pic-none {
-  font-size: 18px;
+  font-size: 16px;
   opacity: 0.45;
 }
 
@@ -260,13 +315,31 @@
 
 .fitem__name {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: baseline;
-  font-size: 13px;
+  min-width: 0;
+  font-size: 12.5px;
+  /* 显式给行高：不给就是浏览器默认 1.6（20px），一行多 3px，两列五行就多 15px */
+  line-height: 1.35;
   color: var(--color-ink);
 }
 
+/*
+ * 名字最多两行、超出省略号。两列布局一格文字宽只有 ~146px，
+ * 一个长名字（"西兰花（上周买的，掰开有点发黄）"）不限的话能撑到三行，
+ * 把那一行从 36px 顶到 75px——**一个用户随手打的备注不该决定整页高度**。
+ * 数量跟在名字外面，不受截断影响。
+ */
+.fitem__name-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .fitem__amount {
+  flex: 0 0 auto;
   font-size: 11px;
   color: var(--color-ink-3);
 }
@@ -275,7 +348,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 10.5px;
+  font-size: 10px;
+  line-height: 1.35;
   color: var(--color-ink-3);
 }
 
@@ -832,101 +906,149 @@
   color: var(--color-ink-3);
 }
 
-.cook__list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 10px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.cook__link {
+/*
+ * 菜在一条横滑卡上（B 方案，D-063）。改前是竖排列表：12 道 × 56px = 694px，
+ * 把这一块整个推到首屏外面（打开冰箱页只看得见"冰箱里有什么"）。
+ *
+ * 横滑必须**看得出来还能滑**：容器右内边距为 0，第 3 张卡只露出 57px 的边
+ * （实测 331px 容器放得下 2 张整卡 + 这一条边）——那个"露边的卡"就是唯一的信号，
+ * 所以卡不能缩到刚好放下两张。
+ */
+.cook__cards {
   display: flex;
   gap: 9px;
-  align-items: center;
-  width: 100%;
-  padding: 6px 4px;
-  text-decoration: none;
-  border-radius: 10px;
+  margin: 9px 0 0;
+  padding: 0 0 2px;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
-.cook__link:active {
+.cook__card {
+  flex: 0 0 auto;
+  width: 128px;
+}
+
+.cook__card-link {
+  display: block;
+  padding: 6px 6px 7px;
+  text-decoration: none;
+  background: rgb(255 255 255 / 70%);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+}
+
+.cook__card-link:active {
   background: rgb(224 123 57 / 8%);
 }
 
-.cook__pic {
-  flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
+/* 图 88px 高：卡整体约 150px，是"看得清是道什么菜"与"别占高度"之间的取舍 */
+.cook__card-pic {
+  position: relative;
+  display: block;
+  height: 88px;
   overflow: hidden;
-  border-radius: 10px;
+  background: var(--color-cream-2);
+  border-radius: 9px;
 }
 
-.cook__pic img,
-.cook__pic .recipe-image-placeholder {
+.cook__card-pic img,
+.cook__card-pic .recipe-image-placeholder {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.cook__body {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
+/*
+ * 徽章压在图左上角。改前它占的是**宽度**（一行 327px 里"不用买"吃掉 60px），
+ * 而横滑卡一共才 128px 宽——放不下任何横向的东西。
+ */
+.cook__card-badge {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  padding: 2px 6px;
+  font-size: 9.5px;
+  color: var(--color-ink-3);
+  background: rgb(255 251 242 / 92%);
+  border-radius: 999px;
 }
 
-.cook__name {
-  overflow: hidden;
-  font-size: 13.5px;
+/* 「不用买」用调色板里那块暖绿（sage）：全站唯一的"可以做"信号（与改前同一口径） */
+.cook__card-badge.is-ready {
   color: var(--color-ink);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  background: var(--color-sage);
 }
 
-/* "用上了什么"是**背景信息**（用掉冰箱里的东西是好事，但用户不必为它做什么），
- * 所以压成次要色；"还差什么"要他去买，用这一页已有的提醒色（与 .stock__soon-summary 一致）。
- * 两行的轻重是有意的：该行动的那一行更响。 */
-.cook__have {
+/* 名字最多两行：卡宽 128px，"超级下饭的番茄炒蛋.西红柿炒鸡蛋"不限的话能撑到三行 */
+.cook__card-name {
+  display: -webkit-box;
   overflow: hidden;
-  font-size: 11px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--color-ink);
+}
+
+/* 一行省略号：这一格是背景信息（用掉了冰箱里的什么），不必读完 */
+.cook__card-have {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 10px;
   color: var(--color-ink-2);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.cook__missing {
+/* "还差什么"要用他去买，所以用这一页已有的提醒色（与改前的 .cook__missing 一致） */
+.cook__card-missing {
+  display: block;
   overflow: hidden;
-  font-size: 11px;
+  font-size: 10px;
   color: #a8542a;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 「不用买」是这一整块唯一敢下的结论，所以要显眼；「差 N 样」是次要信息 */
-.cook__badge {
-  flex: 0 0 auto;
-  padding: 3px 8px;
-  font-size: 10.5px;
-  color: var(--color-ink-3);
-  background: var(--color-cream-2);
-  border-radius: 999px;
+/*
+ * 横滑条的终点：「还有 N 道能做」。
+ * **不是链接**——没有"看全部"那个页面，编一个点了没用的入口等于给死路（同 FamilyPicks）。
+ * 虚线 + 居中，看着就不像一道菜（否则用户会去点它，然后什么都不会发生）。
+ */
+.cook__card--more {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  padding: 0 8px;
+  text-align: center;
+  background: none;
+  border: 1px dashed var(--color-line);
+  border-radius: 14px;
 }
 
-/* 「不用买」用调色板里那块暖绿（sage）：全站唯一的"可以做"信号，
- * 而它是水粉淡色 + 深墨字——不喊，但一眼看得出来与旁边那些灰徽章不同 */
-.cook__badge.is-ready {
-  color: var(--color-ink);
-  background: var(--color-sage);
+.cook__card-more-arrow {
+  font-size: 15px;
+  color: var(--color-brand);
 }
 
-.cook__more-line {
-  margin: 10px 0 0;
-  font-size: 11px;
-  color: var(--color-ink-3);
+.cook__card-more-text {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--color-brand);
 }
+
+/* B 方案：原来那段"还有 N 道能做，先把眼前这几道做了"从竖排列表下面**搬进了横滑条末尾**
+ * （见 .cook__card--more），`.cook__more-line` 已无引用，随之下线。 */
 
 /* ---------------------------------------------------------------
  * 最近录入（M6 / F6-06，D-062）
@@ -937,8 +1059,9 @@
  * 虚线上边框 + 圆形箭头 + 180° 旋转过渡。
  * --------------------------------------------------------------- */
 .recent {
-  margin-top: 12px;
-  padding-top: 10px;
+  /* 12/10 → 10/8：与 B 预览一致（四区收成段控之后，这一条线离上面那格也该近一点） */
+  margin-top: 10px;
+  padding-top: 8px;
   border-top: 1px dashed var(--color-line);
 }
 
@@ -948,7 +1071,8 @@
   justify-content: space-between;
   width: 100%;
   gap: 8px;
-  padding: 7px 2px;
+  /* 内边距 7 → 5：它是一条"可展开的线"，不是按钮本体（行高仍 41px，点得中） */
+  padding: 5px 2px;
   font: inherit;
   font-size: 12.5px;
   color: var(--color-ink-2);
