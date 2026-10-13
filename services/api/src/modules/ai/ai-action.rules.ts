@@ -149,6 +149,15 @@ export interface RecipeRemoveUndo {
     familyId: string | null
     createdById: string | null
     searchText: string
+    /*
+     * 配图（F1-12 的"给自己家的菜配张图"）。**必须一起带走**——否则用户传了照片的菜
+     * 被 AI 删掉再撤回来，照片就没了（那是他自己拍/挑的，重建不出来）。
+     * 可选是因为这四列在"从没配过图"的菜上都是空的，老记录里也没有这几个键。
+     */
+    image?: string | null
+    imageKey?: string | null
+    imageHash?: string | null
+    imageStoredAt?: string | null
   }
 }
 /** 撤「收藏」= 反过来（收了就取消，取消了就再收上） */

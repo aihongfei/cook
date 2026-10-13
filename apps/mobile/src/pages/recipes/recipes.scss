@@ -144,17 +144,32 @@
   img { display: block; width: 100%; height: 100%; object-fit: cover; }
 }
 
+/*
+ * 标题块（菜名 / 来源 / 标签 / 热量辣度 / 三个动作）。
+ *
+ * 用**列向 flex + 一个 gap** 统一下间距，而不是给每一块各写一套 margin：
+ * 各写一套的结果是"热量那行上面 0px、下面 14px"这种明显不匀的样子
+ * （实测：菜名→来源 12、来源→标签 10、标签→热量 0、热量→动作 14）——
+ * 用户 2026-10-13 指的正是这里。gap 一处说了算，改动时也不会再分叉。
+ */
 .recipe-detail__heading {
-  padding: 8px 4px;
+  display: flex;
+  flex-direction: column;
+  /* 上边距是"图片 → 菜名"的距离（原先是 padding 8 + h1 margin 16 = 24） */
+  padding: 24px 4px 8px;
+  gap: 12px;
 
-  h1 { margin: 16px 0 12px; font-size: 25px; line-height: 1.4; }
-  p { font-size: 13px; line-height: 1.6; color: var(--color-ink-3); }
+  /* 块的间距全归 gap：子元素自己的 margin 一律归零，免得两套一起生效又变成不匀 */
+  h1 { margin: 0; font-size: 25px; line-height: 1.4; }
+  p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--color-ink-3); }
 }
 
 .recipe-detail__tags {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+  /* 同样归父级的 gap（原先这行上下都是 0，紧跟其后的"热量 · 辣度"就贴着它） */
+  margin: 0;
 
   span { padding: 6px 10px; font-size: 12px; color: #856043; background: #f2e3c7; border: 1px solid var(--color-line); border-radius: 999px; }
 }
@@ -236,7 +251,8 @@
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin: 0 0 10px;
+  /* 上下的间距由父级的 gap 统一给（见 `.recipe-detail__heading`） */
+  margin: 0;
   font-size: 12px;
   color: var(--color-ink-3);
 }
@@ -254,7 +270,8 @@
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin-top: 14px;
+  /* 与上面几块的间距同样归父级的 gap */
+  margin-top: 0;
 
   .recipe-button { margin-top: 0; }
 }
@@ -303,6 +320,27 @@
   color: var(--color-ink-3);
 }
 
+/*
+ * 这一页的横向栏距要补在这里：页头、返回键、「新建菜谱」那一行各自带了 `padding/margin`，
+ * 而**网格与状态块是页面级的块，自己不带**——不在 `.recipes-page` 里（那页有容器 padding），
+ * 本页用的 `.pscreen` 只有上边距。结果就是卡片左右贴着屏幕边缘（用户 2026-10-13：
+ * 「左右因为没有间隔，都需要优化」）。补在网格这一层，卡片的尺寸与别页保持一致。
+ *
+ * 上边距同理：网格紧跟在「新建菜谱」那一行后面时是贴着的（用户 2026-10-13 第二次反馈）。
+ */
+.my-recipes .recipes-grid,
+.my-recipes .recipe-status {
+  margin: 16px var(--spacing-page) 0;
+}
+
+@media (min-width: 560px) {
+  /* 宽屏下两列卡片会被拉得很宽，限制一下单张卡的宽度（与别页的 760px 容器同口径） */
+  .my-recipes .recipes-grid {
+    max-width: 760px;
+    margin-inline: auto;
+  }
+}
+
 .my-recipes__empty {
   display: flex;
   flex-direction: column;
@@ -337,7 +375,10 @@
   gap: 6px;
   margin-top: 14px;
 
-  > span { font-size: 12px; color: var(--color-ink-2); }
+  /* 字段名。`label` 与 `span` 都要盖到：`SuggestField` 里的那一格用了 `label`（显式 htmlFor 关联），
+     其余几格还是 `span`（整格包在 label 里）——两者长得必须一样 */
+  > span,
+  > label { font-size: 12px; color: var(--color-ink-2); }
 }
 
 /*
@@ -369,16 +410,126 @@
   box-shadow: var(--shadow-focus);
 }
 
-/* 品类/菜系并排：它们都是两三个字的短词，各占一行会白白拉长表单 */
+/*
+ * 品类/菜系。
+ *
+ * **曾经是并排两列**（"都是两三个字的短词，各占一行会白白拉长表单"），
+ * 加了建议词之后不成立了：半屏宽只有 159px，一列 7 个词要排 3 行、另一列 12 个词排 5 行，
+ * 两列高度差出一大截（实测 102 vs 174），中间那片空白比省下来的还多。
+ * 各占一行给足横向空间之后，两列都只要 2 行。
+ */
 .recipe-form__row {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 0;
 }
 
-.recipe-form__row .recipe-form__field {
+/*
+ * 建议词（`SuggestField`）：一排能点的小词。它们**不是**必选枚举——
+ * 后端不收固定枚举，家里祖传的那道菜想算什么菜系就算什么，所以输入框照样能自己写，
+ * 这里只是把"最可能的那几个"摆在手边（见该组件的文件头）。
+ */
+.recipe-form__suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.recipe-form__suggest-item {
+  padding: 5px 11px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  background: var(--color-cream-2);
+  border: 1px dashed var(--color-line);
+  border-radius: 999px;
+}
+
+.recipe-form__suggest-item.is-active {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+  border-style: solid;
+}
+
+.recipe-form__suggest-item:active {
+  opacity: 0.8;
+}
+
+/*
+ * 配图那一格：左边一张预览、右边两个动作。
+ *
+ * 预览框与详情页的大图用同一个圆角口径（`border-radius: 24px 20px 28px 18px`，
+ * 手绘风的"手裁纸边"），这样在表单里看到的构图与存好之后一致。
+ */
+.recipe-form__photo {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.recipe-form__photo-frame {
+  flex: 0 0 116px;
+  height: 92px;
+  overflow: hidden;
+  background: var(--color-cream-2);
+  border: 1.5px solid var(--color-line);
+  border-radius: 14px 12px 16px 11px;
+
+  img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  /* 缺图占位（RecipeImage）在这个小框里要跟着缩，别把碗盘画到框外 */
+  .recipe-image-placeholder span { font-size: 10px; }
+}
+
+.recipe-form__photo-actions {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 8px;
   min-width: 0;
-  margin-top: 14px;
+}
+
+/* 「选一张图 / 换一张」——它是 label，点它等于点那个隐藏的 file input */
+.recipe-form__photo-pick {
+  padding: 9px 14px;
+  font-size: 13px;
+  color: #ab5527;
+  text-align: center;
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1px solid #de9057;
+  border-radius: 999px;
+}
+
+.recipe-form__photo-pick:active {
+  opacity: 0.85;
+}
+
+/*
+ * 隐藏原生 file 控件，但**不能用 `display: none`**：那样在一些安卓 WebView 上
+ * 点 label 不触发选择器。用 1px + 裁剪把它留在布局里，可聚焦、可点。
+ */
+.recipe-form__photo-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
+}
+
+.recipe-form__photo-drop {
+  padding: 7px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+  background: none;
+  border: 1px dashed var(--color-line);
+  border-radius: 999px;
 }
 
 /* 配料行：名字（宽）+ 用量（窄）+ 删除键，可以换行不横滚——横滚会让删除键藏到屏幕外 */

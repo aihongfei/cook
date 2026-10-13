@@ -447,6 +447,11 @@ export class AiActionService {
             familyId: row.familyId,
             createdById: row.createdById,
             searchText: row.searchText,
+            // 配图一起带走：撤回来照片还得在（那是用户自己拍/挑的，重建不出来）
+            image: row.image,
+            imageKey: row.imageKey,
+            imageHash: row.imageHash,
+            imageStoredAt: row.imageStoredAt?.toISOString() ?? null,
           },
         } as unknown as Prisma.InputJsonValue,
         targetId: recipeId,

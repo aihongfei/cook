@@ -40,7 +40,12 @@ export interface RecipeIngredientDraft {
   amount: string
 }
 
-/** 一份自建菜谱的可写字段（创建与更新共用） */
+/**
+ * 一份自建菜谱的可写字段（创建与更新共用）。
+ *
+ * `image` 是 dataURL（前端已缩过图），**不在这个接口里**：它会被换成对象存储的地址与
+ * key 再落库（见 `recipe-write.service` 的 `storeImage`），所以它是**请求字段、不是存储字段**。
+ */
 export interface RecipeDraft {
   name: string
   category: string
@@ -54,22 +59,44 @@ export interface RecipeDraft {
 }
 
 /**
- * 判断这条菜谱能不能被"这个家"改/删。
+ * 判断这条菜谱能不能被"这个家/这个人"改/删。
  *
- * `null` familyId = 全局库 → 一律不许（见文件头）。
- * 两家人的自建菜谱互相也看不见、更不许改：`familyId` 必须**完全相等**。
+ * 三种情况，判据都在这里（**别处不许再写一遍**：两处各判一次必然分叉，
+ * 一处放行一处拦截——"能不能改"与"界面上画不画编辑键"必须同一个来源）：
+ *
+ * - **全局库**（`familyId` 为空、`createdById` 也为空）：导入器抓来的，一律不许改；
+ * - **个人菜谱**（`familyId` 为空、`createdById` 是某人）：一个人还没建家庭时先记下的，
+ *   只归他自己——**只有他能改**；
+ * - **家庭菜谱**（`familyId` 有值）：`familyId` 必须**完全相等**（别人家的看不见、也改不了）。
  */
 export function canWriteRecipe(
-  recipe: { familyId: string | null },
-  actor: { familyId: string | null },
+  recipe: { familyId: string | null; createdById: string | null },
+  actor: { userId: string; familyId: string | null },
 ): boolean {
-  if (!recipe.familyId) return false
+  if (!recipe.familyId) return recipe.createdById !== null && recipe.createdById === actor.userId
   return recipe.familyId === actor.familyId
 }
 
+/**
+ * 谁能**看见**这条菜谱（列表与详情共用；详情不做这一步就是经典的越权口子）。
+ *
+ * - 全局库（两个归属字段都空）：谁都能看，登录与否都一样；
+ * - 个人菜谱（没家庭但有主人）：**只有主人**能看。这是"还没建家庭先记下自家菜谱"
+ *   那条路的隐私边界——漏掉它的话，一个人的私人笔记会变成全站可见（实测撞到过）；
+ * - 家庭菜谱：自家人能看（`familyId` 精确相等）。
+ */
+export function canReadRecipe(
+  recipe: { familyId: string | null; createdById: string | null },
+  viewer: { userId: string; familyId: string | null } | null,
+): boolean {
+  if (recipe.familyId !== null) return recipe.familyId === viewer?.familyId
+  if (recipe.createdById === null) return true
+  return recipe.createdById === viewer?.userId
+}
+
 /** 拒绝的理由（直接给用户看，所以是人话；分两种，因为用户的下一步动作不同） */
-export function writeRefusal(recipe: { familyId: string | null }): string {
-  if (!recipe.familyId) {
+export function writeRefusal(recipe: { familyId: string | null; createdById: string | null }): string {
+  if (!recipe.familyId && recipe.createdById === null) {
     return '这是菜谱库里的公共菜谱，改不了。想调整的话，把它复制成自己的一道（「我的菜谱」里新建一份）。'
   }
   return '这道菜谱不是你们家的，改不了'
@@ -164,8 +191,13 @@ export function parseRecipeCreate(raw: unknown): RecipeDraft {
  * 与冰箱那条"只记模型动过的字段"同一个道理：把没提的字段当成"要清空"，
  * 会把用户没打算改的东西抹掉——AI 改一句话就可能清掉别人写的步骤。
  * 用 `undefined` 当哨兵，而不是空值：`notes: []` 是明确的"清空备注"。
+ *
+ * @param options.allowEmpty 没有可改字段时**不报错**，返回空对象。
+ *   给"这一次只换了配图"用：配图不走这个 patch（它直接写 image 那几列，
+ *   见 `recipe-write.service`），但那次请求仍然是有效的改动——
+ *   这里如果照旧报 400「没有要改的内容」，用户点「存好」就会莫名其妙地失败。
  */
-export function parseRecipePatch(raw: unknown): Partial<RecipeDraft> {
+export function parseRecipePatch(raw: unknown, options: { allowEmpty?: boolean } = {}): Partial<RecipeDraft> {
   const body = (raw ?? {}) as Record<string, unknown>
   const patch: Partial<RecipeDraft> = {}
   if (body.name !== undefined) patch.name = text(body.name, '菜名', RECIPE_NAME_MAX)
@@ -177,7 +209,7 @@ export function parseRecipePatch(raw: unknown): Partial<RecipeDraft> {
   if (body.notes !== undefined) patch.notes = textList(body.notes, '备注', RECIPE_NOTES_MAX, RECIPE_NOTE_MAX)
   if (body.calories !== undefined) patch.calories = calories(body.calories)
   if (body.aliases !== undefined) patch.aliases = textList(body.aliases, '别名', RECIPE_TAGS_MAX, RECIPE_TAG_MAX)
-  if (Object.keys(patch).length === 0) throw new BadRequestException('没有要改的内容')
+  if (Object.keys(patch).length === 0 && !options.allowEmpty) throw new BadRequestException('没有要改的内容')
   return patch
 }
 

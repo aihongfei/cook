@@ -48,6 +48,14 @@ export interface RecipeDraft {
   notes: string[]
   calories: number | null
   aliases: string[]
+  /**
+   * 配图（dataURL，前端已经缩到最长边 1600px 再发）。
+   *
+   * **只在这次要换图时才带**：不带 = 保持原来那张不动。所以它是个"请求字段"、
+   * 不是存储字段——后端收到后会上传到对象存储，把地址与 key 写进库
+   * （见 `recipe-write.service` 的 `storeImage`）。
+   */
+  image?: string
 }
 
 export interface RecipePage {

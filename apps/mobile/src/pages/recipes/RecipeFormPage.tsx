@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
+import { shrinkImage } from '@/api/checkins'
 import {
   fetchRecipe,
   recipeErrorMessage,
@@ -16,8 +17,10 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import { toast } from '@/components/ui/toast'
-import { readBackLink } from '@/pages/back-link'
+import { readBackLink, readCarry } from '@/pages/back-link'
+import RecipeImage from './components/RecipeImage'
 import RecipeStatus from './components/RecipeStatus'
+import SuggestField from './components/SuggestField'
 import '../shared.scss'
 import './recipes.scss'
 
@@ -41,7 +44,6 @@ const NOTE_MAX = 60
 const NOTES_MAX = 5
 const CALORIES_MIN = 0
 const CALORIES_MAX = 10_000
-
 /** 表单里的一行配料 / 一步做法 */
 interface IngredientDraft {
   name: string
@@ -59,6 +61,14 @@ interface FormState {
   /** 备注按行写（一条一行），提交时拆成列表 */
   notes: string
   calories: string
+  /**
+   * 这次要**新传**的配图（dataURL）。null = 这次没换图。
+   *
+   * 分成"已存的图"与"这次新选的图"两份是有意的：接口要的是"这次改了什么"，
+   * 而编辑一道本来就有图的菜时，用户没碰图片就不该把图片重新上传一遍
+   * （那会白传几百 KB，还会把 imageStoredAt 刷新掉）。
+   */
+  image: string | null
 }
 
 /** 表单能改的那几项（`aliases` 不在表单里，见 `updatable` 的说明） */
@@ -81,6 +91,7 @@ function blankForm(): FormState {
     steps: ['', ''],
     notes: '',
     calories: '',
+    image: null,
   }
 }
 
@@ -95,7 +106,14 @@ function formOf(recipe: RecipeDetail): FormState {
     steps: recipe.steps.length > 0 ? [...recipe.steps] : [''],
     notes: recipe.notes.join('\n'),
     calories: recipe.calories === null ? '' : String(recipe.calories),
+    // 已存的图是**服务端那份地址**（展示用），不是"这次要传的图"——见 FormState.image 的说明
+    image: null,
   }
+}
+
+/** 表单里已经有的那张图（编辑时的服务端地址）；新选了图就换成新选的 */
+function shownImage(form: FormState, recipe?: RecipeDetail): string | null {
+  return form.image ?? recipe?.image ?? null
 }
 
 /** 一行文本 → 去空、去重、保序的列表（与后端 textList 同一口径：顿号/逗号/换行都是分隔符） */
@@ -167,7 +185,14 @@ export default function RecipeFormPage() {
   const { id = '' } = useParams()
   const location = useLocation()
   const isEdit = Boolean(id)
-  const back = readBackLink(location.state, isEdit ? `/recipes/${id}` : '/recipes/mine')
+  // 兜底是**这道菜的详情**（编辑页的上一层就是它）；id 要转义，路由参数是外部输入
+  const back = readBackLink(location.state, isEdit ? `/recipes/${encodeURIComponent(id)}` : '/recipes/mine')
+  /*
+   * 编辑页夹在中间：它的返回目标是菜谱详情，而**详情页自己还有来源**。
+   * 那份来源从详情带过来（见 RecipeDetailPage 的编辑入口），这里原样收着，
+   * 回详情时再交还——不然"我的菜谱 → 详情 → 编辑 → 返回"会把来源丢成菜谱小书。
+   */
+  const carry = readCarry(location.state)
 
   const detail = useQuery({
     queryKey: ['recipes', 'detail', id],
@@ -180,7 +205,7 @@ export default function RecipeFormPage() {
   return (
     <Page>
       <div className="pscreen recipe-form-page">
-        <Link className="page-back" to={back.to}>← {back.label}</Link>
+        <Link className="page-back" to={back.to} state={carry}>← {back.label}</Link>
         <PageHeader
           title={isEdit ? '改这道菜谱' : '写一道菜谱'}
           subtitle={isEdit ? '改完还是你们家的菜' : '自己家的味道，记下来就不会丢'}
@@ -198,13 +223,17 @@ export default function RecipeFormPage() {
          * 拿不到详情就**不画表单**：空表单提交出去等于又新建了一道菜，
          * 而那正是用户最不想要的结果（他想改的是一道已有菜）。
          */}
-        {(!isEdit || detail.data) && <RecipeForm key={id || 'new'} id={id} recipe={detail.data} />}
+        {(!isEdit || detail.data) && <RecipeForm key={id || 'new'} id={id} recipe={detail.data} carry={carry} />}
       </div>
     </Page>
   )
 }
 
-function RecipeForm({ id, recipe }: { id: string; recipe?: RecipeDetail }) {
+/**
+ * @param carry 上层（详情页）托这一页收着的来源 state。**存在时表单已经改完跳回详情**：
+ *   它是原样带回去的，`RecipeForm` 自己不该解释它（形状由 `back-link` 负责）。
+ */
+function RecipeForm({ id, recipe, carry }: { id: string; recipe?: RecipeDetail; carry?: Record<string, unknown> }) {
   const navigate = useNavigate()
   const isEdit = Boolean(id)
   const options = useRecipeFilters()
@@ -217,6 +246,29 @@ function RecipeForm({ id, recipe }: { id: string; recipe?: RecipeDetail }) {
   const [baseline] = useState(() => (recipe ? draftOfRecipe(recipe) : null))
   const [error, setError] = useState('')
   const [deleting, setDeleting] = useState(false)
+  const [preparingImage, setPreparingImage] = useState(false)
+
+  /**
+   * 选好的图先在本机缩一遍再进表单。
+   *
+   * 缩图参数与打卡照片完全一致（`shrinkImage`：最长边 1600px / JPEG 0.85）：
+   * 手机原图 3–10MB，缩完通常 < 500KB，这样"存一道菜"不会变成等半分钟的上传。
+   * 缩图失败就**不进表单**并如实说一声——把一张后端收不下的图留在预览里，
+   * 用户要等点「存好」才知道不行。
+   */
+  const pickImage = async (file: File | undefined) => {
+    if (!file) return
+    setPreparingImage(true)
+    try {
+      const shrunk = await shrinkImage(file)
+      setForm((current) => ({ ...current, image: shrunk }))
+      if (error) setError('')
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : '这张图片处理不了')
+    } finally {
+      setPreparingImage(false)
+    }
+  }
 
   const patch = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }))
@@ -296,6 +348,12 @@ function RecipeForm({ id, recipe }: { id: string; recipe?: RecipeDetail }) {
     if (next.steps.join('\n') !== baseline.steps.join('\n')) changed.steps = next.steps
     if (next.notes.join('\n') !== baseline.notes.join('\n')) changed.notes = next.notes
     if (next.calories !== baseline.calories) changed.calories = next.calories
+    /*
+     * 配图只在**这次新选了图**时才发：编辑一道本来就有图的菜、用户没碰图片，
+     * 就不该把那张图重新传一遍（白传几百 KB，还会把 imageStoredAt 刷新掉）。
+     * `form.image` 非空 = 这一次刚刚选过（见 FormState.image）。
+     */
+    if (form.image) changed.image = form.image
     return changed
   }
 
@@ -318,7 +376,7 @@ function RecipeForm({ id, recipe }: { id: string; recipe?: RecipeDetail }) {
       const changed = changedFields(draft)
       if (Object.keys(changed).length === 0) {
         toast.success('没有要改的地方')
-        navigate(`/recipes/${encodeURIComponent(id)}`)
+        navigate(`/recipes/${encodeURIComponent(id)}`, { state: carry })
         return
       }
       update.mutate(
@@ -326,7 +384,7 @@ function RecipeForm({ id, recipe }: { id: string; recipe?: RecipeDetail }) {
         {
           onSuccess: () => {
             toast.success('改好了')
-            navigate(`/recipes/${encodeURIComponent(id)}`)
+            navigate(`/recipes/${encodeURIComponent(id)}`, { state: carry })
           },
           onError: fail,
         },
@@ -335,12 +393,18 @@ function RecipeForm({ id, recipe }: { id: string; recipe?: RecipeDetail }) {
     }
     create.mutate(
       // 别名由导入器/AI 维护、不在表单里：新建时本来就该是空的（编辑时也不碰它，见 changedFields）
-      { ...draft, aliases: [] },
+      { ...draft, aliases: [], ...(form.image ? { image: form.image } : {}) },
       {
         onSuccess: (created) => {
           toast.success('菜谱写好了')
-          // 建完进这一道的详情：用户多半想再看一眼自己刚写的东西对不对
-          navigate(`/recipes/${encodeURIComponent(created.id)}`)
+          /*
+           * 建完进这一道的详情：用户多半想再看一眼自己刚写的东西对不对。
+           *
+           * 带上 `from: '/recipes/mine'`——从「新建菜谱」进来的，看完这道自然想回那一页，
+           * 而详情页的兜底是**菜谱小书**（公共库）。不带的话返回会落到公共库里，
+           * 用户刚在自己家的菜谱里干完一件事，退出来却到了别人的地盘。
+           */
+          navigate(`/recipes/${encodeURIComponent(created.id)}`, { state: { from: '/recipes/mine' } })
         },
         // 后端的中文 message（重名那条尤其有用："你们家已经有一道…"）原样显示，不自己编文案
         onError: fail,
@@ -380,6 +444,46 @@ function RecipeForm({ id, recipe }: { id: string; recipe?: RecipeDetail }) {
           {error}
         </p>
 
+        {/*
+         * 配图（用户 2026-10-13：「我的菜谱那里现在没有图片上传」）。
+         *
+         * 与打卡照片同一套：选图 → 在浏览器里缩到最长边 1600px（`shrinkImage`）
+         * → 提交时随表单一起发，后端存进对象存储。放在**最上面**，因为它是这张卡片
+         * 最显眼的部分，也是用户最想先看一眼的东西。
+         */}
+        <div className="recipe-form__field">
+          <label htmlFor="recipe-field-image">配图（可以拍一张，也可以先空着）</label>
+          <div className="recipe-form__photo">
+            <div className="recipe-form__photo-frame">
+              {shownImage(form, recipe)
+                ? <img src={shownImage(form, recipe) as string} alt="这道菜的配图" />
+                : <RecipeImage src={null} name={form.name || '这道菜'} />}
+            </div>
+            <div className="recipe-form__photo-actions">
+              {/*
+               * 原生文件选择：`accept="image/*"` 让安卓同时给相册与相机（与打卡一致）。
+               * 直接点击是**不行的**——它是隐藏的，这里用 label 关联过去。
+               */}
+              <label className="recipe-form__photo-pick" htmlFor="recipe-field-image">
+                {preparingImage ? '正在处理…' : shownImage(form, recipe) ? '换一张' : '选一张图'}
+              </label>
+              <input
+                id="recipe-field-image"
+                className="recipe-form__photo-input"
+                type="file"
+                accept="image/*"
+                onChange={(event) => { void pickImage(event.target.files?.[0]) }}
+              />
+              {(form.image ?? '') !== '' && (
+                // 只撤"这次选的"：已存的那张图要换掉只能再选一张（删图是另一个动作，这一刀不做）
+                <button type="button" className="recipe-form__photo-drop" onClick={() => patch('image', null)}>
+                  不用这张
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
         <label className="recipe-form__field">
           <span>菜名</span>
           <input
@@ -392,40 +496,28 @@ function RecipeForm({ id, recipe }: { id: string; recipe?: RecipeDetail }) {
 
         <div className="recipe-form__row">
           {/*
-           * 品类/菜系的建议来自**库里实际存在的值**（filters 接口）+ 几个常用词。
-           * 后端不收枚举，做成单选会让"我家祖传的糊辣汤算什么菜系"变成一个填不下去的框；
-           * 用 datalist 而不是 Chips，正是因为后者是互斥的单选，而这里要的是"可以自己写"。
+           * 品类/菜系：可以自己写，也可以点现成的词（`SuggestField`，替换掉了原生的 datalist——
+           * 那个在手机上会弹一个系统级白列表，与这套手绘风是两张皮）。
+           * 词表 = 常用词 + **库里实际存在的值**（用它们才能与筛选口径对齐：点了就能筛出来）。
            */}
-          <label className="recipe-form__field">
-            <span>品类</span>
-            <input
-              value={form.category}
-              maxLength={CATEGORY_MAX}
-              placeholder="如：荤菜"
-              list="recipe-categories"
-              onChange={(event) => patch('category', event.target.value)}
-            />
-          </label>
-          <label className="recipe-form__field">
-            <span>菜系</span>
-            <input
-              value={form.cuisine}
-              maxLength={CUISINE_MAX}
-              placeholder="如：家常"
-              list="recipe-cuisines"
-              onChange={(event) => patch('cuisine', event.target.value)}
-            />
-          </label>
-          <datalist id="recipe-categories">
-            {[...new Set([...(options.data?.categories ?? []), ...CATEGORY_SUGGESTIONS])].map((value) => (
-              <option key={value} value={value} />
-            ))}
-          </datalist>
-          <datalist id="recipe-cuisines">
-            {[...new Set([...(options.data?.cuisines ?? []), ...CUISINE_SUGGESTIONS])].map((value) => (
-              <option key={value} value={value} />
-            ))}
-          </datalist>
+          <SuggestField
+            label="品类"
+            value={form.category}
+            maxLength={CATEGORY_MAX}
+            placeholder="如：荤菜"
+            common={CATEGORY_SUGGESTIONS}
+            options={options.data?.categories ?? []}
+            onChange={(value) => patch('category', value)}
+          />
+          <SuggestField
+            label="菜系"
+            value={form.cuisine}
+            maxLength={CUISINE_MAX}
+            placeholder="如：家常"
+            common={CUISINE_SUGGESTIONS}
+            options={options.data?.cuisines ?? []}
+            onChange={(value) => patch('cuisine', value)}
+          />
         </div>
 
         <label className="recipe-form__field">

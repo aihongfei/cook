@@ -87,6 +87,35 @@ export function contentTypeForKey(key: string): string {
 }
 
 /**
+ * 按**文件头**判断真实图片类型（不认识就返回 null）。
+ *
+ * 为什么不能只信调用方声明的 content-type：那样把任意字节声明成 image/jpeg 就能存进去，
+ * 页面上就会出现一张永远打不开的图。宁可拒绝，也不存"看着像图片"的东西。
+ *
+ * 放在这里而不是各模块自己写一份：**打卡照片与自建菜谱上传都要判这一件事**，
+ * 而这是安全判断——两份实现里只要有一份漏了 SVG/HTML，那一份就成了后门。
+ */
+export function sniffImageType(bytes: Buffer): string | null {
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'image/png'
+  }
+  // JPEG: FF D8 FF
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg'
+  }
+  // WebP: "RIFF" … "WEBP"
+  if (
+    bytes.length >= 12 &&
+    bytes.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    bytes.subarray(8, 12).toString('latin1') === 'WEBP'
+  ) {
+    return 'image/webp'
+  }
+  return null
+}
+
+/**
  * 幂等地准备好桶：不存在就建，并设为**公开只读**。
  * 菜谱图是要给所有登录用户看的公开内容，用公开读 + 内容哈希文件名最省事
  * （不需要给每张图签临时 URL）；私有内容（如口味档案头像）应另建私有桶。

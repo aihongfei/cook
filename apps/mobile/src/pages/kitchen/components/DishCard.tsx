@@ -95,6 +95,7 @@ export default function DishCard({
         </button>
       )}
 
+      {/* 图与文字块（点它进详情）。两个动作按钮在这一层之外，见下面那段 */}
       <Link
         className="dish-card__link"
         to={`/recipes/${encodeURIComponent(dish.id)}`}
@@ -112,13 +113,31 @@ export default function DishCard({
             <RecipeOriginBadge origin={dish.origin} sourceLabel={dish.sourceLabel} />
           </div>
           <div className="dish-card__calories">{caloriesLabel(dish)}</div>
-          <span className="dish-card__browse">看做法 →</span>
         </div>
       </Link>
 
-      {mayOrder && (
-        <div className="dish-card__order">
-          {added ? (
+      {/*
+       * 两个动作**并排一行**（用户 2026-10-13：「看做法和点这道放在一行」）。
+       *
+       * 它们是两个独立的可点元素，所以**不能一个套一个**：把「点这道」放进链接里，
+       * 点它会冒泡到链接上——用户想加菜，结果进了详情页（F1-10 上线的老问题）。
+       * 「看做法」于是也做成独立的 `<Link>`（同一个目标、带上同样的 state），
+       * 两个并排，靠 `.dish-card__actions` 那一行兜住。
+       */}
+      <div className="dish-card__actions">
+        <Link
+          className="dish-card__browse"
+          to={`/recipes/${encodeURIComponent(dish.id)}`}
+          state={{ from: `${location.pathname}${location.search}`, ...(plan ? { plan } : {}) }}
+          aria-label={`查看${dish.name}做法`}
+        >
+          看做法 →
+        </Link>
+
+        {/* 不能点菜时不画按钮（没加入家庭 / 角色没有 `order.create`）：给个按钮让用户白点一次、
+            再拿 403 告诉他不行，比不给他按钮更糟。此时「看做法」自己占满那一行 */}
+        {mayOrder && (
+          added ? (
             <span className="dish-card__order-done">已加入</span>
           ) : (
             <button
@@ -129,9 +148,9 @@ export default function DishCard({
             >
               点这道
             </button>
-          )}
-        </div>
-      )}
+          )
+        )}
+      </div>
     </article>
   )
 }

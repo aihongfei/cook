@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
+import * as checkins from '@/api/checkins'
 import type { Recipe } from '@/api/recipes'
 import { Toaster, useToasts } from '@/components/ui/toast'
 import { useAuth } from '@/stores/auth'
@@ -320,4 +321,91 @@ it('编辑：取不到那道菜时给错误与重试，不是一张空表单（�
   // 拿不到详情就不画表单：一张空表单提交出去等于又新建了一道
   expect(screen.queryByLabelText('菜名')).toBeNull()
   expect(screen.getByRole('button', { name: '再试一次' })).toBeTruthy()
+})
+
+/*
+ * 配图与建议词（用户 2026-10-13：「我的菜谱那里现在没有图片上传」+
+ * 「新建那里的下拉不要用原生的，要好看的符合软件风格的」）。
+ *
+ * 两条都是"看得见但传不上去"最伤人的那一类：预览里明明有图、存完却没有，
+ * 用户只会以为丢了。所以这里盯的是**payload 里到底带了什么**。
+ */
+
+it('配图：选一张图会先在本地缩一遍，再随新建请求发出去', async () => {
+  const shrink = vi.spyOn(checkins, 'shrinkImage').mockResolvedValue('data:image/jpeg;base64,SHUNK')
+  const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { ...own, id: 'own-9' } } as never)
+  mount('/recipes/new')
+
+  const file = new File(['x'], 'dish.png', { type: 'image/png' })
+  fireEvent.change(screen.getByLabelText('配图（可以拍一张，也可以先空着）'), { target: { files: [file] } })
+  await waitFor(() => expect(shrink).toHaveBeenCalledWith(file))
+
+  fillBasics()
+  fireEvent.click(screen.getByRole('button', { name: '写好收着' }))
+
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+  // 发出去的是**缩过的**那张（不是原图），字段名与后端契约一致
+  expect((post.mock.calls[0][1] as { image?: string }).image).toBe('data:image/jpeg;base64,SHUNK')
+})
+
+it('配图：编辑时没碰图片，就不把那张图重新传一遍', async () => {
+  const shrink = vi.spyOn(checkins, 'shrinkImage')
+  const patch = vi.spyOn(apiClient, 'patch').mockResolvedValue({ data: own } as never)
+  mount('/recipes/own-1/edit')
+
+  await waitFor(() => expect(value('菜名')).toBe('外婆的红烧肉'))
+  type('菜名', '外婆的梅菜扣肉')
+  fireEvent.click(screen.getByRole('button', { name: '存好' }))
+
+  await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+  expect(patch.mock.calls[0][1]).toEqual({ name: '外婆的梅菜扣肉' })
+  expect(shrink).not.toHaveBeenCalled()
+})
+
+it('配图：只换图、别的字段一个字不改，也是一次有效改动（要真发出去）', async () => {
+  vi.spyOn(checkins, 'shrinkImage').mockResolvedValue('data:image/jpeg;base64,NEW')
+  const patch = vi.spyOn(apiClient, 'patch').mockResolvedValue({ data: own } as never)
+  mount('/recipes/own-1/edit')
+
+  await waitFor(() => expect(value('菜名')).toBe('外婆的红烧肉'))
+  fireEvent.change(screen.getByLabelText('配图（可以拍一张，也可以先空着）'), {
+    target: { files: [new File(['x'], 'new.png', { type: 'image/png' })] },
+  })
+  await waitFor(() => expect(screen.getByText('不用这张')).toBeTruthy())
+  fireEvent.click(screen.getByRole('button', { name: '存好' }))
+
+  await waitFor(() => expect(patch).toHaveBeenCalledWith('/recipes/own-1', { image: 'data:image/jpeg;base64,NEW' }))
+})
+
+it('配图：处理不了的文件如实说一声，且不把图留在预览里（别让人存完才发现）', async () => {
+  vi.spyOn(checkins, 'shrinkImage').mockRejectedValue(new Error('这不是一张能显示的图片'))
+  mount('/recipes/new')
+
+  fireEvent.change(screen.getByLabelText('配图（可以拍一张，也可以先空着）'), {
+    target: { files: [new File(['x'], 'bad.png', { type: 'image/png' })] },
+  })
+
+  await waitFor(() => expect(useToasts.getState().items.some((item) => item.text === '这不是一张能显示的图片')).toBe(true))
+  expect(document.querySelector('.recipe-form__photo-frame img')).toBeNull()
+})
+
+it('品类/菜系：点一个现成的词就填进去，再点一次取消（不用手动删字）', async () => {
+  mount('/recipes/new')
+
+  const suggest = document.querySelector('.recipe-form__row .recipe-form__suggest') as HTMLElement
+  fireEvent.click(within(suggest).getByRole('button', { name: '荤菜' }))
+  expect(value('品类')).toBe('荤菜')
+
+  fireEvent.click(within(suggest).getByRole('button', { name: '荤菜' }))
+  expect(value('品类')).toBe('')
+})
+
+it('品类/菜系：**仍然可以自己写**（后端不收固定枚举，家里的菜想算什么菜系就算什么）', async () => {
+  mount('/recipes/new')
+
+  type('菜系', '祖传菜系')
+  expect(value('菜系')).toBe('祖传菜系')
+  // 输入之后建议词收敛成匹配项（这时它就是个自动补全），且原始输入没有被打断
+  const suggest = document.querySelector('.recipe-form__row .recipe-form__suggest') as HTMLElement
+  expect(within(suggest).queryByRole('button', { name: '川菜' })).toBeNull()
 })

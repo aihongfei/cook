@@ -77,32 +77,13 @@ export function assertSize(bytes: number): void {
 }
 
 /**
- * 按**文件头**判断真实图片类型（不认识就返回 null）。
+ * 扩展名（私有桶的 key 用它，让存储里的对象可被人眼辨认）
  *
- * 为什么不能只信调用方声明的 content-type：那样把任意字节声明成 image/jpeg 就能存进去，
- * 全家人的墙上就会出现一张永远打不开的图。宁可拒绝，也不存"看着像图片"的东西。
+ * `sniffImageType` 已搬到 `media/media.storage`（自建菜谱上传也要判同一件事），
+ * 这里重新导出，免得 checkins 里每一处调用点都改一次 import。
  */
-export function sniffImageType(bytes: Buffer): string | null {
-  // PNG: 89 50 4E 47 0D 0A 1A 0A
-  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
-    return 'image/png'
-  }
-  // JPEG: FF D8 FF
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    return 'image/jpeg'
-  }
-  // WebP: "RIFF" … "WEBP"
-  if (
-    bytes.length >= 12 &&
-    bytes.subarray(0, 4).toString('latin1') === 'RIFF' &&
-    bytes.subarray(8, 12).toString('latin1') === 'WEBP'
-  ) {
-    return 'image/webp'
-  }
-  return null
-}
+export { sniffImageType } from '../media/media.storage'
 
-/** 扩展名（私有桶的 key 用它，让存储里的对象可被人眼辨认） */
 export function extensionFor(contentType: string): string {
   return { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[contentType] ?? 'jpg'
 }

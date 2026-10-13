@@ -42,6 +42,22 @@ function matchEntry(raw: string): string | null {
 }
 
 /**
+ * 返回按钮上的字。
+ *
+ * 表里查得到就用表里的；查不到的是**菜谱详情**这种"动态路径"——它的目标里带着一个 id，
+ * 没法写进静态表。这时给一句准确的话（"返回这道菜谱"），而不是干巴巴一个"返回"：
+ * 编辑页夹在中间，它的返回目标正是详情（`/recipes/<id>`），
+ * 表里没有它就落到了一个没有主语的按钮上。
+ */
+function labelFor(path: string): string {
+  const listed = BACK_LABELS[path]
+  if (listed) return listed
+  // `/recipes/<id>`（详情）——排除 `mine`/`new`/`<id>/edit` 这几个同样在 /recipes 下的子页
+  if (/^\/recipes\/[^/]+$/.test(path) && path !== '/recipes/mine' && path !== '/recipes/new') return '返回这道菜谱'
+  return '返回'
+}
+
+/**
  * 来源路径属于底部哪个 Tab（认不出返回 null）。
  *
  * 用途：**菜谱页该高亮哪个 Tab**。菜谱列表/详情不在 Tab 里，原先一律高亮「厨房」，
@@ -68,5 +84,23 @@ export function readBackLink(state: unknown, fallback: string): { to: string; la
   // 文案按**路径**取（`/recipes?q=鱼` 的键是 `/recipes`）：拿带查询串的完整值查表会落空，
   // 返回按钮就变成干巴巴一个"返回"（自己写的测试当场抓出来的）
   const path = to.split('?', 1)[0]
-  return { to, label: BACK_LABELS[path] ?? '返回' }
+  return { to, label: labelFor(path) }
+}
+
+/**
+ * 中间页**替下一站收着**的那份 state（现在用在菜谱详情 → 编辑这条链上）。
+ *
+ * 为什么需要它：编辑页是夹在中间的一页——它的返回目标是**菜谱详情**，而详情页自己
+ * 还有来源（「我的菜谱」）。中间页如果不把这份来源收好再还回去，链条就断了：
+ * 我的菜谱 → 详情 → 编辑 → 返回详情 → 再返回会落到菜谱小书，而不是我的菜谱
+ * （用户 2026-10-13 报的正是这个）。
+ *
+ * 所以从详情进编辑时把详情那份 state 塞进 `carry`，回详情时原样交还，
+ * 详情页"从哪来"就一直是当初那一份。**校验仍然在读取处**（详情页自己会过
+ * `readBackLink`），这里只保证交还的是一个普通对象、不把形状弄坏。
+ */
+export function readCarry(state: unknown): Record<string, unknown> | undefined {
+  const carry = (state as { carry?: unknown } | null)?.carry
+  if (carry === null || typeof carry !== 'object' || Array.isArray(carry)) return undefined
+  return carry as Record<string, unknown>
 }

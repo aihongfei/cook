@@ -2142,3 +2142,60 @@ SELECT f.name 家, COUNT(*) 条 FROM cook.FridgeItem i JOIN cook.Family f ON f.i
 ```
 
 **结论（2026-10-13 清点）**：213 家庭 / 487 账号 / 496 点单 / 350 餐次 / 83 冰箱 / 168 条 AI 操作 / 62 打卡 / 10 组合 / 17 收藏 / 1 道自建菜谱。**全部落在脚本与浏览器实证自建的家庭里**（脚本：`AI 验收家` / `点单验收家` / `冰箱验收之家` / `组合验收家` / `最爱验收家`；浏览器：`小满一家`、账号 `uimama87722824`/`uibaba87722824`、`uimama87756154`/`uibaba87756154`——后者的 6 条冰箱与那道「外婆的红烧肉」就是浏览器实证留下的），**唯一非测试账号 `mama_20261012`（小艾的家）名下一条没有**。所有查询都按 `familyId` 隔离，正常登录看不到这些，放着不影响使用，只影响开发库体积。清理属**不可逆操作**，须用户明确授权后再动。
+
+## R-044 自建菜谱配图 + 全家共享 + 返回链（D-055；含一条隐私 bug 的处置）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：
+
+- **前端 · 卡片布局（`kitchen/kitchen.scss`、`kitchen/components/DishCard.tsx`）**
+  - `.dish-card` 改**列向 flex**；`.dish-card__link` 从 `height: 100%`（**就是它把「点这道」裁掉了**）改成 `flex: 1`；`.dish-card__pic { flex: none }`。
+  - 删掉 `.dish-card__name { min-height: 36px }`；`.dish-card__calories` 带 `margin-bottom`，`.dish-card__body` 的 `padding-bottom` 归零。
+  - 「看做法」从卡片里挪出来，做成独立 `<Link>`（带同样的 state），与「点这道」并排进 `.dish-card__actions`。
+- **前端 · 我的菜谱页（`recipes/recipes.scss`）**：`.my-recipes .recipes-grid / .recipe-status` 补 `margin: 16px var(--spacing-page) 0`（原来网格没有栏距，卡片贴着屏幕边）。
+- **前端 · 详情页（`recipes/recipes.scss`）**：`.recipe-detail__heading` 改列向 flex + `gap: 12px`，子元素 margin 归零（原来 12/10/0/14 不匀）。
+- **前端 · 选词（新 `recipes/components/SuggestField.tsx`、`RecipeFormPage.tsx`、`recipes.scss`）**：品类/菜系去掉原生 `datalist`，改成输入框 + 可点小词（常用词 + 库里实际值，上限 12）；两个字段上下各一行。
+- **前端 · 配图（`RecipeFormPage.tsx`、`api/recipes.ts`、`recipes.scss`）**：新增配图那一格（预览框 + 「选一张图/换一张」+「不用这张」）；选图走 `shrinkImage`（与打卡同一套 1600px/JPEG 0.85）；`RecipeDraft.image` 是**只在换图时才带**的可选字段。
+- **前端 · 返回链（`pages/back-link.ts`、`RecipeDetailPage.tsx`）**：新增 `readCarry`；详情页的「编辑」把当前 state 塞进 `carry` 交给编辑页，编辑页回详情时原样交还（返回按钮与保存后跳转两处都带）。`labelFor` 让编辑页显示「返回这道菜谱」而不是干巴巴「返回」；新建完跳详情带 `from: '/recipes/mine'`。
+- **后端 · 配图（`recipes/recipe-write.service.ts`、`recipe.rules.ts`、新 `media/image.rules.ts`）**：`storeImage` 把 dataURL 存进**公开桶**（内容哈希命名）；`parseRecipePatch` 加 `allowEmpty`（只换图也算有效改动）；写操作返回补 `mine`。
+- **后端 · 隐私（`recipe.rules.ts`、`builtin-recipe.provider.ts`）**：`canWriteRecipe` 加 `createdById` 判据、新增 `canReadRecipe`；列表可见性条件补"个人菜谱（familyId 空 + createdById 我）"，详情改用同一个 `canReadRecipe`。
+- **后端 · AI 撤销**：`RecipeRemoveUndo.recipe` 补 `image/imageKey/imageHash/imageStoredAt`，`ai-action.service` 删除时一并快照，`restore` 写回（撤"AI 删菜谱"后照片还在）。
+- **测试**：新增 `tests/recipe.rules.test.ts`（14 条：三种归属 × 四种身份的读/写判据、字段解析、搜索文本、来源标签）；`RecipeFormPage.test.tsx` 补 6 条（配图三条 + 建议词两条 + 自由输入一条）；`back-link.test.ts` 补 2 条（carry 与原样读回）。
+
+### 怎么验
+
+```bash
+# 后端
+cd services/api && pnpm run test; echo "exit=$?"            # 282/282
+cd services/api && npx tsc --noEmit; echo "exit=$?"         # exit 0
+docker compose build api && docker compose up -d --force-recreate api
+docker inspect --format '{{.Image}}' "$(docker compose ps -q api)"   # 与 cook-api:latest 相同
+docker compose exec -T api grep -c canReadRecipe /app/dist/modules/recipes/recipe.rules.js
+
+# HTTP 验收（真接口 + 真 MinIO；不需要 stub）
+pnpm --dir services/api run test:http:recipe-image; echo "exit=$?"     # **14/14**（配图：存取/假图被拒/只换图/越权）
+pnpm --dir services/api run test:http:recipe-sharing; echo "exit=$?"   # **9/9**（建第二个家庭成员，验"全家共享"）
+
+# 前端
+pnpm --dir apps/mobile run test; echo "exit=$?"             # 394/394
+pnpm --dir apps/mobile run typecheck; echo "exit=$?"        # 仅 2 条既有错误（CombosPage/PrepPage 测试，与本轮无关）
+```
+
+**隐私 bug 的手工探针**（想再确认一次时直接用；脚本已在仓库里，`verify-recipe-sharing` 覆盖了其中的正路）：
+
+```bash
+# 注册一个不建家庭的账号 → 建一道菜 → 自己改（应 200）→ 陌生人与未登录看它（都应 404）
+node -e "..."   # 见本轮处置记录；核心是 GET /recipes/<id> 应回 404 而不是 200
+```
+
+### 本轮抓到的真问题
+
+| 症状 | 根因 | 修法 |
+| --- | --- | --- |
+| **「点这道」按钮从来没显示过**（用户报"卡片下面空白大"） | `.dish-card__link { height: 100% }` 独占整卡高度，把同级按钮挤出卡外，被 `overflow: hidden` 切掉 | 改列向 flex，链接 `flex: 1`；同时去掉 `min-height` 让菜名下的空隙消失 |
+| **没加入家庭的用户建的自建菜谱漏给所有人看、他自己却改不了** | 读/写判据只判 `familyId`，而"个人菜谱"的 `familyId` 也是 null，被当成公共菜谱 | 判据补 `createdById`（三种归属），读/写共用一对函数；列表条件与详情都改 |
+| 我的菜谱 → 详情 → 编辑 → 返回详情 → 再返回落到菜谱小书 | 详情页的「编辑」没把来源带下去，链条断了 | 新增 `readCarry`，中间页收着再交还 |
+
+> **这一轮最值得记的一条**：`canWriteRecipe` / 可见性这两条判据此前**一条单测都没有**，所以那个隐私 bug 从交付起就存在、一路走到"我想到去试一下没家庭的情况"才被发现。**权限判据没有测试，等于没有实现**——它的错误永远不会以"报错"的形式出现，只会静静地少拦一个人。
+
+**回归测试**：后端 268 → **282**（新增 `recipe.rules.test.ts` 14 条）；前端 385 → **394**（`RecipeFormPage` +6、`back-link` +2、`DishCard` 相关结构未改断言）。
+**反证**：两组——还原旧的读/写判据 → **恰好 2 条红**（两条"个人菜谱"用例），不误伤；把配图从 payload 里去掉 → **恰好 2 条红**（两条配图用例）。

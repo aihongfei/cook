@@ -246,6 +246,14 @@
 
 .dish-card {
   position: relative; /* 收藏的心要压在图片右上角（F1-09），见 .dish-card__fav */
+  /*
+   * 竖着排：链接（图 + 文字块）在上、「点这道」在下。
+   *
+   * 这必须是 flex，不能是默认的 block——原因见 `.dish-card__link` 里那段：
+   * 链接一旦把整张卡占满，它下面那颗按钮就会被挤出卡外裁掉。
+   */
+  display: flex;
+  flex-direction: column;
   flex: 0 0 150px;
   overflow: hidden;
   background: var(--color-paper);
@@ -258,6 +266,8 @@
   position: relative;
   height: 120px;
   background: var(--color-cream-2);
+  /* 图片不参与伸缩：列方向上的 flex 子项默认可收缩，空间紧时会把图压扁 */
+  flex: none;
 }
 
 .dish-card__pic img {
@@ -303,7 +313,16 @@
 }
 
 .dish-card__body {
-  padding: 10px 11px 12px;
+  display: flex;
+  flex-direction: column;
+  /* 文字块吃掉链接里剩下的高度，好让两个按钮贴着卡片底部（多出的空间落在热量下方） */
+  flex: 1;
+  /*
+   * **下边距是 0**：热量到按钮的距离由 `.dish-card__calories` 的 `margin-bottom` 一个地方说了算
+   * （用户 2026-10-13：「下面 padding 不要，和下面两个按钮间隔有点大」）。
+   * 这里再留 12px，两处一叠就是 22px——看着就是白空了一截。
+   */
+  padding: 10px 11px 0;
 }
 
 .dish-card__name {
@@ -314,8 +333,9 @@
 .dish-card__meta {
   display: flex;
   gap: 11px;
-  margin-top: 7px;
-  padding-top: 7px;
+  /* 菜名到虚线的距离：原来 7+7，菜名下面看着空了一截（用户 2026-10-13 同一条反馈） */
+  margin-top: 6px;
+  padding-top: 6px;
   font-size: 10.5px;
   color: var(--color-ink-3);
   border-top: 1px dashed var(--color-line);
@@ -336,8 +356,22 @@
 
 /* 浏览入口 */
 .dish-card__link {
-  display: block;
-  height: 100%;
+  /*
+   * `flex: 1`（而不是 `height: 100%`）——**这是曾经把「点这道」整颗按钮裁掉的那一行**。
+   *
+   * `height: 100%` 会让链接**独占整张卡的高度**：它是卡里第一个孩子，占满之后同级的
+   * 「点这道」就被挤到卡底之外，再被 `.dish-card { overflow: hidden }` 切掉。
+   * 后果是一张卡底部白空着 44px（那是按钮本该在的位置），而按钮谁都看不见——
+   * 用户 2026-10-13 报的「卡片下面的间隔有点大」就是这个。实测（391 宽）：
+   * 卡片高 355、链接高 353、按钮的 y 从 512 起（卡底 513 之外）。
+   *
+   * 换成列向 flex 后：链接按内容长，剩下的高度归按钮；一行里两张卡高度不同时，
+   * 多出来的空间落在「看做法」上方（见 `.dish-card__browse` 的 `margin-top: auto`），
+   * 卡片底部的按钮**仍然对齐**。
+   */
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 .dish-card__link:focus-visible {
@@ -346,7 +380,6 @@
 }
 
 .dish-card__name {
-  min-height: 36px;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -357,31 +390,45 @@
 
 .dish-card__calories {
   margin-top: 7px;
+  /* 下边距挂在这里、而不是给「看做法」上边距：那条要写 `margin-top: auto`，
+     两者只能留一个，否则"没有多余空间时"胶囊会贴着热量（实测会挨到一起） */
+  margin-bottom: 10px;
   font-size: 11px;
   color: var(--color-ink-3);
 }
 
 .dish-card__browse {
   display: block;
-  margin-top: 10px;
+  /* 与「点这道」平分这一行；两个都长一颗胶囊，谁也不比谁显眼 */
+  flex: 1;
+  min-width: 0;
   padding: 6px;
   font-size: 12px;
   color: #c4652a;
   text-align: center;
+  text-decoration: none;
   border: 1px solid #de9057;
   border-radius: 999px;
 }
 
-/* 卡片上的「点这道」（F1-10）：贴在卡片底部的一条实心按钮。
-   与卡内的「看做法 →」并排成两级——看做法是次要（描边），点这道是要动手的（实心）；
-   两者都在卡里，所以按钮**不做成整行**，免得一张卡上两个"整行按钮"抢注意力。 */
-.dish-card__order {
+/*
+ * 卡片底部那一行：「看做法」在左、「点这道」在右（用户 2026-10-13 要求并排）。
+ *
+ * 这一行在链接**之外**：两个都是独立可点元素，套在一起点谁都会冒泡进详情页。
+ * 它在卡里是最后一块，`padding-bottom` 自己带（不能靠卡片兜底，
+ * 否则按钮会贴着圆角被裁）。
+ */
+.dish-card__actions {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
   padding: 0 11px 12px;
 }
 
 .dish-card__order-btn {
   display: block;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 7px;
   font-family: inherit;
   font-size: 12.5px;
@@ -399,6 +446,8 @@
 /* 加过就置灰说明"已加入"：同一张卡连点两次会变成两份，而多数时候那是误触 */
 .dish-card__order-done {
   display: block;
+  flex: 1;
+  min-width: 0;
   padding: 7px;
   font-size: 12.5px;
   color: var(--color-ink-3);

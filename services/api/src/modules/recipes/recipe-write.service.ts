@@ -1,7 +1,11 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
+import { createHash } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { PrismaService } from './prisma.service'
-import { publicImageUrl } from '../media/media.storage'
+import {
+  ensureBucket, extensionForContentType, mediaKey, mediaS3Config, publicImageUrl, putImage, s3Client,
+} from '../media/media.storage'
+import { decodeImage } from '../media/image.rules'
 import {
   RECIPE_ORIGIN_USER,
   buildSearchText,
@@ -13,6 +17,12 @@ import {
   type RecipeDraft,
 } from './recipe.rules'
 import type { Ingredient, RecipeSource } from './recipe.types'
+
+/** 这一次请求里带没带配图（有它就给 `parseRecipePatch` 放行"别的字段都没改"那种情况） */
+function imageProvided(raw: unknown): boolean {
+  const image = (raw as { image?: unknown } | null)?.image
+  return typeof image === 'string' && image !== ''
+}
 
 /**
  * 自建菜谱的写操作（F1-11 / F1-12；用户 2026-10-13：「自己上传的要和极速 api 的区分下」）。
@@ -43,7 +53,6 @@ export class RecipeWriteService {
   async create(userId: string, raw: unknown) {
     const draft = parseRecipeCreate(raw)
     const who = await this.actor(userId)
-
     /*
      * 同名检查**只在本家范围内**做：全局库里已经有一道"番茄炒蛋"不妨碍你写自己的做法
      * （你的可能不放糖），那正是"自建"的意义。但同一家里出现两道同名会让人分不清，
@@ -56,10 +65,13 @@ export class RecipeWriteService {
     if (clash) throw new ConflictException(`你们家已经有一道「${draft.name}」了，直接改那一道就行`)
 
     const id = `own-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    // 配图是可选的：没传就一个字都不写（`imageKey` 留空 = 页面显示占位插画）
+    const image = await this.storeImage(raw)
     const row = await this.prisma.recipe.create({
       data: {
         id,
         ...this.columns(draft),
+        ...(image ?? {}),
         origin: RECIPE_ORIGIN_USER,
         // sourceKey 必须唯一（列上有唯一约束）：自建的用 id 派生一个，重新导入也不会撞
         sourceKey: `user:${id}`,
@@ -84,7 +96,11 @@ export class RecipeWriteService {
     const who = await this.actor(userId)
     if (!canWriteRecipe(row, who)) throw new ForbiddenException(writeRefusal(row))
 
-    const patch = parseRecipePatch(raw)
+    /*
+     * 配图也要在"有东西要改"的判断里算一份：只换一张图、别的字段一个字都没动，
+     * 那也是有效的改动（不给它算，用户点「存好」会收到 400「没有要改的内容」）。
+     */
+    const patch = parseRecipePatch(raw, { allowEmpty: imageProvided(raw) })
     // 改名同样要查自家重名（改成一个已经存在的名字，还是分不清哪道是哪道）
     if (patch.name && patch.name !== row.name) {
       const clash = await this.prisma.recipe.findFirst({
@@ -110,13 +126,16 @@ export class RecipeWriteService {
       calories: patch.calories !== undefined ? patch.calories : row.calories,
       aliases: patch.aliases ?? (row.aliases as string[]),
     }
-    const updated = await this.prisma.recipe.update({ where: { id }, data: this.columns(merged) })
+    const updated = await this.prisma.recipe.update({
+      where: { id },
+      data: { ...this.columns(merged), ...(await this.storeImage(raw)) },
+    })
     return this.view(updated)
   }
 
   /** 删一道自建菜谱。**只删菜谱本身**：点单记录、收藏、组合里的引用按 schema 的 onDelete 走 */
   async remove(userId: string, id: string) {
-    const row = await this.prisma.recipe.findUnique({ where: { id }, select: { id: true, name: true, familyId: true } })
+    const row = await this.prisma.recipe.findUnique({ where: { id }, select: { id: true, name: true, familyId: true, createdById: true } })
     if (!row) throw new NotFoundException('没有这道菜谱')
     const who = await this.actor(userId)
     if (!canWriteRecipe(row, who)) throw new ForbiddenException(writeRefusal(row))
@@ -136,6 +155,7 @@ export class RecipeWriteService {
     id: string; name: string; category: string; cuisine: string; tags: string[]; aliases: string[]
     ingredients: { name: string; amount: string }[]; steps: string[]; notes: string[]
     calories: number | null; familyId: string | null; createdById: string | null; searchText: string
+    image?: string | null; imageKey?: string | null; imageHash?: string | null; imageStoredAt?: string | null
   }) {
     const row = await this.prisma.recipe.create({
       data: {
@@ -152,6 +172,12 @@ export class RecipeWriteService {
         calories: recipe.calories,
         caloriesEstimated: false,
         searchText: recipe.searchText,
+        // 配图原样还回来（对象按内容哈希命名，删菜谱从来不动存储里的字节，
+        // 所以这里只需把 key 与 hash 写回列上，图立刻就在）
+        image: recipe.image ?? null,
+        imageKey: recipe.imageKey ?? null,
+        imageHash: recipe.imageHash ?? null,
+        imageStoredAt: recipe.imageStoredAt ? new Date(recipe.imageStoredAt) : null,
         origin: RECIPE_ORIGIN_USER,
         sourceKey: `user:${recipe.id}`,
         familyId: recipe.familyId,
@@ -169,9 +195,41 @@ export class RecipeWriteService {
 
   /** 列表/详情要用的"能不能改"——前端据此决定画不画编辑按钮，AI 也用它回话 */
   async writable(userId: string, id: string): Promise<boolean> {
-    const row = await this.prisma.recipe.findUnique({ where: { id }, select: { familyId: true } })
+    const row = await this.prisma.recipe.findUnique({ where: { id }, select: { familyId: true, createdById: true } })
     if (!row) return false
     return canWriteRecipe(row, await this.actor(userId))
+  }
+
+  /**
+   * 把请求里的配图存进对象存储，返回要写进库的那几列；没传图就返回 null。
+   *
+   * 与菜谱图床同一套口径（`media/media.storage`）：**内容哈希当文件名**——
+   * 同一张图重复上传只占一份空间，写入天然幂等，也能长期强缓存。
+   *
+   * `image` 那一列**同时写一份公开地址**：`publicImageUrl` 优先用 `imageKey`，
+   * 但也有人（脚本、往后的导出）只看 `image`。两列指向同一个对象，不会分叉。
+   */
+  private async storeImage(raw: unknown): Promise<{ image: string; imageKey: string; imageHash: string; imageStoredAt: Date } | null> {
+    const body = (raw ?? {}) as { image?: unknown }
+    if (body.image === undefined || body.image === null || body.image === '') return null
+
+    const { bytes, contentType } = decodeImage(body.image)
+    const hash = createHash('sha256').update(bytes).digest('hex')
+    const key = mediaKey(hash, extensionForContentType(contentType) ?? 'jpg')
+
+    const config = mediaS3Config()
+    const client = s3Client(config)
+    // 请求路自己把桶建出来：不能假设"导入脚本先跑过一次"（新环境里用户可能先传图）
+    await ensureBucket(client, config)
+    await putImage(client, config, key, bytes)
+
+    const url = publicImageUrl(key, null)
+    return {
+      image: url ?? key,
+      imageKey: key,
+      imageHash: hash,
+      imageStoredAt: new Date(),
+    }
   }
 
   /**
@@ -204,7 +262,8 @@ export class RecipeWriteService {
     tags: Prisma.JsonValue; aliases: Prisma.JsonValue; calories: number | null; caloriesEstimated: boolean
     spiciness: number; ingredients: Prisma.JsonValue; steps: Prisma.JsonValue; notes: Prisma.JsonValue
     videoUrl: string | null; source: Prisma.JsonValue; origin: string
-  }) {
+    familyId: string | null; createdById: string | null
+  }, viewer?: { userId: string; familyId: string | null } | null) {
     return {
       id: row.id,
       name: row.name,
@@ -223,6 +282,13 @@ export class RecipeWriteService {
       source: row.source as unknown as RecipeSource,
       origin: row.origin,
       sourceLabel: sourceLabel(row.origin),
+      createdBy: null as string | null,
+      /*
+       * 写操作回来的那份也要带 `mine`：不给的话，前端刚建完这道菜时手里那个对象
+       * 是 `mine: undefined`（实测撞到过）——"刚建的菜自己能不能改"这件事在返回值里
+       * 就成了一个说不清的状态，而它明明恒为 true（自己刚建的）。
+       */
+      mine: viewer === undefined ? true : Boolean(viewer) && canWriteRecipe(row, viewer as { userId: string; familyId: string | null }),
     }
   }
 }

@@ -133,6 +133,12 @@ export default function RecipeDetailPage() {
                     <Link
                       className="recipe-button recipe-detail__edit"
                       to={`/recipes/${encodeURIComponent(recipe.id)}/edit`}
+                      /*
+                       * 把**这一页收到的来源**交给编辑页收着（`carry`）。
+                       * 不回传的话：我的菜谱 → 详情 → 编辑 → 返回详情时，
+                       * 详情那份「从我的菜谱来」就没了，再返回会落到菜谱小书。
+                       */
+                      state={{ carry: location.state }}
                     >
                       编辑
                     </Link>
