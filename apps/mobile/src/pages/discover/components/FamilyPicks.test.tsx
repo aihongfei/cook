@@ -125,6 +125,47 @@ it('点一行进那道菜的详情页', async () => {
   expect(screen.getByTestId('probe').textContent).toBe('/recipes/jis-abc')
 })
 
+/*
+ * 排版两条（用户 2026-10-13：「这块怎么只有 1、2、3 有序号下面的呢，然后每行右面还都是空的」）。
+ *
+ * jsdom 算不了布局，所以守的是**决定布局的那个结构**（与 R-035「两个入口并排」同一口径）：
+ * 谁被移出这个父节点、谁被包进另一层，屏幕上的那行就散了——结构在，排版就守得住。
+ */
+it('每一行都有名次（不是只有前三名），第 4 行起也在**同一条竖线**上', async () => {
+  mockGet({
+    picks: board({
+      total: 5,
+      items: [1, 2, 3, 4, 5].map((n) => pick({ id: `r${n}`, name: `第${n}道` })),
+    }),
+  })
+  renderPicks()
+
+  await screen.findByText('第5道')
+  const items = Array.from(document.querySelectorAll('.picks__item'))
+  expect(items).toHaveLength(5)
+  const ranks = items.map((item) => item.querySelector('.picks__rank')?.textContent ?? '（缺名次）')
+  // 少一个名次，那行的图与菜名就会整条左滑，跟上面的对不齐
+  expect(ranks).toEqual(['1', '2', '3', '4', '5'])
+})
+
+it('菜名与理由在同一行里（菜名吃掉中间空档、理由贴行尾），不再上下两行留白', async () => {
+  mockGet({ picks: board({ items: [pick({ name: '番茄炒蛋', cooked: 3, favorites: 2 })] }) })
+  renderPicks()
+
+  const link = await screen.findByRole('link', { name: '查看番茄炒蛋菜谱' })
+  const name = link.querySelector('.picks__name')
+  const reason = link.querySelector('.picks__reason')
+  expect(name).not.toBeNull()
+  expect(reason).not.toBeNull()
+  // 两者是同一个 flex 行的**兄弟**：中间没有那层「上下两行」的包裹（`.picks__body` 已撤掉），
+  // 所以它们并排落在同一行上——这也正是"菜名吃掉空档、理由被推到行尾"的前提
+  expect(name?.parentElement).toBe(link)
+  expect(reason?.parentElement).toBe(link)
+  expect(link.querySelector('.picks__body')).toBeNull()
+  // 理由紧跟在菜名后面（顺序反了会变成"做过 3 次 番茄炒蛋"）
+  expect(name?.nextElementSibling).toBe(reason)
+})
+
 it('名单超过一屏时说还有多少道；**卡头不再挂"收藏/点菜"入口**（2026-10-13 信息架构改版）', async () => {
   mockGet({ picks: board({ total: 20, items: [pick()] }) })
   renderPicks()

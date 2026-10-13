@@ -29,8 +29,14 @@ function PickRow({ pick, scope, from, rank }: { pick: FamilyPick; scope: 'family
   const reason = pickReason(pick, scope)
   return (
     <li className="picks__item">
-      {/* 前三名给名次；第 4 名往后就是"列表"，再编号只会占地方 */}
-      {rank <= 3 && <span className="picks__rank">{rank}</span>}
+      {/*
+       * 每一行都给名次（用户 2026-10-13：「这块怎么只有 1、2、3 有序号下面的呢」）。
+       * 原来只给前三名，本意是"第 4 名往后就是列表、不再编号"，但这个名次块是
+       * **定宽的一列**（`flex: 0 0 auto`）：少了它整行就往左滑，第 4 行起图片与菜名
+       * 跟上面的**不在同一条竖线上**，看着像排版坏了。现在统一垫着——
+       * 这段列表的读法就是"排行"，各行对齐比省那 28px 重要。
+       */}
+      <span className="picks__rank">{rank}</span>
       <Link
         className="picks__link"
         to={`/recipes/${encodeURIComponent(pick.id)}`}
@@ -38,10 +44,16 @@ function PickRow({ pick, scope, from, rank }: { pick: FamilyPick; scope: 'family
         aria-label={`查看${pick.name}菜谱`}
       >
         <span className="picks__pic"><RecipeImage src={pick.image} name={pick.name} /></span>
-        <span className="picks__body">
-          <span className="picks__name">{pick.name}</span>
-          <span className="picks__reason">{reason}</span>
-        </span>
+        {/*
+         * 菜名与理由摆成**一行**：菜名吃掉中间的空档、理由贴到行尾
+         * （用户 2026-10-13：「每行右面还都是空的」）。
+         * 原来是上下两行、都靠左，于是行右侧空着一大片：卡片内宽约 329px，
+         * 而"做过 1 次"只有 60px 出头——右边那截白着没有任何用处。
+         * 理由仍然每行都有（没有理由的排名用户不会信，见文件头），只是挪到
+         * 眼睛读完菜名自然落到的地方。
+         */}
+        <span className="picks__name">{pick.name}</span>
+        <span className="picks__reason">{reason}</span>
       </Link>
     </li>
   )

@@ -1785,3 +1785,45 @@ pnpm --dir apps/mobile exec tsc -b; echo "exit=$?"             # exit 2，7 条�
 **反证（1 组）**：把 `picks` 改回组件内 `useState`（同一挂载期照常工作）→ 第 1 条在"返回之后"精确变红；恢复后 21/21。
 
 **测试文件的两处配套改动**：① `beforeEach` 加 `useAiSuggestSession.getState().close()`——store 是**模块级**的，不重置会把上一条的推荐带进下一条（组件会误判自己"续上"、连 AI 那批都不去要），三条既有用例因此假红；② `freezeClock()` 取代 4 处默认全假的假定时器（见上表与 `RISKS.md` R-31）。
+
+## R-038 「家人最爱」排版：每行都给名次 + 菜名理由同行（D-046）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：`apps/mobile/src/pages/discover/components/FamilyPicks.tsx`（名次不再只给前三；撤掉 `.picks__body` 那层）；`apps/mobile/src/pages/discover/discover.scss`（`.picks__name` 加 `flex: 1 1 auto` + `min-width: 0`，`.picks__reason` 加 `flex: 0 0 auto`，删掉 `.picks__body` 规则）。**后端一行未改，数据口径一行未改。**
+
+### 怎么验
+
+```bash
+pnpm --dir apps/mobile exec vitest run src/pages/discover/components/FamilyPicks.test.tsx; echo "exit=$?"   # 10/10
+pnpm --dir apps/mobile test; echo "exit=$?"                    # 293/293
+pnpm --dir apps/mobile exec tsc -b; echo "exit=$?"             # exit 2，7 条既有错误（R-25），本轮文件零错误
+```
+
+浏览器（391×844 与 320×844 各看一次）：`.picks__item` 每行都有 `.picks__rank`；各行的 `.picks__pic`、`.picks__name`、`.picks__reason` 的 **x 坐标各自一致**（即同一条竖线），且 `.picks__reason` 的右边缘不超出 `.picks__item`。
+
+### 实测结果（2026-10-13）
+
+| 项 | 结果 |
+| --- | --- |
+| 新增用例 | **2 条**：① 「每一行都有名次（不是只有前三名），第 4 行起也在**同一条竖线**上」；② 「菜名与理由在同一行里（菜名吃掉中间空档、理由贴行尾），不再上下两行留白」 |
+| 这个文件 | **10/10**（改前 8 条） |
+| 全量前端 | **293/293**（34 个文件；改前 291，本轮 +2） |
+| 前端类型 | `tsc -b` **exit 2、7 条既有错误**，本轮两个文件（`FamilyPicks.tsx` / `discover.scss`）零错误 |
+| 反证 ① | 名次恢复 `rank <= 3 && …` → 那条红：`expected [ '1','2','3','（缺名次）','（缺名次）' ] to deeply equal [ '1','2','3','4','5' ]`（缺的正是第 4、5 行）；恢复后 10/10 |
+| 反证 ② | 菜名/理由包回 `.picks__body`（上下两行）→ 同行那条红：`expected <span class="picks__body">…(2)</span> to be <a class="picks__link" …(3)>…(2)</a>`；恢复后 10/10 |
+| 浏览器几何（391×844，真数据 5 行） | 图片 x **全 64**、菜名 x **全 113**、理由 x **全 313**（行尾 359）；名次列宽 20px、图片 40px |
+| 浏览器几何（320×844） | 菜名可用宽 120px，5 行菜名均不截断；理由 x **全 242**、不换行（高 <20px） |
+| 最坏情况（390 与 320 各测） | 菜名「番茄土豆炖牛腩煲」+ 理由「做过 12 次 · 3 人收着」：391 下菜名 126px **不截断**、理由右边缘 355（< 行右 359）；320 下菜名压到 55px 才截断，理由仍在框内（截的是菜名，不是把理由挤出去） |
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| 第 4 行起整体左移 28px | 名次是 `flex: 0 0 auto` 的**定宽列**，只给前三名时第 4 行没有这个占位块 | 每行都给名次；用"各行的图片/菜名 x 坐标是否一致"来量，而不是只看某一行 |
+| 只给 `.picks__name` 加 `flex: 1` 还不够 | 原来是"名字/理由上下两行"，空档留在**列方向**：不撤掉 `.picks__body` 那层，怎么调 flex 右侧都还是空的 | 撤掉包裹层，让两者成为同一 flex 行的兄弟；断言直接盯"`.picks__body` 不存在 + 名字的下一个兄弟是理由" |
+| jsdom 算不了布局 | 与 R-035 同一处境 | 守**决定布局的结构**（谁是谁的父/兄弟），真正的几何用浏览器当场量（上表两档宽度 + 最坏情况） |
+
+### 回归测试
+
+**新增 2 条**（`FamilyPicks.test.tsx`）：① 5 行数据下逐行读 `.picks__rank`，断言 `['1','2','3','4','5']`；② 断言 `.picks__name` 与 `.picks__reason` 的父节点都是 `a.picks__link`、`.picks__body` 不存在、且名字的下一个兄弟就是理由。
+
+**反证（2 组，各自独立）**：见上表——两组都只让**对应的那一条**红，互不干扰。

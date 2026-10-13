@@ -635,7 +635,8 @@
 
 .picks__link {
   display: flex;
-  /* 一行：图 + 名字/理由。min-width:0 让长菜名能省略号截断而不是把行撑破 */
+  /* 一行：名次 + 图 + 菜名（吃掉中间空档）+ 理由（贴行尾）。
+     min-width:0 让长菜名能省略号截断而不是把行撑破 */
   flex: 1 1 auto;
   gap: 9px;
   align-items: center;
@@ -665,14 +666,11 @@
   object-fit: cover;
 }
 
-.picks__body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
 .picks__name {
+  /* 菜名吃掉名次与理由之间的全部空档（理由因此被推到行尾）：
+     不写 flex 的话它会缩成内容宽，空档全留在最后，右边照样是空的 */
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   font-size: 13.5px;
   color: var(--color-ink);
@@ -681,6 +679,8 @@
 }
 
 .picks__reason {
+  /* 不参与伸缩：它是这一行的"注释"，宽度由内容决定，不许被菜名挤变形 */
+  flex: 0 0 auto;
   font-size: 11.5px;
   color: var(--color-ink-3);
 }
