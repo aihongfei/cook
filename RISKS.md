@@ -294,3 +294,15 @@
   3. **反证注入后先确认构建 exit 0**，再看断言红不红；红的必须是断言（输出里有 `not ok` / `expected … actual …`），不是 `error TS`；
   4. **断言通过之后，读一遍它打印的 detail**：说明文字与结论矛盾时，先怀疑说明文字的写法（`??`、`||`、三元里把 `null` 当"没有"这类）。
 - **相关**：`RUNBOOK.md` R-036 的"踩过的坑"；R-25（静态检查的假证据——同类问题的另一个面）；`DECISIONS.md` D-044。
+
+## R-31 测试里 `vi.useFakeTimers()` 会把动画帧循环一起打桩，症状伪装成"选择器写错"（🟡 2026-10-13 踩了一次，已处置并立规矩）
+
+- **现象**：新加的两条用例（点菜名进详情 → 返回）里，第二条红在"找不到 `.adm-mask` 遮罩"上——看着像选择器写错。**但单跑那一条是绿的，前面接一条就红**。失败现场的真实 DOM 是：抽屉体停在 `transform: translate(0, 100%)`、`pointer-events: none`——**弹簧一帧都没跑，抽屉还在屏幕外**，而遮罩（antd-mobile 的 `Mask` 靠弹簧的 `onStart` 才挂载）因此永远不出现。
+- **根因**：这个测试文件里几条用例为了锁住「现在几点」（`nextMealDefaults` 按小时决定推荐落到哪一餐）调了 `vi.useFakeTimers()`。它的**默认行为是连 `setTimeout` / `requestAnimationFrame` / `performance` 一起打桩**，而 react-spring 的帧循环正是 `requestAnimationFrame` + `performance.now`（见 `@react-spring/rafz` 的 `loop()` / `raf.now`）。打桩后循环再也推不动，动画停在第一帧。
+- **为什么难发现（三点值得单独记）**：
+  1. **单跑绿、连跑红**——`afterEach` 里有 `vi.useRealTimers()`，所以"上一条用例装过假定时器"这件事在失败现场已经看不到了；能看到的只有"遮罩不存在"；
+  2. **红在"元素找不到"上**，第一反应是改选择器/加 waitFor，而真正的原因不在查询上（改查询只会把红推给别人）；
+  3. **这些用例根本不需要假定时器**：文件里**没有任何一处 `advanceTimersByTime`**，只用 `setSystemTime` 锁钟。
+- **处置**：抽了一个带说明的 `freezeClock()` 助手，统一改成 `vi.useFakeTimers({ toFake: ['Date'] })` + `setSystemTime(...)`——**只假 `Date`，把定时器与动画帧留给真实实现**。改完 21/21 全绿，整文件反而更快（1727ms → 865ms）。
+- **规矩（本轮起）**：① 装假定时器前先问"我到底要假什么"——只要锁时间就写 `toFake: ['Date']`，**不要用默认全假**；② 凡"某个 DOM 元素在某条件下才出现"的断言，先分清它背后是**状态驱动**还是**动画驱动**（动画驱动的元素在 jsdom 里依赖真实帧循环，假定时器会让它永不出现）；③ **"单跑绿、连跑红"优先怀疑跨用例污染**（本项目的第四次：R-028 的随机、R-021 的 jsdom 图像能力、本轮，以及各 store 泄漏那次），而不是先怀疑自己刚写的那段。
+- **相关**：`apps/mobile/src/pages/discover/components/ai-sheets.test.tsx`（`freezeClock()`）；`src/components/ui/bottom-sheet.test.tsx`（动画契约的原始用例，它没装假定时器，所以从没踩到这个坑）；`RISKS.md` R-030（另一类"假证据"——绿断言配反向说明）；`DECISIONS.md` D-045。

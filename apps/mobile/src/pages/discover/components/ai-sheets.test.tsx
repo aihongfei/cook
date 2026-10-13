@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import type { ChatTurn, SuggestedPick } from '@/api/ai'
-import { toast } from '@/components/ui/toast'
+import { Toaster, toast } from '@/components/ui/toast'
+import { useAiSuggestSession } from '@/stores/ai-suggest-session'
 import { useAuth } from '@/stores/auth'
 import { HINT_POOL } from '../ai-prompts'
+import DiscoverPage from '../DiscoverPage'
 import AiChatSheet from './AiChatSheet'
 import AiSuggestSheet from './AiSuggestSheet'
 
@@ -148,8 +150,30 @@ function clickFirstHint() {
   fireEvent.click(hints[0])
 }
 
+/**
+ * 锁住「现在几点」——推荐落到哪一餐由 `nextMealDefaults` 按小时决定（见 order/next-meal），
+ * 不锁的话用例在下午三点前后会落到不同的一餐，断言跟着飘。
+ *
+ * **只假 `Date`，不要把 setTimeout/requestAnimationFrame 一起假**（`vi.useFakeTimers()` 的默认行为）：
+ * 抽屉的入场动画由 react-spring 逐帧写成，而它的帧循环是 `requestAnimationFrame` + `performance.now`。
+ * 那些被一起打桩后弹簧一帧都跑不动——抽屉会**永久停在屏幕外**（`translate(0, 100%)`），
+ * 连遮罩都不挂载（Mask 靠弹簧的 onStart 才渲染）。症状很迷惑：单跑一条绿、前面接一条就红，
+ * 而红在"找不到遮罩"上，看着像选择器写错。这里没有一处用 advanceTimersByTime，只锁钟就够。
+ */
+function freezeClock() {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-10-12T10:00:00+08:00'))
+}
+
 beforeEach(() => {
   localStorage.clear()
+  /*
+   * 「AI 帮你想」的会话状态现在在 store 里（D-045：为了点菜名看详情后回来还能原样），
+   * 而 store 是**模块级**的——不重置的话上一条用例留下的推荐会带进下一条，
+   * 组件会以为自己是"续上"（resumed）、连 AI 那批都不去要，三条用例因此假红。
+   * 等于"每条用例从一个干净的新开开始"（与用户点开抽屉时同一状态）。
+   */
+  useAiSuggestSession.getState().close()
   useAuth.getState().setSession({
     token: 't', refreshToken: 'r',
     user: { id: 'u1', account: 'mama', nickname: '妈妈', avatar: '🍳', email: null, createdAt: new Date().toISOString() },
@@ -182,8 +206,7 @@ it('没配 AI 时不编推荐，明说去哪配（两个入口同一口径）', 
 it('推荐落地的菜点得动，而且带着日期与餐次（少一个后端就 400）', async () => {
   // 固定在上午 10 点：默认"下一餐"= 今天晚餐。时间参与判定，不固定就会早晚跑出两种结果
   // （只在这个用例里开假时钟：它会拖住 react-query 的 pending 状态，问答那两个用例等不了）
-  vi.useFakeTimers({ shouldAdvanceTime: true })
-  vi.setSystemTime(new Date('2026-10-12T10:00:00+08:00'))
+  freezeClock()
   try {
     const { post } = mockApi()
     renderSheet(<AiSuggestSheet visible onClose={() => {}} />)
@@ -496,8 +519,7 @@ it('再问一句时上一轮的建议要收走（它属于上一句回答）', a
 // ---------- 用户 2026-10-13 的三条反馈 ----------
 
 it('再问一次时先把上一次的推荐清掉（旧结果留着会被当成这一问的答案）', async () => {
-  vi.useFakeTimers({ shouldAdvanceTime: true })
-  vi.setSystemTime(new Date('2026-10-12T10:00:00+08:00'))
+  freezeClock()
   try {
     /*
      * 第一问给「番茄炒蛋」；第二问**故意让它一直挂着**（不 resolve）。
@@ -536,8 +558,7 @@ it('再问一次时先把上一次的推荐清掉（旧结果留着会被当成�
 })
 
 it('点过的那道置灰并说"已加入"，不能再点第二次（同一道菜不该加两遍）', async () => {
-  vi.useFakeTimers({ shouldAdvanceTime: true })
-  vi.setSystemTime(new Date('2026-10-12T10:00:00+08:00'))
+  freezeClock()
   try {
     // GET 必须一起桩上：少了 /family 与 /orders/options，`target.day` 是空的，
     // 「点这道」会直接 return（我第一次就是这么写的，界面永远等不到"已加入"）
@@ -576,4 +597,112 @@ it('点过的那道置灰并说"已加入"，不能再点第二次（同一道�
   } finally {
     vi.useRealTimers()
   }
+})
+
+// ---------- 菜名点得进详情，返回时抽屉原样还在（用户 2026-10-13 提） ----------
+
+/**
+ * 发现页那一层的还原：点推荐里的菜名 → 路由跳到详情 → 返回 → 抽屉还开着、推荐还在。
+ *
+ * 为什么必须把这一步单独测出来：**发现页会被真正卸载**（点菜名是一次路由跳转），
+ * 所以"返回后还在"这件事只取决于两处——会话状态在 store 里（活过卸载）、
+ * 且跳转路径**没有**调用任何清空的动作。组件内的 useState 版本在这里必然失败
+ * （返回值全变 null），这条用例正是守它的。
+ */
+/**
+ * 详情页探针：**必须是组件**才能用 useLocation（在普通函数里调 hook 会报
+ * "Invalid hook call"——第一版就是这么写的，两条用例直接红）。
+ *
+ * 它做两件事：把路由 state 里的来源显示出来（`from` 由 Link 带过去，不在 DOM 属性上，
+ * 只能这么读），并给一个"返回"链接。真实详情页的返回按钮就是
+ * `<Link to={readBackLink(state, ...).to}>`，同一套口径。
+ */
+function DetailProbe() {
+  const from = (useLocation().state as { from?: string } | null)?.from ?? ''
+  return (
+    <div data-testid="detail">
+      菜谱详情
+      <span data-testid="from">{from}</span>
+      <Link data-testid="back" to="/discover">返回发现页</Link>
+    </div>
+  )
+}
+
+function renderDiscoverWithDetail() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  clients.push(client)
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/discover']}>
+        <Routes>
+          <Route path="/discover" element={<DiscoverPage />} />
+          <Route path="/recipes/:id" element={<DetailProbe />} />
+        </Routes>
+      </MemoryRouter>
+      <Toaster />
+    </QueryClientProvider>,
+  )
+}
+
+it('点菜名进详情，返回后抽屉还开着、推荐原样（会话状态活过路由跳转）', async () => {
+  freezeClock()
+  try {
+    mockApi()
+    renderDiscoverWithDetail()
+
+    // 开抽屉 → 问一批
+    // 入口按钮按角色查：页面上"AI 帮你想"有两处（这个按钮 + 抽屉标题），按文案抓会抓到两个
+    fireEvent.click(await screen.findByRole('button', { name: /AI 帮你想/ }))
+    await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
+    clickFirstHint()
+    expect(await screen.findByText('番茄炒蛋')).toBeTruthy()
+
+    // 菜名是链接（不是纯文字）：点它进详情
+    const link = screen.getByText('番茄炒蛋').closest('a')
+    expect(link).not.toBeNull()
+    expect(link?.getAttribute('href')).toBe('/recipes/r1')
+    fireEvent.click(link as HTMLElement)
+    expect(await screen.findByTestId('detail')).toBeTruthy()
+    // 来源真的带到了详情页——**这是"返回能回发现页"的前提**（少了它返回按钮指向菜谱小书，
+    // 用户就回不到这个抽屉了）。用探针读路由 state，不猜 DOM 属性。
+    expect(screen.getByTestId('from').textContent).toBe('/discover')
+
+    /*
+     * 从详情**返回**：这里真的走一次返回动作（详情页的那个按钮用的是 `<Link to={back.to}>`），
+     * 而不是只看路由。返回后要同时成立两件事：
+     * ① 抽屉还开着（`open` 没被谁改掉）；② 推荐原样在屏幕上（列表、理由、序号都在）。
+     */
+    fireEvent.click(screen.getByTestId('back'))
+    // 抽屉标题（不是页面那个入口按钮）：按文案抓会同时命中两个，所以限定到 .sheet__title
+    expect(await screen.findByText('AI 帮你想', { selector: '.sheet__title' })).toBeTruthy()
+    expect(document.querySelector('.sheet__body')).not.toBeNull()
+    expect(screen.getByText('番茄炒蛋')).toBeTruthy()
+    expect(screen.getByText('快手')).toBeTruthy()
+    expect(useAiSuggestSession.getState().open).toBe(true)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('关掉抽屉再打开是干净的一次（点菜名那条路不背这个锅）', async () => {
+  mockApi()
+  renderDiscoverWithDetail()
+
+  fireEvent.click(await screen.findByText('AI 帮你想'))
+  await waitFor(() => expect(document.querySelectorAll('.ai__hint:not(.ai__hint--more)').length).toBeGreaterThan(0))
+  clickFirstHint()
+  expect(await screen.findByText('番茄炒蛋')).toBeTruthy()
+
+  // 点遮罩关掉（用户自己的关闭）。遮罩要等抽屉入场那一帧渲染出来才在 DOM 里（Mask 用
+  // ShouldRender 挂载），所以先等它出现再点——直接 querySelector 会拿到 null
+  await waitFor(() => expect(document.querySelector('.adm-mask')).not.toBeNull())
+  const mask = document.querySelector('.adm-mask') as HTMLElement
+  fireEvent.click(mask)
+  await waitFor(() => expect(useAiSuggestSession.getState().open).toBe(false))
+  // 推荐与已加入标记一起清掉：下次打开是干净的一次
+  expect(useAiSuggestSession.getState().picks).toBeNull()
+
+  fireEvent.click(await screen.findByRole('button', { name: /AI 帮你想/ }))
+  await waitFor(() => expect(useAiSuggestSession.getState().open).toBe(true))
+  expect(screen.queryByText('番茄炒蛋')).toBeNull()
 })

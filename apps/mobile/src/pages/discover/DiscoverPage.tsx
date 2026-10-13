@@ -5,6 +5,7 @@ import Page from '@/components/ui/Page'
 import { toast } from '@/components/ui/toast'
 import { apiErrorMessage } from '@/api/client'
 import { fetchRandomRecipe } from '@/api/recipes'
+import { useAiSuggestSession } from '@/stores/ai-suggest-session'
 import FamilyPicks from './components/FamilyPicks'
 import WeekPlan from './components/WeekPlan'
 import AiSuggestSheet from './components/AiSuggestSheet'
@@ -23,8 +24,19 @@ import './discover.scss'
  * （让 AI 挑，要等十几秒）。问答是另一种问题（"豆腐怎么存"），所以只给小字入口。
  */
 export default function DiscoverPage() {
-  // 两个抽屉各自用 key 在打开时重挂载：关掉再打开就是干净的一次（上次的推荐/对话不留着）
+  /*
+   * 两个抽屉各自用 key 在打开时重挂载：关掉再打开就是干净的一次（上次的推荐/对话不留着）。
+   *
+   * **「AI 帮你想」的开合在 store 里**（`stores/ai-suggest-session`），不在这里的 useState：
+   * 用户点推荐里的菜名去看详情时，本页会被卸载，useState 会连同"抽屉开着"这个事实一起丢，
+   * 返回时就变成关着的了（用户 2026-10-13 明确要求"返回时还是打开的、保持原样"）。
+   * 开一次走 `start()`（清掉上一场），关一次走 `close()`（同样清干净）。
+   * 「问 AI」没有这个需求（对话里没有可点的菜名入口），仍是本地 state。
+   */
   const [sheet, setSheet] = useState<'suggest' | 'chat' | null>(null)
+  const suggestOpen = useAiSuggestSession((state) => state.open)
+  const startSuggest = useAiSuggestSession((state) => state.start)
+  const closeSuggest = useAiSuggestSession((state) => state.close)
   const [shaking, setShaking] = useState(false)
   const navigate = useNavigate()
 
@@ -66,7 +78,7 @@ export default function DiscoverPage() {
               </span>
               <span className="today__shake-text">{shaking ? '正在摇…' : '摇一道'}</span>
             </button>
-            <button type="button" className="today__ai" onClick={() => setSheet('suggest')}>
+            <button type="button" className="today__ai" onClick={startSuggest}>
               <span className="today__ai-emoji" aria-hidden>
                 🍳
               </span>
@@ -91,7 +103,9 @@ export default function DiscoverPage() {
         <WeekPlan />
       </div>
 
-      {sheet === 'suggest' && <AiSuggestSheet key="suggest" visible onClose={() => setSheet(null)} />}
+      {/* 「AI 帮你想」的开关来自 store：点菜名进详情再返回时它还得开着（见上方注释）。
+          key 只在"新开一次"时变（start 会清空 picks），所以续上时是同一个实例、内容原样 */}
+      {suggestOpen && <AiSuggestSheet key="suggest" visible onClose={closeSuggest} />}
       {sheet === 'chat' && <AiChatSheet key="chat" visible onClose={() => setSheet(null)} />}
     </Page>
   )

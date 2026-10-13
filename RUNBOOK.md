@@ -1732,3 +1732,56 @@ pnpm --dir apps/mobile exec tsc -b                     # ⚠️ 必须带 -b，�
 **反证（1 组）**：去掉补发 → 推荐与提示词双双 502，且那条断言变红。恢复后 29/29。
 
 **注**：`pi-agent-core` **没有**引入（理由见 D-044 第 1 条：它是状态化 Agent + 自动工具循环，会把 `runToolLoop` 现有三道闸门搬进框架语义——那是行为改变）。所以本项目的"工具循环"仍是我们自己的代码，pi-ai 只负责"发消息、收正文与工具调用、重放历史（含思维链）"。
+
+## R-037 推荐里的菜名点得进详情、返回时抽屉原样还在（D-045）（✅ 已验证，2026-10-13）
+
+**改了哪些地方**：新增 `apps/mobile/src/stores/ai-suggest-session.ts`（这一场会话的状态：open / hint / picks / added / quickHints）；`apps/mobile/src/pages/discover/components/AiSuggestSheet.tsx` 的会话状态整体改用该 store，菜名换成 `<Link to={/recipes/:id} state={{from:'/discover'}}>`；`apps/mobile/src/pages/discover/DiscoverPage.tsx` 的 `suggestOpen/startSuggest/closeSuggest` 改用 store；`apps/mobile/src/pages/discover/discover.scss` 加 `.ai__pick-main` 链接样式。**后端一行未改。**
+
+### 怎么验
+
+```bash
+# 1) 这个文件（21 条）
+pnpm --dir apps/mobile exec vitest run src/pages/discover/components/ai-sheets.test.tsx; echo "exit=$?"   # 21/21
+
+# 2) 全量前端与类型（tsc 必须带 -b，见 RISKS R-25）
+pnpm --dir apps/mobile test; echo "exit=$?"                    # 291/291
+pnpm --dir apps/mobile exec tsc -b; echo "exit=$?"             # exit 2，7 条既有错误（未新增，且都不在本轮改动文件里）
+
+# 3) 浏览器真流程（前端 :5173、后端 :3000 都在跑）
+#    发现页 → 点「AI 帮你想」→ 点一条快问 → 等推荐（真网关 10～20s）→ 点菜名 → 详情里点「← 返回发现」
+#    → 断言：抽屉仍开着，菜名/理由/序号、输入框内容、快问那一排全部原样
+```
+
+### 实测结果（2026-10-13）
+
+| 项 | 结果 |
+| --- | --- |
+| 新增用例 | **2 条**：① 「点菜名进详情，返回后抽屉还开着、推荐原样（会话状态活过路由跳转）」；② 「关掉抽屉再打开是干净的一次（点菜名那条路不背这个锅）」 |
+| 这个文件 | **21/21**（改前 19/21 红） |
+| 全量前端 | **291/291**（34 个文件；改前 289，本轮 +2） |
+| 前端类型 | `tsc -b` **exit 2、7 条既有错误**（R-25 记录在案），本轮改动文件**零错误**——用 `grep -E "AiSuggestSheet\|ai-suggest-session\|DiscoverPage\|ai-sheets.test"` 核对过 |
+| 反证 | 把推荐改回组件内 `useState`（**同一挂载期内照常工作**）→ 那条"返回后推荐原样"的断言精确变红：`Unable to find an element with the text: 番茄炒蛋`，红在**返回之后**那一步，且抽屉本身仍开着。恢复后 21/21。**这是真反证（断言红，非编译红）** |
+| 浏览器（真网关） | 点开抽屉 → 5 条快问来自 AI → 点「来点辣的」→ **14s** 返回 4 道（红油大刀耳片 / 香辣魔芋 / 鱼香肉丝 / 西红柿黄瓜汤，各带理由）→ 点「红油大刀耳片」→ 详情页 URL `/recipes/jis-d49cd9e33196bfa063fb`、返回入口显示**「← 返回发现」**（说明 `from` 带到了）→ 点返回 → `/discover`，抽屉标题「AI 帮你想」在、4 道菜名+理由+序号 1~4 在、4 个「点这道」在、输入框仍是「来点辣的」、5 条快问原样 |
+| 顺手修掉 | 测试文件里 4 处 `vi.useFakeTimers({shouldAdvanceTime:true})` → `freezeClock()`（只假 `Date`），见"踩过的坑"与 `RISKS.md` R-31；整文件耗时 1727ms → 865ms |
+
+### 踩过的坑
+
+| 现象 | 根因 | 处置 |
+| --- | --- | --- |
+| 新用例红在 `ReferenceError: Toaster is not defined` | 新加的 `renderDiscoverWithDetail()` 渲染了 `<Toaster />`，而文件只导入了 `toast` | 补 `import { Toaster, toast } from '@/components/ui/toast'` |
+| 断言 `Found multiple elements with the text: AI 帮你想` | 发现页那个**入口按钮**与**抽屉标题**文案相同，`findByText` 抓到两个 | 入口按钮改按角色查（`findByRole('button', {name: /AI 帮你想/})`），抽屉标题限定 `{ selector: '.sheet__title' }` |
+| 「点菜名那条路」用例**单跑绿、连跑红**，红在 `.adm-mask` 是 `null` | 同文件前一条用例的 `vi.useFakeTimers()` **默认连 `requestAnimationFrame`/`performance` 一起打桩**，react-spring 帧循环停摆 → 抽屉永久停在 `translate(0,100%)`、遮罩（靠弹簧 `onStart` 挂载）永不出现 | 抽 `freezeClock()` = `useFakeTimers({toFake:['Date']})` + `setSystemTime`；**只假 Date**。详见 `RISKS.md` R-31 |
+| 反证第一版**红早了**（红在导航前的 `findByText('番茄炒蛋')`） | 把 `picks` 换成 `useState(null)[0]` 连**同一挂载期内的写入**都没了，隔离不出"跨路由存活"这个性质 | 改成保留"同一挂载期照常工作"的最小改动（`useState` + `setLocalPicks` 在 `onSuccess`/`ask` 里照常调用），于是红的正好是返回之后那一步 |
+| 浏览器点按钮连续两次超时（`Timeout waiting for locator .today__ai`） | 桥的 Playwright click 偶发挂起（`RISKS.md` R-026 同类）。现场核实过：按钮可见、`pointer-events: auto`、中心点命中的是它自己的子 `span`——**不是被遮挡** | 改走 `dom_cua.get_visible_dom()` 拿 ref 再 `dom_cua.click({node_id})`，一次成功 |
+| 页内 `evaluate` 里写了 `as HTMLButtonElement` 报 `Unexpected identifier 'as'` | 传给页面上下文的是**纯 JS**，不是 TS | 页面上下文里的脚本一律写纯 JS（类型断言只留在测试源码里） |
+
+### 回归测试
+
+**新增 2 条**（`apps/mobile/src/pages/discover/components/ai-sheets.test.tsx`）：
+
+1. **跨路由存活**：发现页 + 详情页探针（真 `<Routes>`），开抽屉 → 问一批 → 点菜名 → 落详情（并断言 `from` 是 `/discover`）→ 点返回 → 抽屉标题在、推荐与理由在、`useAiSuggestSession.getState().open === true`；
+2. **关掉再开是干净一次**：点遮罩 → `open` 变 false 且 `picks` 被清 → 再点入口 → `open` 为 true 且旧推荐不在。
+
+**反证（1 组）**：把 `picks` 改回组件内 `useState`（同一挂载期照常工作）→ 第 1 条在"返回之后"精确变红；恢复后 21/21。
+
+**测试文件的两处配套改动**：① `beforeEach` 加 `useAiSuggestSession.getState().close()`——store 是**模块级**的，不重置会把上一条的推荐带进下一条（组件会误判自己"续上"、连 AI 那批都不去要），三条既有用例因此假红；② `freezeClock()` 取代 4 处默认全假的假定时器（见上表与 `RISKS.md` R-31）。
