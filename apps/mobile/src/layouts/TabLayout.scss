@@ -194,19 +194,26 @@
  *   否则在圆点上点一下会"什么都没发生"（本项目在"点不动的箭头"上踩过，见 D-066）；
  * - **深浅用品牌暖色而不是正红**：这个应用整体是手绘暖色，一颗 #f00 会像系统推送气泡，
  *   与界面语汇不搭（与 AI 悬浮球那条同一考虑）。
+ *
+ * 2026-10-14 补：数字原来**没居中**（用户截图，APK 实测）——`line-height: 15px` 配上
+ * 全局 `box-sizing: border-box`（见 styles/index.scss），15px 的盒子里要被边框占掉 3px、
+ * 内容盒只剩 12px，那一行字于是整体下溢、贴到圆的下沿。摆正改由 flex 做，
+ * `line-height` 只留 `1`：行高一旦参与"把文字摆正"就会和盒模型互相打架。
  */
 .tab-bar__dot {
   position: absolute;
   top: 2px;
   left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-width: 15px;
   height: 15px;
   padding: 0 4px;
   font-size: 10px;
   font-style: normal;
-  line-height: 15px;
+  line-height: 1;
   color: var(--color-paper);
-  text-align: center;
   background: #d4552b;
   border: 1.5px solid var(--color-paper);
   border-radius: 999px;

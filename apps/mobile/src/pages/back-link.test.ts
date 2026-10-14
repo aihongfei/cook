@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { readBackLink, readCarry } from './back-link'
+import { readBackLink, readCarry, tabOf } from './back-link'
 
 // 子页面的「返回」目标（F0-05）。要盯住的事：
 // ① **每个 Tab 都认得出来**（发现页「摇一道」那条 bug 就是这里漏了 /discover：
@@ -57,6 +57,30 @@ it('认不出来就用兜底（路由 state 是外部输入，不能原样塞进
     expect(back.to).toBe('/mine')
     expect(back.label).toBe('返回我的')
   }
+})
+
+/*
+ * 这一餐的详情也是"能回去的地方"（用户 2026-10-14 报的 bug）：
+ * 从某一餐的详情点进某道菜的菜谱，返回却落到了**菜谱小书**——因为来源
+ * `/order/2026-10-18-DINNER` 不在静态表里，被静默丢掉、走了兜底。
+ *
+ * `/order/history` 是静态条目，绝不能被这条动态规则吃掉（它没有 id 那一段）。
+ */
+it('这一餐的详情认得出来：「返回这一餐」，并且底栏亮订单', () => {
+  const back = readBackLink({ from: '/order/2026-10-18-DINNER' }, '/recipes')
+  expect(back.to).toBe('/order/2026-10-18-DINNER')
+  expect(back.label).toBe('返回这一餐')
+  expect(tabOf('/order/2026-10-18-DINNER')).toBe('/order')
+})
+
+it('「点单历史」仍走它自己的静态条目（不被这一餐详情那条动态规则抢走）', () => {
+  const back = readBackLink({ from: '/order/history' }, '/recipes')
+  expect(back.to).toBe('/order/history')
+  expect(back.label).toBe('返回点单历史')
+})
+
+it('一餐详情的子路径不认（`/order/<key>/xxx` 不是合法来源）', () => {
+  expect(readBackLink({ from: '/order/2026-10-18-DINNER/x' }, '/recipes').to).toBe('/recipes')
 })
 
 it('前缀伪装不能蒙过去（/recipes-evil 不是菜谱小书）', () => {

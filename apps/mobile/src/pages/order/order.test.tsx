@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import type { Family } from '@/api/family'
+import type { NotificationBoard } from '@/api/notifications'
 import type { MealCard, OrderBoard } from '@/api/orders'
 import { Toaster, useToasts } from '@/components/ui/toast'
 import { useAuth } from '@/stores/auth'
@@ -165,18 +166,27 @@ function boardFixture(
   return { cards, counts, scope: 'family', ...overrides }
 }
 
-/** 页面同时用 /family、/orders 与 /orders/options */
+/** 页面同时用 /family、/orders、/orders/options 与 /notifications（卡片上的未读标记） */
 function mockGet({
   family = familyFixture() as Family | null,
   boards,
+  notifications = {
+    items: [],
+    unread: 0,
+    unreadByArea: {},
+    unreadByKind: {},
+    prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+  } as NotificationBoard,
 }: {
   family?: Family | null
   boards: Record<string, OrderBoard>
+  notifications?: NotificationBoard
 }) {
   vi.spyOn(apiClient, 'get').mockImplementation((url: string, config?: AxiosRequestConfig) => {
     // 用 AxiosRequestConfig（而不是自定义的窄类型）才能与 axios 的 get 签名兼容
     const params = config?.params as Record<string, string> | undefined
     if (url === '/family') return Promise.resolve({ data: family } as never)
+    if (url === '/notifications') return Promise.resolve({ data: notifications } as never)
     if (url === '/orders/options') {
       return Promise.resolve({
         data: {
@@ -833,4 +843,135 @@ it('卡片标题区是真链接：键盘与读屏也能进详情（不只是鼠�
   const links = screen.getAllByRole('link', { name: /2026-10-13/ })
   expect(links.length).toBe(1)
   expect(links[0].getAttribute('href')).toBe('/order/2026-10-13-DINNER')
+})
+
+/*
+ * 卡片上的未读标记（用户 2026-10-14：「订单有红点，但是里面的卡片看不出来哪个是提醒的」）。
+ *
+ * 红点说"订单这一支有事"，但它不说明**是哪一餐**——卡片的职责是回答这个。
+ * 三条要钉住的性质：
+ *   ① 只标未读的（已读过的不能还挂着标记，否则用户会觉得"我明明点过了"）；
+ *   ② 一餐两条各占各的（菜单 + 做好了），且**做好了排在前面**；
+ *   ③ 标不到卡上的那两类（快过期、该备菜）**不硬塞**——尤其备菜虽属订单，
+ *      但它说的正是"这一餐还空着"，空着的那一餐在列表上没有卡。
+ */
+it('未读标记只落在**那几餐**的卡上：别的卡一点变化都没有', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ mealKey: '2026-10-13-DINNER', date: '2026-10-13', mealLabel: '晚餐' }),
+        cardFixture({
+          mealKey: '2026-10-14-LUNCH',
+          date: '2026-10-14',
+          meal: 'LUNCH',
+          mealLabel: '午餐',
+        }),
+      ]),
+    },
+    notifications: {
+      items: [
+        {
+          id: 'done:2026-10-14-LUNCH',
+          kind: 'done',
+          title: '明天午餐做好了',
+          body: '你点的 红烧排骨 可以吃了',
+          at: '2026-10-14T12:30:00.000Z',
+          to: '/order/2026-10-14-LUNCH',
+          mealKey: '2026-10-14-LUNCH',
+          tag: '做好了',
+          unread: true,
+        },
+      ],
+      unread: 1,
+      unreadByArea: { order: 1 },
+      unreadByKind: { done: 1 },
+      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+    },
+  })
+  renderOrder()
+
+  // 角标上写的是**后端给的那个 `tag`**，前端不另写一张"什么类别写什么字"的表
+  expect(await screen.findByText('做好了')).toBeTruthy()
+  // 有未读的那张卡自己也是"未读样"（左边一条品牌色竖标），另一张完全没变
+  const cards = document.querySelectorAll('.order-card')
+  expect(cards.length).toBe(2)
+  expect(cards[0].className).not.toContain('is-unread')
+  expect(cards[1].className).toContain('is-unread')
+  // 而且角标只挂在那一张上——不是两张各挂一颗
+  expect(cards[0].querySelector('.order-card__corner')).toBeNull()
+  expect(cards[1].querySelector('.order-card__corner')).not.toBeNull()
+})
+
+it('一餐两条未读时都念得出来，且「做好了」在前（哪个更该先看到，不随列表顺序变）', async () => {
+  mockGet({
+    boards: { family: boardFixture() },
+    notifications: {
+      items: [
+        {
+          id: 'done:2026-10-13-DINNER',
+          kind: 'done',
+          title: '今天晚餐做好了',
+          body: '你点的 红烧排骨 可以吃了',
+          at: '2026-10-13T18:30:00.000Z',
+          to: '/order/2026-10-13-DINNER',
+          mealKey: '2026-10-13-DINNER',
+          tag: '做好了',
+          unread: true,
+        },
+        {
+          id: 'plan:2026-10-13-DINNER',
+          kind: 'plan',
+          title: '今天晚餐的菜单定下来了',
+          body: '妈妈定了 2 道菜',
+          at: '2026-10-13T10:00:00.000Z',
+          to: '/order/2026-10-13-DINNER',
+          mealKey: '2026-10-13-DINNER',
+          tag: '菜单',
+          unread: true,
+        },
+      ],
+      unread: 2,
+      unreadByArea: { order: 2 },
+      unreadByKind: { plan: 1, done: 1 },
+      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+    },
+  })
+  renderOrder()
+
+  await screen.findByText('2026-10-13 · 晚餐')
+  // 角标写在**卡片右上角**（用户 2026-10-14 说标题行里的标记他根本没看见），
+  // 一餐最多两条，并排念在一颗角标里（`A · B`），不叠两颗
+  expect(document.querySelector('.order-card__corner')?.textContent).toBe('做好了 · 菜单')
+  // 它不是按钮、也不吃掉点击：点角标等于点这张卡（CSS 里 pointer-events: none）
+  expect(document.querySelector('.order-card__corner')?.tagName).toBe('SPAN')
+})
+
+it('已读的那条不留标记（标过了还挂着，用户会以为没生效）', async () => {
+  mockGet({
+    boards: { family: boardFixture() },
+    notifications: {
+      items: [
+        {
+          id: 'done:2026-10-13-DINNER',
+          kind: 'done',
+          title: '今天晚餐做好了',
+          body: null,
+          at: '2026-10-13T18:30:00.000Z',
+          to: '/order/2026-10-13-DINNER',
+          mealKey: '2026-10-13-DINNER',
+          tag: '做好了',
+          unread: false,
+        },
+      ],
+      unread: 0,
+      unreadByArea: {},
+      unreadByKind: {},
+      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+    },
+  })
+  renderOrder()
+
+  await screen.findByText('2026-10-13 · 晚餐')
+  expect(screen.queryByText('做好了')).toBeNull()
+  expect(document.querySelector('.order-card')?.className).not.toContain('is-unread')
 })

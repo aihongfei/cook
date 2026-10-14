@@ -304,40 +304,63 @@
   border-radius: 12px;
 }
 
-/* 「存成常用组合」（M4 / F4-04）：一行文字按钮，不抢流转按钮的注意力 */
-.order-card__combo {
-  display: block;
-  padding: 7px 0 0;
-  font-family: inherit;
-  font-size: 12px;
-  color: #c4652a;
-  text-align: left;
-  cursor: pointer;
-  background: none;
-  border: 0;
-}
-
-.order-card__combo:active {
-  opacity: 0.7;
-}
-
-/* 「再点一次」（F3-06）：与「存成常用组合」同一档——一行文字按钮，
-   不跟真正要动手的流转按钮抢注意力（它俩常常同时出现在一张定局的卡上） */
+/*
+ * 「顺手能做的小事」：就餐人数（M4 / F4-05）、存成常用组合（M4 / F4-04）、
+ * 再点一次（F3-06）。
+ *
+ * 用户 2026-10-14 的原话：「这三行按钮优化下，现在不太好看，不一定一个按钮一行」。
+ * 原先三个各自都是 `display: block; width: 100%`、左对齐的一行字，于是每张卡下面
+ * 挂着一列"文字清单条目"——它们其实是**三个能点的按钮**，看着却像三行备注。
+ *
+ * 现在做成**小药丸**：有底有边，看着就能点（原来只有一行橙字，按下去也不像按了按钮）。
+ * 样式挂在**类名**上而不是列表页那个容器上：同一个「🍚 4 人吃 · 改」在
+ * 这一餐的详情页（`OrderDetailPage` 的 hero 里）**孤零零出现**，不在那一排里，
+ * 写在容器上它就没样式了。
+ *
+ * 轻量仍然保得住：描边 + 淡底 + 12px 字，不跟底部那排实心流转按钮抢注意力
+ * （真正的动作是"选好了""做好了"那些）。
+ */
+.order-card__diners,
+.order-card__combo,
 .order-card__repeat {
-  display: block;
-  padding: 7px 0 0;
+  max-width: 100%;
+  padding: 5px 11px;
   font-family: inherit;
   font-size: 12px;
-  color: #c4652a;
+  line-height: 1.5;
+  color: #8a7259;
   text-align: left;
+  white-space: normal;
   cursor: pointer;
-  background: none;
-  border: 0;
+  background: #fffdf8;
+  border: 1px dashed var(--color-line);
+  border-radius: 999px;
+
+  &:active {
+    opacity: 0.7;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.55;
+  }
 }
 
-.order-card__repeat:active {
-  opacity: 0.7;
+/* 「存成常用组合」与「再点一次」是"想再来一次"的动作，用品牌色区分于"改人数" */
+.order-card__combo,
+.order-card__repeat {
+  color: #c4652a;
 }
+
+/* 列表卡上三个并排；放不下就自己折到第二行（窄屏 + 长文案） */
+.order-card__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+  margin-top: 11px;
+}
+
 
 /* 抽屉里先把"要照的是哪一桌"念清楚 */
 .repeat-sheet__dishes {
@@ -351,23 +374,6 @@
   border-radius: 10px;
 }
 
-.order-card__diners {
-  display: block;
-  width: 100%;
-  padding: 7px 0 0;
-  margin-top: 2px;
-  font-family: inherit;
-  font-size: 12px;
-  color: #8a7259;
-  text-align: left;
-  cursor: pointer;
-  background: none;
-  border: 0;
-
-  &:active {
-    opacity: 0.7;
-  }
-}
 
 /* 确认留痕（M4 / F4-05）：「🔒 妈妈 10 / 12 15:20 定下这餐」。
    纯信息，不是按钮——所以没有 :active、没有下划线，颜色也比正文淡一档。 */
@@ -654,4 +660,49 @@
   flex: 0 0 auto;
   font-size: 15px;
   color: #c7a97e;
+}
+
+/* ---- 卡片上的未读角标（用户 2026-10-14：「卡片没有看到哪条是通知的啊」） ---- */
+
+/*
+ * 有未读的那张卡自己也换一点样子。
+ *
+ * **只给一颗角标是不够的**：用户扫一屏卡片时眼睛在找"哪一张不一样"，一颗 10px
+ * 的小标要逐张比对才看得见。左边那条品牌色竖标与通知中心里的未读行是**同一个记号**
+ * （见 notifications.scss 的 `.is-unread`），学过一遍就够了。
+ *
+ * 竖标用 `inset` 阴影而不是 `border-left`：卡片是虚线边框 + 圆角，加一条真边框会把
+ * 卡片整体推右 3px（同屏的其它卡片就错位了），而阴影不占布局。
+ */
+.order-card.is-unread {
+  background: #fffbf5;
+  border-color: #e6c49c;
+  box-shadow: inset 3px 0 0 var(--color-brand);
+}
+
+/*
+ * 右上角那颗"有新消息"（"做好了""菜单"）。
+ *
+ * 为什么是**角标**而不是卡片里的一行小标：第一版做成了标题行里的药丸，与状态戳挤在
+ * 一起，用户根本没注意到（他的原话是"卡片没有看到哪条是通知的啊，考虑加下角标之类的"）。
+ * 同理，位置与底栏那个未读红点**在同一个角上**——同一个意思用同一种记号。
+ *
+ * 挂在卡片内边距**之外**（`top/right` 取负值）：压着描边，不与卡里的内容抢位置，
+ * 也不会在窄屏上把标题挤到换行。文案最多两条（`A · B`），`white-space: nowrap`
+ * 兜住——超出卡片宽度的情况只可能出现在有人改了后端文案，那时宁可笑出来。
+ */
+.order-card__corner {
+  position: absolute;
+  top: -7px;
+  right: -5px;
+  padding: 2px 9px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--color-paper);
+  white-space: nowrap;
+  background: #d4552b;
+  border: 1.5px solid var(--color-paper);
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgb(120 60 30 / 22%);
+  pointer-events: none;
 }

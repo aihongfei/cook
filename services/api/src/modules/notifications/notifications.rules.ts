@@ -64,6 +64,17 @@ export interface NotificationItem {
   at: string
   /** 点进去看哪儿（应用内路由，后端给；前端不按 kind 硬编码跳转表） */
   to: string
+  /**
+   * 这条提醒**属于哪一餐**（`2026-10-18-DINNER`）；不属于具体某一餐时为 `null`。
+   *
+   * 用户 2026-10-14：「订单有红点，但是里面的卡片看不出来哪个是提醒的」——
+   * 点单列表要把"这张卡有事没看过"标出来，而它需要的正是这个对应关系。
+   *
+   * **结构化给出，而不是让前端从 `id` 或 `to` 里切字符串**：那种切法迟早切错
+   * （`prep` 的键里没有 mealKey、`expiry` 指向冰箱），而"这一条对应哪一餐"是
+   * 一个**事实**，事实应该由知道它的一侧给出（与"去处由后端给"同一条规矩）。
+   */
+  mealKey: string | null
   /** 标题后面那个小标（"已做好""快过期"…），前端直接渲染 */
   tag: string
 }
@@ -215,6 +226,7 @@ export function buildNotifications(input: NotificationInput, now: Date = new Dat
        * 取数、而这条提醒的 id 里就有 `mealKey`，没有理由让他自己找。
        */
       to: `/order/${fact.mealKey}`,
+      mealKey: fact.mealKey,
       tag: '菜单',
     })
   }
@@ -240,6 +252,7 @@ export function buildNotifications(input: NotificationInput, now: Date = new Dat
       at: fact.at.toISOString(),
       // 同上：进**这一餐**的详情，而不是列表页里自己找
       to: `/order/${fact.mealKey}`,
+      mealKey: fact.mealKey,
       tag: '做好了',
     })
   }
@@ -260,6 +273,8 @@ export function buildNotifications(input: NotificationInput, now: Date = new Dat
       body: fridgeBody(due, now),
       at: at.toISOString(),
       to: `/fridge`,
+      // 冰箱的事不属于某一餐（点单列表上没有它的位置）
+      mealKey: null,
       tag: '快过期',
     })
   }
@@ -275,6 +290,12 @@ export function buildNotifications(input: NotificationInput, now: Date = new Dat
       body: prepFacts.length === 1 ? '想吃什么去点两道' : `最近的是${first.dateLabel}${first.mealLabel}`,
       at: at.toISOString(),
       to: `/prep`,
+      /*
+       * 「该备菜」说的是"某一餐还空着"——**那一餐没有点单卡**（没人点菜才空着），
+       * 所以它标不到卡片上。这不是漏了：红点归订单，是因为备菜的入口在订单那一支。
+       * 前端据此把"没法标到卡上"的那些排除掉，而不是在界面上留一个指不到任何东西的标记。
+       */
+      mealKey: null,
       tag: '备菜',
     })
   }

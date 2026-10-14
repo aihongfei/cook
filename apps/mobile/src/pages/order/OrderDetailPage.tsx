@@ -239,15 +239,30 @@ export default function OrderDetailPage() {
                 </p>
               )}
 
-              <button
-                type="button"
-                className="order-card__diners"
-                disabled={!can(family.data, CAPABILITY.MENU_MANAGE)}
-                onClick={() => setDinersFor(card)}
-              >
-                🍚 {card.dinerCount ? `${card.dinerCount} 人吃` : '还没定几个人吃'}
-                {can(family.data, CAPABILITY.MENU_MANAGE) && ' · 改'}
-              </button>
+              {/*
+                就餐人数（M4 / F4-05）+「再点一次」（F3-06）：与列表页同属"顺手能做的小事"，
+                排成一样的一行小药丸（用户 2026-10-14：「这三行按钮优化下」）。
+
+                「再点一次」在详情页给的是**同一个动作的两个入口之一**（另一个在列表卡上）：
+                从列表点进某一餐的人，常常正是想"就照这桌再来一顿"，让他退出去再找那张卡
+                没有道理。判据仍然是后端的 `canRepeat`，前端不自己推。
+              */}
+              <div className="order-card__tools">
+                <button
+                  type="button"
+                  className="order-card__diners"
+                  disabled={!can(family.data, CAPABILITY.MENU_MANAGE)}
+                  onClick={() => setDinersFor(card)}
+                >
+                  🍚 {card.dinerCount ? `${card.dinerCount} 人吃` : '还没定几个人吃'}
+                  {can(family.data, CAPABILITY.MENU_MANAGE) && ' · 改'}
+                </button>
+                {card.canRepeat && card.dishCount > 0 && (
+                  <button type="button" className="order-card__repeat" onClick={() => setRepeatFor(card)}>
+                    🔁 再点一次
+                  </button>
+                )}
+              </div>
             </section>
 
             {/* ② 谁点了什么——逐份，不合并 */}
@@ -320,11 +335,8 @@ export default function OrderDetailPage() {
                 </div>
               )}
 
-              {card.canRepeat && card.dishCount > 0 && (
-                <button type="button" className="order-card__repeat" onClick={() => setRepeatFor(card)}>
-                  🔁 再点一次
-                </button>
-              )}
+              {/* 「再点一次」（F3-06）在头部那一排里（与「改人数」并排），
+                  这里不再重复一个——同一件事在同一个页面上给两个入口只会让人犹豫 */}
 
               {card.nextActions.length > 0 && (
                 <div className="order-card__actions">

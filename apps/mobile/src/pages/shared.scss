@@ -134,6 +134,14 @@ a.row:active {
 
 /* 点单卡 */
 .order-card {
+  /*
+   * 卡片右上角的未读角标（`.order-card__corner`）以它定位。
+   *
+   * 角标**故意放在卡片内边距之外**（右上角压着描边），不走卡片里那一列按钮的布局——
+   * 用户 2026-10-14 说"卡片没有看到哪条是通知的"，而后端给的红点也是**挂在图标右上角的
+   * 那种角标**（底栏那一个）。同一个意思在两处用同一种记号，用户不用学第二遍。
+   */
+  position: relative;
   margin: 12px var(--spacing-page) 0;
   padding: 14px;
   background: var(--color-paper);

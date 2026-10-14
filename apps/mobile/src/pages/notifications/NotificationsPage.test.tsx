@@ -57,6 +57,8 @@ const ITEMS = [
     at: '2026-10-15T18:30:00',
     // 去处是那一餐的详情（后端给整条路径，前端不按 kind 拼）
     to: '/order/2026-10-15-DINNER',
+    // 属于哪一餐——同样由后端给（点单列表用它标"哪张卡有事没看过"）
+    mealKey: '2026-10-15-DINNER',
     tag: '做好了',
     unread: true,
   },
@@ -67,6 +69,8 @@ const ITEMS = [
     body: '想吃什么去点两道',
     at: '2026-10-15T00:00:00',
     to: '/prep',
+    // 该备菜说的是"这一餐空着"——空着才没有卡，所以这一条给不出 mealKey
+    mealKey: null,
     tag: '备菜',
     unread: false,
   },

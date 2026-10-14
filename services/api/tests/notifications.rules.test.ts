@@ -373,6 +373,38 @@ test('备菜窗口是 3 天（与冰箱那个阈值同数、理由不同，所�
 })
 
 /*
+ * `mealKey`：这条提醒**属于哪一餐**。
+ *
+ * 它存在的唯一理由是让点单列表能把"这张卡有事没看过"标出来（用户 2026-10-14：
+ * 「订单有红点，但是里面的卡片看不出来哪个是提醒的」）。所以判据只有一条：
+ * **能在列表上找到那张卡的两类（菜单、做好了）必须给 mealKey，其余一律 null**——
+ * 给不出 mealKey 的那些不是"漏了"，是**本来就没有那张卡**（快过期指向冰箱；
+ * 备菜说的是"这一餐还空着"，空着才没有卡）。前端据此排除，不必自己猜。
+ */
+test('mealKey：菜单/做好了给出是哪一餐；快过期与该备菜是 null（它们没有对应的卡）', () => {
+  const rows = buildNotifications(
+    input({
+      plan: [planFact()],
+      done: [doneFact()],
+      fridge: [fridgeFact({ expiresOn: new Date('2026-10-16T00:00:00Z') })],
+      prep: [prepFact()],
+    }),
+    NOW,
+  )
+  const byKind = Object.fromEntries(rows.map((row) => [row.kind, row.mealKey]))
+  assert.deepEqual(byKind, {
+    plan: '2026-10-15-DINNER',
+    done: '2026-10-15-DINNER',
+    expiry: null,
+    prep: null,
+  })
+  // 与去处同源：进了那一餐详情的，`mealKey` 就必须是同一个（两处各拼一遍迟早分叉）
+  for (const row of rows.filter((item) => item.to.startsWith('/order/'))) {
+    assert.equal(row.to, `/order/${row.mealKey}`)
+  }
+})
+
+/*
  * 「谁做好的」留痕与「谁定的菜单」是同一时刻的第二件事，判据并排放在 orders.rules 里。
  * 三条钉住：DONE 记、CANCELED 清、其余不动。
  */

@@ -4239,13 +4239,23 @@ adb shell pidof com.yushan.cook || echo "(已无进程)"
 adb shell dumpsys jobscheduler | grep -c "RunnerWorker"    # 应为 4（进程死了也还在）
 ```
 
+⚠️ **这一档在模拟器上验不完整（照实记，别当成验过了）**：交付三实测到的是"**注册 + 手动派发 + 进程死后任务仍在**"三件事，**没有**等到一次"系统自己唤起的无人值守弹出"——因为这个模拟器的网络**通不过 Android 的 validated-network 检查**，而插件给周期任务加的约束是 `NetworkType.CONNECTED`：`dumpsys jobscheduler` 里能看到 `TIMING_DELAY` 已满足、`CONNECTIVITY` **未满足**，所以时间到了任务也不会跑。
+
+```bash
+# 判断依据（两条一起看）
+adb shell dumpsys jobscheduler | grep -A 14 RunnerWorker | grep -E "Minimum latency|Required constraints|Unsatisfied"
+adb shell dumpsys connectivity | grep -i "validated" | head -3   # 本模拟器上不是 YES
+```
+
+`cmd jobscheduler run -f com.yushan.cook <id>` 也点不动它（那条命令按**应用侧**的 job id 找人，而 WorkManager 注册在 `androidx.work.systemjobscheduler` 那个**系统 id 空间**里，两边不是一套编号）。要真正验这一步，得在**真机**（有正常网络的手机）上走一遍第二步。**在此之前，口径仍然按"设计如此、手动派发与进程存活都已验证"来写，不要说成"模拟器上无人值守也弹过"。**
+
 ### 五、那三条**不是 bug** 的现象（照实判断，别急着改代码）
 
 | 现象 | 是不是 bug | 为什么 |
 | --- | --- | --- |
 | 巡查返回 `popped: 0`，但通知中心里明明有新事 | **不是** | 那件事多半是**自己做的**（自己定的菜单/自己标的做好了不提醒自己，与交付一同一条口径）；也可能是 `< since` |
 | 第一次巡查（不带 `since`）一条都不弹 | **不是** | 刻意的：那种"新"是伪新，十几条历史会一次性糊一屏 |
-| 15 分钟到了却没响 | **多半不是** | 周期任务是"最多晚一刻钟"，实际时机由系统按省电策略挑；息屏久置会更稀疏 |
+| 15 分钟到了却没响 | **多半不是** | 周期任务是"最多晚一刻钟"，实际时机由系统按省电策略挑；息屏久置会更稀疏。**但在模拟器上另有一个确定的原因**：它的网络通不过 validated-network 检查 → `CONNECTIVITY` 约束不满足 → 任务不会被唤起（见上面第四步那段说明） |
 
 ### 六、排查顺序（照这个顺序看，别乱猜）
 
@@ -4260,3 +4270,85 @@ adb shell dumpsys jobscheduler | grep -c "RunnerWorker"    # 应为 4（进程�
 2. **同一台重登**：旧令牌作废、新令牌可用；
 3. **巡查弹出来的每一条**都能在通知中心里找到**同一个 id、同一句话**（口径同源，脚本里有这条断言）；
 4. **换账号**：下一个人的巡查不能把上一个人的旧事当新的弹（水位线按账号分开，见 `src/api/patrol.ts`）。
+
+## R-073 卡片上的未读角标与两处连带修复：怎么跑、怎么验（D-082 配套，✅ 已验证，2026-10-14）
+
+配套：`DECISIONS.md` **D-082**（为什么 `mealKey` 由后端给、为什么角标放右上角、为什么顺序写死）。
+
+### 一、跑测试
+
+```bash
+# 后端：通知纯规则（27 条，含新加的 mealKey 那一条）
+pnpm --dir services/api test                      # 542 例（540 过；2 个既有失败要 /tmp/all-ingredients.json，与本次无关）
+pnpm --dir services/api run test:http:notifications  # 47/47（真请求，自带前置数据）
+
+# 前端：角标纯函数 + 页面 + 返回链
+pnpm --dir apps/mobile test                       # 646/646（61 文件）
+pnpm --dir apps/mobile typecheck                  # tsc -b；**别省**
+pnpm --dir apps/mobile lint                       # 18 warnings / 0 errors（与本次改动前同数）
+```
+
+新增的三处断言值得单独说：
+
+1. `notifications.rules.test.ts` 的 `mealKey` 那一条**同时**断言"两类给出、两类为 null"，以及 `to === '/order/' + mealKey`（**去处与餐次必须同源**——两处各拼一遍是 D-078 四踩过的坑）；
+2. `verify-notifications-http.cjs` 里有一条**反向**断言：`prep` 那条的 `mealKey` **必须是 null**（它说的是"这一餐还空着"，空着才没有卡）。若哪天有人"顺手"给它填上 key，前端就会在列表上挂一颗点进去什么也没有的角标——这条会当场红；
+3. `order.test.tsx` 里断言角标**只挂在那一张卡上**（另一张卡连 `.order-card__corner` 都不存在），以及一餐两条时拼成 `做好了 · 菜单`（顺序写死，不随列表时刻变）。
+
+### 二、在 APK 里看角标（要造出"别人做的事"）
+
+```bash
+# ① 起一套真实数据：两个账号 + 一个家庭，妈妈把菜单定下来 → 爸爸收到一条 plan 提醒
+#    （脚本在会话里用 curl 走了一遍；关键是"定菜单的人"与"看的人"必须不是同一个，
+#     因为自己定自己的不提醒自己——见 D-078）
+# ② 用 dev 模式打包（记住：`build:apk` 走的是 --mode server，接口指向公网服务器，
+#    本机联调用不了；要连本机后端必须显式 `npx vite build --mode development`）
+pnpm --dir apps/mobile exec vite build --mode development
+pnpm --dir apps/mobile exec cap sync android
+cd apps/mobile/android && ./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb reverse tcp:3000 tcp:3000        # 本机后端；**不设这条 APK 里所有请求都会失败**
+adb shell am force-stop com.yushan.cook && adb shell am start -n com.yushan.cook/.MainActivity
+```
+
+在 WebView 里核对（WebView 里**别用坐标点**，用 CDP；配方见 R-062 §六）：
+
+```bash
+node /tmp/cdp.mjs http://127.0.0.1:9222 "({ url: location.pathname, corners: [...document.querySelectorAll('.order-card')].map(c => ({ corner: c.querySelector('.order-card__corner')?.textContent ?? null, unread: c.className.includes('is-unread') })) })"
+```
+
+实测输出（2026-10-14 22:19，debug 包）：
+
+```json
+{ "url": "/order", "corners": [
+  { "corner": null,     "unread": false },
+  { "corner": "菜单",   "unread": true  }
+] }
+```
+
+截图确认（`adb shell screencap -p`）：有未读的那张卡**右上角压着一颗橙底白字「菜单」**、左边一条品牌色竖标、底色偏暖；另一张完全是原样。同一张截图里也能看到那三个按钮已经**并排成一行药丸**（`🍚 还没定几个人吃` / `⭐ 存成常用组合`），不再各占一行。
+
+### 三、返回链那一处这样验（三步走完）
+
+```bash
+# ① 进那一餐的详情
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => { document.querySelector('a[href=\"/order/2026-10-14-LUNCH\"]').click(); return 'ok' })()"
+# ② 点某道菜的菜谱名
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => { document.querySelector('.od-line__name--link').click(); return 'ok' })()"
+# ③ 读返回按钮与底栏
+node /tmp/cdp.mjs http://127.0.0.1:9222 "({ url: location.pathname, back: document.querySelector('.page-back')?.textContent.trim(), backHref: document.querySelector('.page-back')?.getAttribute('href'), activeTab: document.querySelector('.tab-bar__item.is-active')?.textContent.trim() })"
+```
+
+实测输出：
+
+```json
+{ "url": "/recipes/jis-…", "back": "← 返回这一餐",
+  "backHref": "/order/2026-10-14-LUNCH", "activeTab": "订单" }
+```
+
+**修复前**这个按钮是「← 返回菜谱小书」——来源 `/order/<mealKey>` 不在白名单里，被静默丢弃后走了兜底（`back-link.ts` 顶部注释里记的那类 bug，`/discover` 漏过一次）。点返回再读一次，确认落在**那一餐的详情**（`.od-hero__day` 显示"今天的午餐"），而不是列表页或菜谱小书。
+
+### 四、改这一块时要连带注意的三处
+
+1. **`mealKey` 只给"有卡的那两类"**：新增提醒类别时先想清楚"列表上有没有它对应的一张卡"——没有就给 `null`，不要图省事把 `id` 里的东西切出来；
+2. **角标文案就是后端那条的 `tag`**：不要在前端按 `kind` 再写一张"什么类别写什么字"的表（后端加了一类而前端不知道，就会显示空白角标）；
+3. **`.order-card__tools` 里那三个按钮的样式挂在类名上**：详情页的「改人数」是单独出现的（不在那一排里），把样式写进容器选择器它就没样式了。

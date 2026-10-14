@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { useFamily, CAPABILITY, can } from '@/api/family'
+import { useNotifications } from '@/api/notifications'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import ConfirmMenuSheet from './components/ConfirmMenuSheet'
 import DinerCountSheet from './components/DinerCountSheet'
@@ -23,6 +24,7 @@ import Page from '@/components/ui/Page'
 import { STATUS_TONE } from '@/components/ui/status-tone'
 import { toast } from '@/components/ui/toast'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
+import { badgesOfMeal, unreadByMeal } from './unread-badges'
 import '../shared.scss'
 import './order.scss'
 
@@ -35,6 +37,9 @@ import './order.scss'
  * - **计数徽标由后端给**（`counts`），切换筛选时不会把其它状态的数字清成 0；
  * - **不可逆的动作先问一句**：取消整餐与撤回自己点的菜都走 ConfirmDialog。
  *   前者影响全家人（砖红），后者只影响自己（普通色）。
+ *
+ * 2026-10-14 补：**卡片上标出"这张卡有事没看过"**（用户报「订单有红点，但是里面的卡片
+ * 看不出来哪个是提醒的」）。红点只说明"订单这边有事"，进了列表还得让人一眼找到是哪一餐。
  */
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
@@ -109,6 +114,15 @@ export default function OrderPage() {
   const orders = useOrders(scope, filter, { enabled: Boolean(family.data) })
   const updateStatus = useUpdateMealStatus()
   const removeItem = useRemoveOrderItem()
+
+  /*
+   * 卡片上那个"有事没看过"的标记（用户 2026-10-14 要求）。
+   *
+   * 用的是**和底栏红点同一份数据**（`useNotifications` 同一个 queryKey，不会多打一次接口）：
+   * 两处各算一遍就会出现"红点说有事、卡片上却找不到"（计数写两处迟早分叉，见 D-059 三）。
+   */
+  const notifications = useNotifications()
+  const badges = unreadByMeal(notifications.data?.items ?? [])
 
   const counts = orders.data?.counts ?? {}
   // 一个都没有的状态不占位置（免得顶上挂一排 0）——但当前选中的那个必须留着，否则切不回去
@@ -300,7 +314,9 @@ export default function OrderPage() {
           />
         )}
 
-        {orders.data?.cards.map((card) => (
+        {orders.data?.cards.map((card) => {
+          const cardBadges = badgesOfMeal(badges, card.mealKey)
+          return (
           /*
            * 整张卡可点，进**这一餐的详情**（用户 2026-10-15：「订单里卡片增加下详情吧，
            * 可以点击进去看详细的」）。
@@ -314,13 +330,31 @@ export default function OrderPage() {
            * 键盘与读屏需要那个链接才进得去（与打卡卡片可点那次同一条理由，见 CheckInPage）。
            */
           <article
-            className="order-card order-card--link"
+            className={['order-card', 'order-card--link', cardBadges.length > 0 && 'is-unread']
+              .filter(Boolean)
+              .join(' ')}
             key={card.mealKey}
             onClick={(event) => {
               if ((event.target as HTMLElement).closest('button, a, input, select, textarea')) return
               navigate(`/order/${card.mealKey}`, { state: { from: location.pathname } })
             }}
           >
+            {/*
+              右上角的"有新消息"角标（用户 2026-10-14：「卡片没有看到哪条是通知的啊，
+              考虑加下角标之类的」）。
+
+              三个决定：
+              - **用角标，不用卡片里的一行小标**：角标挂右上角、压着卡片描边，扫一列卡片
+                时一眼就能挑出哪张不一样（第一版把标记放在标题行里，和状态戳挤在一起，
+                用户根本没注意到——在他看来那张卡与别的没什么区别）；
+              - **文案是后端那条的 `tag`**（"做好了""菜单"），不在这里另写一张表，
+                否则后端加了新类别而前端不知道（与"去处由后端给"同一条规矩）；
+              - **一餐最多两条，并排写在一颗角标里**（`A · B`），不叠两颗——
+                右上角只有一个位置，叠起来会互相盖住。
+            */}
+            {cardBadges.length > 0 && (
+              <span className="order-card__corner">{cardBadges.join(' · ')}</span>
+            )}
             <div className="order-card__head">
               <Link
                 className="order-card__headlink"
@@ -391,6 +425,13 @@ export default function OrderPage() {
             )}
 
             {/*
+              这一排是"顺手能做的小事"：就餐人数、存成常用组合、再点一次。
+              （用户 2026-10-14：「这三行按钮优化下，现在不太好看，不一定一个按钮一行」——
+              原先三个各自 `display:block; width:100%`，左对齐的一列文字，看着像清单条目
+              而不是按钮。现在排成**一行小药丸**，放不下就自己折行。）
+
+              三个按钮的判据各自独立，注释见各自下面那几段。
+
               就餐人数（M4 / F4-05）：含没点菜只吃饭的家人，所以和"N 人点了"分开显示。
               能到这一餐的人才看得到；没定就写"还没定"，别显示 0。
 
@@ -403,35 +444,37 @@ export default function OrderPage() {
               任何"用 A 现象当 B 能力代理"的判据都会在权限调整时这样裂开，所以这里
               回到**它自己那一项能力**：前端据此显示/隐藏，判定仍然只由后端下。
             */}
-            <button
-              type="button"
-              className="order-card__diners"
-              disabled={!can(family.data, CAPABILITY.MENU_MANAGE)}
-              onClick={() => setDinersFor(card)}
-            >
-              🍚{' '}
-              {card.dinerCount
-                ? `${card.dinerCount} 人吃（${card.ordererCount} 人点了）`
-                : '还没定几个人吃'}
-              {can(family.data, CAPABILITY.MENU_MANAGE) && ' · 改'}
-            </button>
-
-            {/* 存成常用组合（M4 / F4-04）：刚把这一餐配齐时"下次也照这样点"的念头最强，
-                顺手存下来成本最低（组合页只管用与删，不从那里新建）。 */}
-            {card.dishes.some((line) => line.recipeId) && (
-              <button type="button" className="order-card__combo" onClick={() => setComboFor(card)}>
-                ⭐ 存成常用组合
+            <div className="order-card__tools">
+              <button
+                type="button"
+                className="order-card__diners"
+                disabled={!can(family.data, CAPABILITY.MENU_MANAGE)}
+                onClick={() => setDinersFor(card)}
+              >
+                🍚{' '}
+                {card.dinerCount
+                  ? `${card.dinerCount} 人吃（${card.ordererCount} 人点了）`
+                  : '还没定几个人吃'}
+                {can(family.data, CAPABILITY.MENU_MANAGE) && ' · 改'}
               </button>
-            )}
 
-            {/* 再点一次（F3-06）：只出现在**定局的那一餐**（做好了 / 已取消 / 日子过去了，
-                判据在后端 `canRepeat`）。跟它并排的「存成常用组合」是另一件事：
-                那个是"想常做"，这个是"就照这桌再来一顿"。 */}
-            {card.canRepeat && card.dishCount > 0 && (
-              <button type="button" className="order-card__repeat" onClick={() => setRepeatFor(card)}>
-                🔁 再点一次
-              </button>
-            )}
+              {/* 存成常用组合（M4 / F4-04）：刚把这一餐配齐时"下次也照这样点"的念头最强，
+                  顺手存下来成本最低（组合页只管用与删，不从那里新建）。 */}
+              {card.dishes.some((line) => line.recipeId) && (
+                <button type="button" className="order-card__combo" onClick={() => setComboFor(card)}>
+                  ⭐ 存成常用组合
+                </button>
+              )}
+
+              {/* 再点一次（F3-06）：只出现在**定局的那一餐**（做好了 / 已取消 / 日子过去了，
+                  判据在后端 `canRepeat`）。跟它并排的「存成常用组合」是另一件事：
+                  那个是"想常做"，这个是"就照这桌再来一顿"。 */}
+              {card.canRepeat && card.dishCount > 0 && (
+                <button type="button" className="order-card__repeat" onClick={() => setRepeatFor(card)}>
+                  🔁 再点一次
+                </button>
+              )}
+            </div>
 
             {/* 成品照（F9-08）：只有做好的那一餐才给这个入口——照片是"做出来了"的证据。
                 已传过的显示张数，并给一个"去看看"的入口（照片都在打卡墙那一餐下） */}
@@ -467,7 +510,8 @@ export default function OrderPage() {
               </div>
             )}
           </article>
-        ))}
+          )
+        })}
       </div>
 
       {uploadMealKey && (

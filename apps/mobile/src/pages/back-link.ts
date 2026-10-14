@@ -39,11 +39,23 @@ export const BACK_LABELS: Record<string, string> = {
   ...EXTRA_ENTRIES,
 }
 
-/** 能从来源里认出的"返回目标"（`/recipes?q=鱼` 这类带查询串的按前缀认） */
+/**
+ * 能从来源里认出的"返回目标"（`/recipes?q=鱼` 这类带查询串的按前缀认）。
+ *
+ * 动态路径（带 id 的）没法写进静态表，在这里单独认两条：
+ * - `/recipes/<id>`：菜谱详情（编辑页的返回目标就是它）；
+ * - `/order/<mealKey>`：**这一餐的详情**。用户 2026-10-14 报的 bug 就是漏了它——
+ *   从某一餐的详情点进某道菜的菜谱，返回却落到了菜谱小书（来源被静默丢弃后走了兜底）。
+ *   `/order/history` 是静态条目（在 EXTRA_ENTRIES 里），必须排除，别被这条吃掉。
+ */
+const ORDER_MEAL = /^\/order\/(?!history$)[^/]+$/
+const RECIPE_DETAIL = /^\/recipes\/(?!mine$|new$)[^/]+$/
+
 function matchEntry(raw: string): string | null {
   if (raw in BACK_LABELS) return raw
   const [path, query] = raw.split('?', 2)
   if (query !== undefined && path in BACK_LABELS) return `${path}?${query}`
+  if (ORDER_MEAL.test(path)) return raw
   return null
 }
 
@@ -58,8 +70,11 @@ function matchEntry(raw: string): string | null {
 function labelFor(path: string): string {
   const listed = BACK_LABELS[path]
   if (listed) return listed
-  // `/recipes/<id>`（详情）——排除 `mine`/`new`/`<id>/edit` 这几个同样在 /recipes 下的子页
-  if (/^\/recipes\/[^/]+$/.test(path) && path !== '/recipes/mine' && path !== '/recipes/new') return '返回这道菜谱'
+  // 动态路径要说得出是哪一层，而不是干巴巴一个"返回"：
+  // `/order/<mealKey>` = 这一餐的详情（从点菜单点进去的那一页）
+  if (ORDER_MEAL.test(path)) return '返回这一餐'
+  // `/recipes/<id>`（详情）——排除 `mine`/`new` 这两个同样在 /recipes 下的子页
+  if (RECIPE_DETAIL.test(path)) return '返回这道菜谱'
   return '返回'
 }
 
@@ -73,6 +88,8 @@ function labelFor(path: string): string {
 export function tabOf(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
   const path = raw.split('?', 1)[0]
+  // 这一餐的详情属于**订单**那一支：从它点进菜谱时，底栏该亮订单（返回也是回订单）
+  if (ORDER_MEAL.test(path)) return '/order'
   return tabs.some((tab) => tab.path === path) ? path : null
 }
 

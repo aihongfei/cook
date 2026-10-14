@@ -32,6 +32,14 @@ export interface AppNotification {
   at: string
   /** 点进去看哪儿——**后端给**，前端不按 kind 硬编码跳转表（与"状态机不硬编码"同一条） */
   to: string
+  /**
+   * 这条提醒**属于哪一餐**（`2026-10-18-DINNER`）；不属于某一餐时为 `null`
+   * （快过期、该备菜）。点单列表拿它把"这张卡有事没看过"标出来（用户 2026-10-14 要求）。
+   *
+   * **不在前端从 `id` 或 `to` 里切字符串**：那种切法迟早切错（`prep` 里没有 mealKey、
+   * `expiry` 指向冰箱），而"这一条对应哪一餐"是个事实，该由知道它的一侧给出。
+   */
+  mealKey: string | null
   /** 标题旁边那个小标（"菜单""做好了""快过期""备菜"） */
   tag: string
   unread: boolean

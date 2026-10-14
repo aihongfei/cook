@@ -16,7 +16,9 @@
  * ⑥ 换设备（重新登录）后条数与已读状态**一致**（这就是"换手机也都在"）；
  * ⑦ 那句文案与去处**取库里那份**（回放"当时那句话"），`body` 与 `to` 都有；
  * ⑧ 四个开关：关掉一类 → 那类不再出现在列表里；非法值当没传（不能静默改开关）；
- * ⑨ 三个边界：不给 id → 400、空数组 → 400、未登录 → 401。
+ * ⑨ 三个边界：不给 id → 400、空数组 → 400、未登录 → 401；
+ * ⑩ `mealKey`（用户 2026-10-14 追加）：能标到点单卡上的那两类给出是哪一餐、
+ *    标不到的那两类给 `null`——前端靠它决定"哪张卡有事没看过"，不在前端切字符串。
  *
  * ⚠️ **点菜有窗口**（「只能点从今天到周二这 7 天内的菜」）：造餐必须落在窗口内，
  * 而且**每一步都要看状态码**——本脚本第一版用 day+7/day+8 造餐、又没检查 400，
@@ -152,6 +154,16 @@ async function main() {
     planRow?.to === `/order/${planKey}`,
     `to=${planRow?.to}`,
   )
+  /*
+   * `mealKey`（用户 2026-10-14：「订单有红点，但是里面的卡片看不出来哪个是提醒的」）：
+   * 点单列表拿它把"这张卡有事没看过"标出来，所以它必须是**后端给的结构化事实**，
+   * 不是前端从 `id` 或 `to` 里切出来的。能在列表上找到卡的那两类必须给，其余给 null。
+   */
+  check(
+    '⑩ plan 那条带 `mealKey`（点单列表靠它标到卡上）',
+    planRow?.mealKey === planKey,
+    `mealKey=${JSON.stringify(planRow?.mealKey)} 期望=${planKey}`,
+  )
   check(
     '⑦ 文案由后端拼、`body` 有内容（前端不拼句子）',
     typeof planRow?.title === 'string' && planRow.title.length > 0 && typeof planRow?.body === 'string',
@@ -201,6 +213,11 @@ async function main() {
     (doneRow?.body ?? '').includes(recipe.name),
     `body=${JSON.stringify(doneRow?.body)}`,
   )
+  check(
+    '⑩ done 那条也带 `mealKey`（同一餐两条提醒各标各的）',
+    doneRow?.mealKey === doneKey,
+    `mealKey=${JSON.stringify(doneRow?.mealKey)} 期望=${doneKey}`,
+  )
   const uncleBoard = await board(uncle.token)
   check(
     '③ **没点这一餐的人收不到**（他没在等这顿饭）',
@@ -212,6 +229,16 @@ async function main() {
   const prepRow = (babaBoard2?.items ?? []).find((row) => row.kind === 'prep')
   check('① 接下来几天有餐次空着 → 收到「该备菜了」', Boolean(prepRow), prepRow?.title ?? '(没有)')
   check('① 那条点进去是备菜页', prepRow?.to === '/prep', `to=${prepRow?.to}`)
+  /*
+   * ⚠️ 这条**必须是 null**：备菜说的正是"这一餐还空着"，空着才没有点单卡——
+   * 它标不到任何一张卡上。前端据此排除；若这里给了一个 mealKey，前端就会在
+   * 那张卡上挂一个点进去什么也没有的标记。
+   */
+  check(
+    '⑩ prep 那条的 `mealKey` 是 null（它说的是"这一餐空着"，没有卡可标）',
+    prepRow?.mealKey === null,
+    `mealKey=${JSON.stringify(prepRow?.mealKey)}`,
+  )
   check('① 备菜也算订单那个 Tab 的未读（入口在订单那一支）', (babaBoard2?.unreadByArea?.order ?? 0) >= 1, JSON.stringify(babaBoard2?.unreadByArea))
 
   // ---------- ④ 已读的还翻得回去看 ----------
