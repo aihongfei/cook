@@ -1145,6 +1145,16 @@ M2 只剩 F2-08（多家庭切换，P2）；M3 只剩 F3-07（掌勺人视图，
 
 **留下的资产**：两张源渲染图、切好的图层（`previews/assets/fridge3d/`）、完整预览页。**Tripo 的冰箱 GLB 已生成但未导出**（账号权益在 `studio.tripo3d.ai`，Pro 站；用户提供的 API key 经实测**无 API 额度**——Studio 积分与 API credits 是两套账，要自动化需另购 API credits，20 credits ≈ $0.2/个模型）。将来重启 M17 时从「导出那个 GLB」开始，不用重做。
 
+## AI 流式 + 结构化输出（F16-02 / D-073 / R-064，✅ 已交付，2026-10-15）
+
+`chatStreamEvents` **补上 `jsonSchema` 形参**——这是 F16-06/07/08（拍照识别菜品 / 营养分析 / 拍照生成菜谱）的地基：那三件事都要**既早点出字、又要一份能解析的 JSON**，而补上之前只能二选一。
+
+**一条必须想清楚的分歧**：非流式那条路被网关拒 `response_format` 时会摘掉它重试一次；流式**不能照搬**——流式 `yield` 出去的字已经写到了用户屏幕上，第 3 段吐完才发现要重试的话，用户会看到自己刚读的话被**抹掉重写一遍**，那比如实报一次错更糟。所以流式的重试窗口只有"**第一个事件之前**"（`emitted` 为假），判据写成纯函数 `shouldRetryStructuredStream` 并配单测。
+
+顺带**订正一句过期的话**：`ai.service.ts` 原先写"结构化与流式叠加在网关这边不可靠"——D-044 迁移到 pi-ai 之后那句就不成立了（pi-ai 恒发 `stream: true`，结构化在那条路上验过）。现在"不把 recommend 改成流式"的理由只剩产品判断，与能力无关。
+
+**验证**：这条改动**没有用户可见入口**，所以直接驱动客户端打本地 stub——`pnpm run test:ai-stream-schema` **8/8**（schema 真发出去了 / 正文多段流 / 被拒后补发一次且第二次不带 schema / 总开关有效）。**脚本第一版是假绿的**：我把 schema 写成内层那个对象而非整个 `response_format`，接口层根本没看到它，可"正文照样流出来"那几条仍然绿（8 过 5）——形状约定必须照抄 `PICKS_SCHEMA`/`PROMPTS_SCHEMA`。
+
 ## 「摇一桌」（F5-01 升级 / D-072 / R-063，✅ 已交付，2026-10-15）
 
 **用户选定「升级成『摇一桌』」**。开工前的核查查到一处**真实的不一致**（不是"想加功能"）：首页推荐与「帮我决定」都过 `judgeDish` 硬拦，**只有「摇一道」不过**——它走公共 `GET /recipes`，与口味档案毫无交集，所以写了「花生过敏」的人照样可能摇到一盘花生米。
@@ -1319,7 +1329,7 @@ M2 只剩 F2-08（多家庭切换，P2）；M3 只剩 F3-07（掌勺人视图，
 - 调研：`docs/context/RESEARCH.md`
 - 方案：`docs/context/PLAN.md`
 - 功能清单：`docs/context/FEATURES.md`
-- 接口验收脚本：`services/api/scripts/verify-recipes-http.cjs`（菜谱）、`verify-auth-http.cjs`（注册登录）、`verify-family-http.cjs`（家庭）、`verify-orders-http.cjs`（点单）、`verify-checkins-http.cjs`（打卡）、`verify-ai-http.cjs`（AI 推荐与问答，配 `ai-stub-upstream.cjs` 可离线验）、`verify-fridge-http.cjs`（冰箱库存）、`verify-ai-actions-http.cjs`（AI 对话里办事 + 撤销，同样走 stub）、**`verify-ai-shopping-http.cjs`（AI 办采购清单）、`verify-ai-taste-http.cjs`（AI 写口味忌口）、`verify-ai-readonly-http.cjs`（AI 帮我决定/家人最爱/打卡）**、**`verify-meal-preview-http.cjs`（一餐要买什么 + AI 的 `preview_meal_shopping`）、`verify-recommend-http.cjs`（首页推荐随机化与有界性）**、`verify-taste-http.cjs`（口味档案与过滤）、`verify-cookable-http.cjs`（手边食材能做什么，含 offset 翻页）、`verify-stock-match-http.cjs`（采购清单与库存比对）、`verify-decide-http.cjs`（帮我决定）、`verify-shopping-edit-http.cjs`（清单编辑与一键补货，`pnpm run test:http:shopping-edit`）、**`verify-spread-http.cjs`（摇一桌：搭配/道数/忌口阳型对照/整组加入，`pnpm run test:http:spread`）**；操作步骤见 `RUNBOOK.md` R-003b/R-010/R-012/R-014/R-015/**R-018**/**R-041**/**R-042**/**R-043**/**R-045**/**R-046**/**R-047**/**R-048**/**R-049**/**R-050**/**R-051**/**R-052**/**R-053**/**R-054**/**R-055**/**R-057**/**R-058**/**R-059**/**R-061**/**R-062**/**R-063**
+- 接口验收脚本：`services/api/scripts/verify-recipes-http.cjs`（菜谱）、`verify-auth-http.cjs`（注册登录）、`verify-family-http.cjs`（家庭）、`verify-orders-http.cjs`（点单）、`verify-checkins-http.cjs`（打卡）、`verify-ai-http.cjs`（AI 推荐与问答，配 `ai-stub-upstream.cjs` 可离线验）、`verify-fridge-http.cjs`（冰箱库存）、`verify-ai-actions-http.cjs`（AI 对话里办事 + 撤销，同样走 stub）、**`verify-ai-shopping-http.cjs`（AI 办采购清单）、`verify-ai-taste-http.cjs`（AI 写口味忌口）、`verify-ai-readonly-http.cjs`（AI 帮我决定/家人最爱/打卡）**、**`verify-meal-preview-http.cjs`（一餐要买什么 + AI 的 `preview_meal_shopping`）、`verify-recommend-http.cjs`（首页推荐随机化与有界性）**、`verify-taste-http.cjs`（口味档案与过滤）、`verify-cookable-http.cjs`（手边食材能做什么，含 offset 翻页）、`verify-stock-match-http.cjs`（采购清单与库存比对）、`verify-decide-http.cjs`（帮我决定）、`verify-shopping-edit-http.cjs`（清单编辑与一键补货，`pnpm run test:http:shopping-edit`）、**`verify-spread-http.cjs`（摇一桌：搭配/道数/忌口阳型对照/整组加入，`pnpm run test:http:spread`）**、**`verify-ai-stream-schema.cjs`（流式+结构化，自带 stub，`pnpm run test:ai-stream-schema`）**；操作步骤见 `RUNBOOK.md` R-003b/R-010/R-012/R-014/R-015/**R-018**/**R-041**/**R-042**/**R-043**/**R-045**/**R-046**/**R-047**/**R-048**/**R-049**/**R-050**/**R-051**/**R-052**/**R-053**/**R-054**/**R-055**/**R-057**/**R-058**/**R-059**/**R-061**/**R-062**/**R-063**/**R-064**
 - UI 设计稿：`docs/ui-preview/`（选定方向实现稿 `handpainted/index.html`）
 - 代码仓库：`https://github.com/aihongfei/cook`（私有）
 - 参考原图：`参考图片/`

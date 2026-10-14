@@ -227,3 +227,35 @@ export function readPiFailure(
   }
   return { kind: 'connection', detail: detail.slice(0, 200) }
 }
+
+/**
+ * 流式那条路上"要不要摘掉 `response_format` 再试一次"（F16-02，2026-10-15 补）。
+ *
+ * 这个判据与 `chatJson` 的那条**必须分开**，差在一个条件：**`emitted`（已经吐过字没有）**。
+ *
+ * 非流式那条路整段结果都在手里，被拒了就重试，用户什么都还没看见；流式不一样——
+ * `yield` 出去的每一段都已经由 SSE 写到了用户屏幕上。**吐过字之后再重试，用户会看到
+ * 自己刚读的那段话被抹掉重写一遍**，那比报一次错更糟（错至少是诚实的）。
+ *
+ * 所以流式的重试窗口只有"**第一个事件之前**"：三个条件缺一不可——
+ * 这一趟带了 schema、认得出是 `response_format` 引起的 400、且 `emitted` 为假。
+ * 判据单独放在这里（而不是写在 client 的分支里）是为了能直接单测：
+ * 它决定了"会不会重试"，写宽了会白花额度，写窄了会让 F16-06/07/08 那三条路直接 502。
+ */
+export function isResponseFormatRejection(detail: string): boolean {
+  return /response_format/i.test(detail) || /unavailable now/i.test(detail)
+}
+
+export function shouldRetryStructuredStream(input: {
+  /** 这一趟带了 `response_format` 吗（去掉之后的那一趟不再重试，天然防循环） */
+  withSchema: boolean
+  /** 这一趟已经 yield 过事件了吗 */
+  emitted: boolean
+  status: number
+  message: string
+}): boolean {
+  if (!input.withSchema) return false
+  if (input.emitted) return false
+  if (input.status !== 400) return false
+  return isResponseFormatRejection(input.message)
+}

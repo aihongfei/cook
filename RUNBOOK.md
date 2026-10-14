@@ -3625,3 +3625,38 @@ pnpm test:http:spread        # 36/36
 | 点单道「就它了」 | 提示「已加进午餐」，那一行变「已在菜单里」，**其余仍可点** |
 
 **顺带证到的一条**：`roleLabel` 一开始**是空的**——因为 `cook-api-1` 是**镜像构建时烘进去的源码**，我改完后端没重建。`docker compose build api && docker compose up -d api` 之后立刻正常。**改后端源码后必须重建容器**，否则前端看到的是旧接口（本项目又一次踩到这个：容器里的代码不等于工作区的代码）。
+
+## R-064 流式 + 结构化输出的验收（F16-02 补 `jsonSchema`，✅ 已验证，2026-10-15）
+
+### 跑法
+
+```bash
+cd services/api
+pnpm run test:ai-stream-schema        # 8/8，自带 stub、不碰数据库
+```
+
+脚本 `scripts/verify-ai-stream-schema.cjs` **自己起 stub 上游**（端口 18992，`STUB_PORT` 可换）、**自己收尾**，跑完不留进程。它直接驱动编译后的 `chatStreamEvents`（`.test-build/src/modules/ai/ai.client.js`），所以命令里带了 `tsc -p tsconfig.test.json`。
+
+### 输出的三段
+
+| 段 | 验的是什么 | 结果 |
+| --- | --- | --- |
+| ① 不拒绝 | schema 发出去了 / 正文多段流出 / 不传工具就没有 tool_calls | 4/4 |
+| ② 拒绝一次（`STUB_REJECT_SCHEMA_ONCE=1`） | 摘掉 schema **补发一次**、第二次不带、正文照常给到用户 | 3/3 |
+| ③ 总开关 | `sendJsonSchema=false` 时一个 schema 都不发 | 1/1 |
+
+关键一条输出（能看到"确实补发了"）：
+
+```
+✅ ② 网关拒了 schema 之后**自动补发了一次**（摘掉 schema）  — stub 收到 2 次请求
+✅ ② 第一次带 schema、第二次不带（摘的正是被拒的那个东西）  — 第一次="stream_dish_analysis" 第二次=null
+```
+
+### 两个坑（第一版脚本自己踩的）
+
+1. **schema 的形状**：传的是**整个 `response_format`**（`{type:'json_schema', json_schema:{name,strict,schema}}`），不是里面那层。我第一版只给了内层，于是 stub 那侧 `schemaName=null`——而"正文照样流出来了"那几条**仍然是绿的**（8 条里过 5 条）。**形状约定照抄 `PICKS_SCHEMA`/`PROMPTS_SCHEMA`，别自己发明**；
+2. **非流式那条路也一起验了一遍**（顺手）：`chatJson` 传同样的 schema，stub 也只看到 `schemaName=null`——**同一个错**。这说明那条路一直以来的真实验收（`verify-ai-http.cjs` 等）读的是 `schemaName`，所以它们是对的；错的是我这个新脚本。
+
+### 与真网关的关系
+
+真网关的拒绝是**偶发**的（约 8 次里 5 次，D-026/D-043），所以真网关那边**不适合**当回归手段；`STUB_REJECT_SCHEMA_ONCE=1` 正是为此伪造出那次拒绝。**这条路径的替代验证只有"拿真额度反复碰运气"**——迁移到 pi-ai 之后第一次真网关验证就撞上过（`/ai/prompts` 502）。

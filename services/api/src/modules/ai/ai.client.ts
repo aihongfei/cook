@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common'
 import type { Message, ModelsApiStreamOptions, ProviderHeaders } from '@earendil-works/pi-ai'
 import type { AiConfig, ChatMessage } from './ai.rules'
 import type { ToolCall } from './ai.tools'
-import { fromPiToolCall, readPiFailure, toPiMessages, toPiTools, type WireLike } from './ai.pi.rules'
+import { fromPiToolCall, isResponseFormatRejection, readPiFailure, shouldRetryStructuredStream, toPiMessages, toPiTools, type WireLike } from './ai.pi.rules'
 import { createRuntime } from './ai.pi.runtime'
 
 /**
@@ -140,18 +140,12 @@ export async function chatJson(config: AiConfig, request: ChatRequest): Promise<
   }
 }
 
-/**
- * 这个 400 是不是"不接受 response_format"引起的。
- *
- * 只看状态码不够：400 也可能是模型名写错、消息格式不对（那些**不该**摘掉 schema 重试，
- * 重试一次白花用户额度，还掩盖了真正的问题）。所以这里认两件事：
- * 错误体里提到 response_format，或者提到这个网关那种"参数不可用"的措辞。
- * 网关的错误体有两种形状，实测都见过：明说的那种，与只回 `{"model":"..."}` 的截断那种
- * （截断的认不出来 → 不重试，如实报错，比乱试强）。
+/*
+ * 「这个 400 是不是不接受 response_format 引起的」与「流式那一趟要不要摘掉 schema 重试」
+ * 两条判定都搬去了 `ai.pi.rules`（纯规则、可直接单测）。这里 re-export 一次，
+ * 既有的 `import { isResponseFormatRejection } from '../ai.client'`（含验收测试）不用改。
  */
-export function isResponseFormatRejection(detail: string): boolean {
-  return /response_format/i.test(detail) || /unavailable now/i.test(detail)
-}
+export { isResponseFormatRejection } from './ai.pi.rules'
 
 /**
  * 流式对话 + 工具调用：把正文增量与工具调用**逐事件**交给调用方。
@@ -170,6 +164,18 @@ export interface ToolStreamRequest {
   messages: WireMessage[]
   /** 传了就允许模型调工具；不传就是纯聊天（与旧行为一致） */
   tools?: readonly unknown[]
+  /**
+   * 期望**边流边结构化**时用：与 `ChatRequest.jsonSchema` 同一份 `response_format`。
+   *
+   * 这一格是给"既想早点出字、又要一份能解析的 JSON"的场景留的（F16-06/07/08 那三条：
+   * 拍照识别菜品 / 营养分析 / 拍照生成菜谱）。补上之前这条路没有这个形参，
+   * 那类需求只能二选一——要么流式、要么结构化。
+   *
+   * 与 `ChatRequest` 同一条规矩：**刻意要求调用方显式给出**，不给 `json: true` 这种布尔——
+   * 曾经因为布尔为真时统一塞一个推荐用的 schema，"提示词"那条路被强制返回
+   * `{picks:[...]}`、解析必然失败（用错 schema 的代价是功能静默失效）。
+   */
+  jsonSchema?: unknown
   temperature?: number
   signal?: AbortSignal
 }
@@ -178,38 +184,85 @@ export type StreamEvent =
   | { type: 'text'; text: string }
   | { type: 'tool_calls'; calls: ToolCall[] }
 
+/**
+ * 流式对话 + 工具调用：把正文增量与工具调用**逐事件**交给调用方。
+ *
+ * `jsonSchema` 那一支与 `chatJson` 走同一套：`AI_JSON_SCHEMA=0` 时不发；被网关拒（400 且
+ * 错误体认得出是 `response_format` 引起）时**摘掉它重试一次**。区别只在于重试的时机——
+ * 这里必须**在吐出任何正文之前**判定，因为：
+ *
+ * > 正文一旦 yield 出去，调用方（SSE 那条路）就已经把字写到用户屏幕上了。
+ * > 那时再回头重试，用户会看到自己刚才读的那段话被抹掉重写一遍。
+ *
+ * 所以结构化那条路的重试判据落在"**第一个事件之前**收到的失败"上；已经开始吐字之后
+ * 再遇到 400 就只能如实报错（这也正是"结构化与流式叠加"这件事的边界，实测见 D-044：
+ * 这台网关下两者**可以**叠加，但被拒的情形必须有个明确的收口）。
+ */
 export async function* chatStreamEvents(config: AiConfig, request: ToolStreamRequest): AsyncGenerator<StreamEvent> {
-  const { runtime, isAborted, done, options } = await prepare(config, request.signal)
+  const structured = Boolean(request.jsonSchema && config.sendJsonSchema)
 
-  try {
-    const stream = runtime.models.stream(
-      runtime.model,
-      {
-        systemPrompt: request.systemPrompt,
-        messages: toPiMessages(request.messages, { provider: runtime.model.provider, model: runtime.model.id }),
-        ...(request.tools?.length ? { tools: toPiTools(request.tools as Parameters<typeof toPiTools>[0]) } : {}),
-      },
-      options(request.temperature ?? 0.7),
-    )
+  /*
+   * 一"趟"：装配资源 → 收流 → 收尾。结构化被拒时要再跑一趟（去掉 schema），
+   * 所以整段包在循环里；两趟用的是各自独立的 `prepare()`，第一趟的计时器不会漏到第二趟。
+   */
+  for (let withSchema = structured; ; withSchema = false) {
+    const { runtime, isAborted, done, options } = await prepare(config, request.signal)
+    let emitted = false
 
-    for await (const event of stream) {
-      if (event.type === 'text_delta') {
-        yield { type: 'text', text: event.delta }
-      } else if (event.type === 'toolcall_end') {
-        // 一次给一个（调用方会攒起来）；参数在这里已拼装完整——半截 JSON 交给谁都没法执行
-        yield { type: 'tool_calls', calls: [fromPiToolCall(event.toolCall)] }
-      } else if (event.type === 'error') {
-        throw toUpstreamError(readPiFailure(event.error, isAborted()) ?? { kind: 'connection', detail: '' }, config)
+    try {
+      const stream = runtime.models.stream(
+        runtime.model,
+        {
+          systemPrompt: request.systemPrompt,
+          messages: toPiMessages(request.messages, { provider: runtime.model.provider, model: runtime.model.id }),
+          ...(request.tools?.length ? { tools: toPiTools(request.tools as Parameters<typeof toPiTools>[0]) } : {}),
+        },
+        {
+          ...options(request.temperature ?? 0.7),
+          ...(withSchema ? { onPayload: (payload) => withResponseFormat(payload, request.jsonSchema) } : {}),
+        },
+      )
+
+      for await (const event of stream) {
+        if (event.type === 'text_delta') {
+          emitted = true
+          yield { type: 'text', text: event.delta }
+        } else if (event.type === 'toolcall_end') {
+          emitted = true
+          // 一次给一个（调用方会攒起来）；参数在这里已拼装完整——半截 JSON 交给谁都没法执行
+          yield { type: 'tool_calls', calls: [fromPiToolCall(event.toolCall)] }
+        } else if (event.type === 'error') {
+          throw toUpstreamError(readPiFailure(event.error, isAborted()) ?? { kind: 'connection', detail: '' }, config)
+        }
       }
-    }
 
-    const result = await stream.result()
-    const failure = readPiFailure(result, isAborted())
-    if (failure) throw toUpstreamError(failure, config)
-  } catch (error) {
-    throw normalizeFailure(error, config)
-  } finally {
-    done()
+      const result = await stream.result()
+      const failure = readPiFailure(result, isAborted())
+      if (failure) throw toUpstreamError(failure, config)
+      return
+    } catch (error) {
+      const normalized = normalizeFailure(error, config)
+      /*
+       * 摘掉 schema 重试**只在还没吐过字**时成立（见文件头那段）：吐过之后重试等于让用户
+       * 看着自己刚读的话被抹掉重写。三个条件缺一不可——结构化的那一趟、认得出是
+       * `response_format` 引起的 400、`emitted` 为假。
+       */
+      if (
+        normalized instanceof AiUpstreamError &&
+        shouldRetryStructuredStream({
+          withSchema,
+          emitted,
+          status: normalized.status,
+          message: normalized.message,
+        })
+      ) {
+        logger.warn(`上游不支持结构化输出（流式，400）：${normalized.message.slice(0, 100)}，去掉 response_format 重试一次`)
+        continue
+      }
+      throw normalized
+    } finally {
+      done()
+    }
   }
 }
 
