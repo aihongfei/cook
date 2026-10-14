@@ -28,6 +28,8 @@ function Nav() {
     <>
       <button type="button" onClick={() => navigate('/recipes/abc', { state: { from: '/recipes' } })}>进详情</button>
       <button type="button" onClick={() => navigate('/recipes')}>回列表</button>
+      <button type="button" onClick={() => navigate('/recipes?category=汤')}>切品类汤</button>
+      <button type="button" onClick={() => navigate('/recipes?category=面')}>切品类面</button>
     </>
   )
 }
@@ -90,4 +92,56 @@ it('摘掉之后不再挂回来（换页那一刻挂一次，之后一直干净�
   // 再等很久也不该有变化
   act(() => { vi.advanceTimersByTime(5000) })
   expect(pageClass()).toBe('tab-layout__page')
+})
+
+/**
+ * 用户 2026-10-15：「这三个切换时，页面会抖；还有首页那些 tab 的，没加载过的第一次点会闪现一下」。
+ *
+ * 根因是"换页"的判据拿了整条地址：`/recipes/mine?tab=收藏的` 与 `?tab=原创的` 被当成两个页面，
+ * 于是点一个 tab 就**整页重播入场动画**（页头、标题、tab 条一起变透明再从右边滑进来）。
+ * 页面内那些把状态存进查询串的控件改的是**同一个页面**的内容，不是换了一页。
+ */
+it('只改查询串不算换页：页内 tab 不该重播整页动画（用户报的"抖/闪"）', async () => {
+  vi.useFakeTimers()
+  renderAt('/recipes')
+  act(() => { vi.advanceTimersByTime(PAGE_TURN_MS + 120) })
+  expect(pageClass()).toBe('tab-layout__page')
+
+  // 切一个品类（只改 ?category=）：动画类不许挂回来
+  act(() => screen.getByRole('button', { name: '切品类汤' }).click())
+  expect(pageClass()).toBe('tab-layout__page')
+
+  // 再切一个（也已经收工）同样干净
+  act(() => screen.getByRole('button', { name: '切品类面' }).click())
+  expect(pageClass()).toBe('tab-layout__page')
+
+  // 而且等多久都不会"迟到地"播一下
+  act(() => { vi.advanceTimersByTime(1000) })
+  expect(pageClass()).toBe('tab-layout__page')
+})
+
+it('动画还没收工时改查询串：不重播（类名不变，CSS 动画就不会重头来）', async () => {
+  vi.useFakeTimers()
+  renderAt('/recipes')
+  // 首屏那条淡入还在跑的时候切品类
+  act(() => { vi.advanceTimersByTime(40) })
+  expect(pageClass()).toContain('--fade')
+  act(() => screen.getByRole('button', { name: '切品类汤' }).click())
+  // 还是那一条，没有换成 --forward
+  expect(pageClass()).toContain('--fade')
+
+  act(() => { vi.advanceTimersByTime(PAGE_TURN_MS + 120) })
+  expect(pageClass()).toBe('tab-layout__page')
+})
+
+it('换页面照旧播（别把这条规则做没了）', async () => {
+  vi.useFakeTimers()
+  renderAt('/recipes')
+  act(() => { vi.advanceTimersByTime(PAGE_TURN_MS + 120) })
+
+  // 先切品类（同页，不播），再进详情（换页，要播）
+  act(() => screen.getByRole('button', { name: '切品类汤' }).click())
+  expect(pageClass()).toBe('tab-layout__page')
+  act(() => screen.getByRole('button', { name: '进详情' }).click())
+  expect(pageClass()).toContain('--forward')
 })

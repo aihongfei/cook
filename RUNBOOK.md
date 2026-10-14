@@ -3811,3 +3811,68 @@ docker compose build api && docker compose up -d api   # ⚠️ 改了后端源�
 第一版的数量行是左对齐、紧贴 tab 下划线的一句「做过 4 道」，用户：「**这个放在这里不好看，优化下**」。改成**右上角**（与同一页「原创的」那个「共 N 道」同位置、同字号 12px / `--color-ink-3`），截断说明（"只列了最近 30 道"）折进同一行。
 
 **并把「收藏的」那行一起改了**——同一页里同一个信息只该有一个位置，否则每换一个 tab 就要重新找一次总数在哪。
+
+## R-068 页内 tab 切换不再重播整页动画（用户报的"抖/闪"，✅ 已验证，2026-10-15）
+
+配套：`DECISIONS.md` **D-077**（判据为什么收窄到 pathname）。
+
+用户原话：「这三个切换时，页面会抖，还有首页那些 tab 的，没加载过的第一次点会闪现一下」。
+
+### 一、逐帧录法（这次靠它一眼看出根因）
+
+问题出在**几十毫秒的中间帧**上，肉眼看只能得出一句"会抖"。做法是在页内起一个 `requestAnimationFrame` 循环，每帧记下那一层页面的类名 / `opacity` / URL / 内容首字，点完再回读：
+
+```js
+// 在页面上下文里（这里是浏览器自动化工具的 evaluate，本身不收参数也不 await）
+window.__f = []; window.__t0 = performance.now(); window.__stop = false;
+const loop = () => {
+  const el = document.querySelector('.tab-layout__page');
+  const cs = el ? getComputedStyle(el) : null;
+  window.__f.push({
+    t: Math.round(performance.now() - window.__t0),
+    cls: el.className.replace('tab-layout__page', '').trim() || '(base)',
+    op: cs ? Number(cs.opacity).toFixed(2) : '-',
+    url: location.search,
+    txt: document.querySelector('.tab-layout__body').innerText.replace(/\s+/g, ' ').slice(0, 46),
+  });
+  if (!window.__stop) requestAnimationFrame(loop);
+};
+requestAnimationFrame(loop);
+```
+
+点一下目标控件、等 900ms、`window.__stop = true`，再把 `window.__f` 读回来。**打出"有变化"的那些帧**（相邻两帧全同就跳过），几十行就够定性。
+
+### 二、修复前的曲线（未加载过的 tab 第一次点）
+
+```
+t=  46  (base)         op=1.00  ?tab=favorites                  ← URL 先变、内容还是旧的
+t=  54  --forward      op=0.00  ?tab=favorites                  ← 整页掉到透明
+t=  62  --forward      op=0.06  ?tab=favorites  卡片=3           ← 数据到了，0.06 就开始淡入
+t=  71…154             op=0.11→0.59                             ← 一路淡上来
+```
+
+**"抖"和"闪"是同一段曲线**：已加载过的 tab 只闪一下旧内容；没加载过的，新数据正好落在 `opacity` 还很小那几帧里。
+
+### 三、修复后的复测（三处页内控件）
+
+| 处 | 结果 |
+| --- | --- |
+| 我的菜谱 做过的→收藏的 | `op=1.00` 全程、`cls=(base)` 全程；只有内容换（卡=1 → 卡=3） |
+| 我的菜谱 收藏的→原创的 | 同上 |
+| 菜谱小书 点「汤」品类 | **89 帧 / 1 次变化**（就是没有变化） |
+| 冰箱「能做点什么」切「只看不用买的」 | 114 帧 / 2 次变化（只有 URL 变） |
+
+**同时复验"不能做坏的那一半"**：点一张卡片进详情，仍然 `--forward`、`op 0.00 → 1.00` 从右边滑进来。
+
+### 四、一条纪律：先用旧实现证明新测试会红
+
+新增的 3 条单测（同页切查询串不播 / 动画没收工时切也不重播 / 换页面照旧播）如果直接在改好的代码上跑，**全绿说明不了任何事**——它们可能只是在描述现状。做法是 `git stash` 掉实现、只留测试跑一遍：
+
+```
+× 只改查询串不算换页：页内 tab 不该重播整页动画（用户报的"抖/闪"）
+× 动画还没收工时改查询串：不重播（类名不变，CSS 动画就不会重头来）
+× 换页面照旧播（别把这条规则做没了）
+Tests  3 failed | 3 passed (6)
+```
+
+红了之后再 `git stash pop` 跑全绿，这 3 条才算真的钉住了东西。
