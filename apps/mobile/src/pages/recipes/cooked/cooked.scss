@@ -1,0 +1,105 @@
+/* 我做过（M9 / F9-01）。布局照收藏页与菜谱小书的双列网格——
+   三份都是"翻菜"的界面，形状一致才不用重新认一遍（D-076）。 */
+
+.cooked-page {
+  padding-bottom: 18px;
+}
+
+.cooked__status {
+  padding: 14px 0;
+}
+
+.cooked__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+
+.cooked__go {
+  width: auto;
+  padding: 9px 20px;
+  text-decoration: none;
+}
+
+/* 数量靠右，与同一页「原创的」那一行（`.my-recipes__count`）同位置：
+   三个 tab 的"总数"都落在右上角，翻 tab 时不用重新找它在哪。
+   离底下的网格留出与那一行等量的间距（12px），卡片不会顶着文字。
+   横向边距仍由块自己带（与 `.favorites__summary` 同一条，见那个文件里的说明）：
+   给容器加内边距会让标题比正文多缩一格。 */
+.cooked__summary {
+  margin: 10px var(--spacing-page) 12px;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  text-align: right;
+}
+
+.cooked__grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin: 0 var(--spacing-page);
+}
+
+.cooked-card {
+  overflow: hidden;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.cooked-card__link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.cooked-card__link:active {
+  opacity: 0.75;
+}
+
+.cooked-card__pic {
+  height: 96px;
+  background: var(--color-cream-2);
+}
+
+.cooked-card__pic img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cooked-card__body {
+  padding: 9px 10px 11px;
+}
+
+.cooked-card__name {
+  font-size: 13.5px;
+  color: var(--color-ink);
+}
+
+/*
+ * 「做过 N 次 · 最近 …」是这一页的**主要信息**（与收藏页的品类/菜系不同），
+ * 所以给它品牌暖色而不是灰字——用户扫一眼就该看到"我做过几次"。
+ */
+.cooked-card__times {
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: #b15d2c;
+}
+
+.cooked-card__meta {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.cooked-card__calories {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}

@@ -88,8 +88,15 @@ test('流转权限按目标状态算，且复用 M2 的能力键（不新增）'
     assert.deepEqual(pending, ['PLANNED', 'CANCELED'], `${role} 在待确认阶段应能安排或取消`)
     assert.deepEqual(nextActionsFor(role, 'COOKING').map(a => a.status), ['DONE'], `${role} 应能确认做好`)
   }
-  // 吃货：什么状态都推不动（点菜可以，改状态不行）
+  /*
+   * 吃货：能点菜，也能**把「准备中」推成「做好了」**（2026-10-15 用户要求"任何人
+   * 都可以点击做好"，见 D-075）。但**其余一步都推不动**——安排、取消、开始做都是
+   * 掌勺人/帮厨的事。这一条的写法刻意是"逐个状态列出来"，而不是"除了 COOKING 都为空"：
+   * 前者在将来给 EATER 多放开一步时会红（那是我们想知道的），后者会静默跟着放行。
+   */
+  assert.deepEqual(nextActionsFor('EATER', 'COOKING').map(a => a.status), ['DONE'], '吃货能标"做好了"')
   for (const status of ORDER_STATUSES) {
+    if (status === 'COOKING') continue
     assert.deepEqual(nextActionsFor('EATER', status), [], `吃货不该能推动 ${status}`)
   }
   // 能力点确实来自 M2 那张表
@@ -102,6 +109,19 @@ test('会影响别人的动作标了 needsConfirm（前端据此弹二次确认�
   assert.equal(cancel?.needsConfirm, true, '取消整餐要二次确认')
   const plan = nextActionsFor('OWNER', 'PENDING').find(action => action.status === 'PLANNED')
   assert.equal(plan?.needsConfirm, false, '「选好了」是正常推进，不该打扰用户')
+
+  /*
+   * 「做好了」是**终态**（标好之后不能再加菜、不能取消，没有撤销），而 2026-10-15 起
+   * 全家任何成员都能点它（D-075）——误触的代价因此变高，所以要问一句。
+   * 「开始做」不同：它随时能退回去，点一下生效（多问一句只是多一次点击）。
+   */
+  const done = nextActionsFor('EATER', 'COOKING').find(action => action.status === 'DONE')
+  assert.equal(done?.needsConfirm, true, '「做好了」是终态，要二次确认')
+  assert.equal(
+    nextActionsFor('OWNER', 'PLANNED').find(action => action.status === 'COOKING')?.needsConfirm,
+    false,
+    '「开始做」可以退回去，不该打扰用户',
+  )
 })
 
 test('共享开关关闭时，只有吃货被收窄到"只看我的"', () => {

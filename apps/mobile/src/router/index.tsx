@@ -16,6 +16,7 @@ import MinePage from '@/pages/mine/MinePage'
 import PrepPage from '@/pages/prep/PrepPage'
 import ShoppingPage from '@/pages/shopping/ShoppingPage'
 import FavoritesPage from '@/pages/recipes/favorites/FavoritesPage'
+import CookedPage from '@/pages/recipes/cooked/CookedPage'
 import MyRecipesPage from '@/pages/recipes/MyRecipesPage'
 import RecipeFormPage from '@/pages/recipes/RecipeFormPage'
 import RecipeListPage from '@/pages/recipes/RecipeListPage'
@@ -51,6 +52,7 @@ export const router = createBrowserRouter([
       { path: 'recipes/:id', element: <RecipeDetailPage /> },
       { path: 'recipes/:id/edit', element: <RecipeFormPage /> },
       { path: 'favorites', element: <FavoritesPage /> },
+      { path: 'cooked', element: <CookedPage /> },
       { path: 'order', element: <OrderPage /> },
       { path: 'order/history', element: <HistoryPage /> },
       { path: 'prep', element: <PrepPage /> },

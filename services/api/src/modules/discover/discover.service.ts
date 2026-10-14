@@ -9,6 +9,7 @@ import { matchDish } from '../fridge/pantry.rules'
 import { judgeDish } from '../taste/taste.rules'
 import { TasteService } from '../taste/taste.service'
 import {
+  cookedLabel,
   countCooked,
   countFavorites,
   parsePicksLimit,
@@ -412,6 +413,103 @@ export class DiscoverService {
       total: recipes.length,
       /** 冰箱里一条都没记：界面要说"记了冰箱，推荐会跟着变" */
       fridgeEmpty: fridgeRows.length === 0,
+    }
+  }
+
+  /**
+   * 「我做过」（M9 / F9-01）：**我点过、且那一餐已经做好的**菜。
+   *
+   * ## "谁掌勺"这件事这个应用本来就有记录
+   *
+   * 2026-10-15 用户的原话是「家庭任何人都可以点击做好，但是要记录是谁点的，
+   * 谁点的就是谁掌勺的」。核查发现**"谁点的"一直都有**（`OrderItem.userId` 就是点菜人），
+   * 所以这里不需要新字段——"我做过"= 我点过的那几份、且那一餐已标 DONE。
+   * 权限那一半（谁都能点「做好了」）在 `family.roles` 里，见 D-075。
+   *
+   * ## 与「家人最爱」的口径差别
+   *
+   * 那一份按**家庭**口径算（"我们家做过 3 次"），这一份**只算我自己点的**——
+   * 它是"我的手艺账本"，不是家里的榜单。所以这里不走 `visibleToMember`：
+   * 共享开关关掉时也只是"别人看不到我的"，而不影响我看自己的。
+   *
+   * ## 三个刻意的
+   *
+   * - **按"餐"计次，不按"份"**：同一餐里我点了两份同一道菜，那是做过**一次**
+   *   （复用 `countCooked`——纯函数、单测已覆盖，两个口径不能各算一遍）；
+   * - **只要 DONE 的餐**：安排了没做的、取消的都不算"我做过"。这与 F5-02/F5-05 同一条；
+   * - **按最近做的排前面**（不是按次数）：这一页是"我最近做了什么"的账本，
+   *   用户找的多半是"上周那道"；做过几次是列表上的一个事实，不是排序依据。
+   */
+  async cooked(userId: string, rawLimit: unknown) {
+    const membership = await this.prisma.familyMember.findUnique({ where: { userId } })
+    if (!membership) throw new NotFoundException('先加入家庭，才有"我做过"这一说')
+    const { familyId } = membership
+    const limit = parsePicksLimit(rawLimit)
+    const now = new Date()
+
+    // 只认**我点过**的那些份：cookedRows 的 onlyUserId 正是这个语义（见它的实现）
+    const rows = await this.cookedRows(familyId, userId)
+    const counted = countCooked(rows)
+
+    /*
+     * 排序与截断都在这里做（不是数据库层）：菜谱要先拿到名字才能按名字做确定性的次序，
+     * 而"最近做的在前"这一条在 `lastCookedOn` 上。两步分开写会让两次请求的顺序不同
+     * （同一天做的几道菜之间没有稳定次序）。
+     */
+    const picks = [...counted]
+      .map(([recipeId, stat]) => ({ recipeId, ...stat }))
+      .sort((a, b) =>
+        (b.lastCookedOn ?? '').localeCompare(a.lastCookedOn ?? '') || b.cooked - a.cooked || a.recipeId.localeCompare(b.recipeId),
+      )
+
+    const total = picks.length
+    const top = picks.slice(0, limit)
+    const recipes = await this.prisma.recipe.findMany({
+      where: { id: { in: top.map((pick) => pick.recipeId) } },
+      select: {
+        id: true,
+        name: true,
+        image: true,
+        imageKey: true,
+        category: true,
+        cuisine: true,
+        tags: true,
+        calories: true,
+        caloriesEstimated: true,
+      },
+    })
+    const byId = new Map(recipes.map((recipe) => [recipe.id, recipe]))
+
+    return {
+      limit,
+      /** 我做过的菜一共多少道（**不是返回了多少道**）——界面据此说"还有 N 道" */
+      total,
+      items: top.flatMap((pick) => {
+        const recipe = byId.get(pick.recipeId)
+        // 菜谱在这两次查询之间被删掉时拿不到详情：宁可少一行，也不给一条没有菜名的空壳
+        if (!recipe) return []
+        return [
+          {
+            id: recipe.id,
+            name: recipe.name,
+            image: publicImageUrl(recipe.imageKey, recipe.image),
+            category: recipe.category,
+            cuisine: recipe.cuisine,
+            tags: recipe.tags as string[],
+            calories: recipe.calories,
+            caloriesEstimated: recipe.caloriesEstimated,
+            /** 做过几次（按餐去重） */
+            cooked: pick.cooked,
+            /** 最近一次做的日期（`YYYY-MM-DD`）；这一份里**保证非 null**（有记录才有它） */
+            lastCookedOn: pick.lastCookedOn,
+            /**
+             * 那行字（"做过 3 次 · 最近 10-12"）**由后端拼**：与 `stockLabel`/`addedLabel`
+             * 同一条规矩（D-059 四），前端只照搬——两边各拼一遍必然漂移。
+             */
+            cookedLabel: cookedLabel(pick.cooked, pick.lastCookedOn, dateKey(now)),
+          },
+        ]
+      }),
     }
   }
 

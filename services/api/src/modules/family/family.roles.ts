@@ -38,7 +38,22 @@ export const ROLE_CAPABILITIES: Record<FamilyRole, Capability[]> = {
     CAPABILITIES.FAMILY_EDIT,
   ],
   COOK: [CAPABILITIES.ORDER_CREATE, CAPABILITIES.MENU_MANAGE, CAPABILITIES.MENU_CONFIRM],
-  EATER: [CAPABILITIES.ORDER_CREATE],
+  /**
+   * 吃货：点菜 + **把某道菜标成做好了**（2026-10-15 用户明确要求，见 D-075）。
+   *
+   * 「谁掌勺」这件事在这个应用里是**家里轮流做饭**，而不是"只有掌勺人角色能操作"：
+   * 用户的原话是「家庭任何人都可以点击做好，但是要记录是谁点的，谁点的就是谁掌勺的」。
+   * **"谁点的"一直都有记录**（`OrderItem.userId`），所以这次只是把这一步的门打开。
+   *
+   * 只放开了这一个 key：`MENU_CONFIRM` 在全仓库**只有一个消费点**（`TRANSITION_CAPABILITY.DONE`，
+   * 见 `orders.rules`），所以给 EATER 加它**不会连带放开**"选好了""开始做""取消这餐"——
+   * 那三个走 `MENU_MANAGE`，吃货仍然没有。
+   *
+   * ⚠️ 共享开关关掉时，"人人可点"只对**参与这一餐的人**成立：家人看不到自己没参与的餐，
+   * 也就点不了那餐的「做好了」。这是现有可见性口径的必然结果（D-024 定的"宁可少说"），
+   * 不是这次的疏漏。
+   */
+  EATER: [CAPABILITIES.ORDER_CREATE, CAPABILITIES.MENU_CONFIRM],
 }
 
 export const ROLE_LABELS: Record<FamilyRole, string> = {

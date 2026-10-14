@@ -5,8 +5,10 @@ import {
   FAVORITE_WEIGHT,
   PICKS_LIMIT_DEFAULT,
   PICKS_LIMIT_MAX,
+  cookedLabel,
   countCooked,
   countFavorites,
+  recentDayLabel,
   parsePicksLimit,
   rankPicks,
 } from '../src/modules/discover/discover.rules'
@@ -136,5 +138,41 @@ describe('榜单排序', () => {
     )
     // 3 人收藏 = 3 分 > 做过一次 = 2 分
     assert.deepEqual(ranked.map((pick) => pick.recipeId), ['三个人收着的', '做过一次的'])
+  })
+})
+
+describe('「我做过」那行字（F9-01 / D-075）', () => {
+  it('次数与最近日期都写出来', () => {
+    assert.equal(cookedLabel(3, '2026-10-12', '2026-10-15'), '做过 3 次 · 最近 3 天前')
+  })
+
+  it('当天/昨天/前天用相对说法（用户判断"上次做"用的是日历，不是秒表）', () => {
+    assert.equal(recentDayLabel('2026-10-15', '2026-10-15'), '今天')
+    assert.equal(recentDayLabel('2026-10-14', '2026-10-15'), '昨天')
+    assert.equal(recentDayLabel('2026-10-13', '2026-10-15'), '前天')
+  })
+
+  it('一周以上直接给月日（"13 天前"要用户自己再算一遍，而 10-02 一眼对得上日历）', () => {
+    assert.equal(recentDayLabel('2026-10-02', '2026-10-15'), '10-02')
+    assert.equal(cookedLabel(1, '2026-09-20', '2026-10-15'), '做过 1 次 · 最近 09-20')
+  })
+
+  it('跨年时补上年份（不补的话"12-30"是哪个冬天说不清）', () => {
+    // 16 天前，落在"给月日"那一档；跨了年，所以要连年份一起给
+    assert.equal(recentDayLabel('2025-12-20', '2026-01-05'), '2025-12-20')
+    // 同年则只给月日
+    assert.equal(recentDayLabel('2026-03-20', '2026-04-05'), '03-20')
+  })
+
+  it('未来的日期当"今天"（服务器与库的时钟差几秒会造出"未来"，而"后天做的"是句胡话）', () => {
+    assert.equal(recentDayLabel('2026-10-16', '2026-10-15'), '今天')
+  })
+
+  it('日期串坏掉时如实回原文，**不编"今天"**（编一个假的比不精确更糟）', () => {
+    assert.equal(recentDayLabel('不是日期', '2026-10-15'), '不是日期')
+  })
+
+  it('没有最近日期时只说次数（有记录才有这一行，但真缺了也不编一个日期）', () => {
+    assert.equal(cookedLabel(2, null, '2026-10-15'), '做过 2 次')
   })
 })

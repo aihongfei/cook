@@ -134,3 +134,45 @@ export function rankPicks(
         a.recipeId.localeCompare(b.recipeId),
     )
 }
+
+/**
+ * 「我做过」那行字（M9 / F9-01，D-075）：**做过 N 次 · 最近 …**。
+ *
+ * **由后端拼**，与采购清单那句 `stockLabel`、冰箱的 `addedLabel` 同一条规矩（D-059 四）：
+ * 这类句子前端各拼一遍必然漂移，而"我到底做过几次"是用户会拿来当事实读的一句话。
+ *
+ * 日期的说法**复用冰箱那套相对日期的口径**（今天 / 昨天 / N 天前 / 更早 / 具体月日）：
+ * 用户判断"上次做是什么时候"用的是日历，不是秒表。三档以上就直给月日——
+ * "13 天前"要用户自己再算一遍，不如写 `10-02` 一眼就对得上日历。
+ *
+ * `lastCookedOn` 为空（理论上不会：有记录才有这一行）时只说次数，不编一个日期。
+ */
+export function cookedLabel(cooked: number, lastCookedOn: string | null, today: string): string {
+  const times = `做过 ${cooked} 次`
+  if (!lastCookedOn) return times
+  return `${times} · 最近 ${recentDayLabel(lastCookedOn, today)}`
+}
+
+/** 相对日期的说法（`YYYY-MM-DD` 进、给人看的话出） */
+export function recentDayLabel(dayKey: string, today: string): string {
+  const days = daysBetween(dayKey, today)
+  if (days === null) return dayKey // 日期串坏掉时如实回原文，不编"今天"（那是假的）
+  if (days <= 0) return '今天'
+  if (days === 1) return '昨天'
+  if (days === 2) return '前天'
+  if (days <= 6) return `${days} 天前`
+  /*
+   * 一周以上写 `10-02`：`13 天前` 要用户自己再算一遍，而月日一眼就对得上日历。
+   * 跨年时补上年份（`2025-12-30` → `2025-12-30`）——不补的话"12-30"到底是哪个冬天说不清。
+   */
+  const [year, month, day] = dayKey.split('-')
+  return year === today.slice(0, 4) ? `${month}-${day}` : dayKey
+}
+
+/** 两个 `YYYY-MM-DD` 相差几个日历日（后者减前者）；日期串不合规时返回 null */
+function daysBetween(from: string, to: string): number | null {
+  const a = Date.parse(`${from}T00:00:00Z`)
+  const b = Date.parse(`${to}T00:00:00Z`)
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null
+  return Math.round((b - a) / 86_400_000)
+}

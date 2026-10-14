@@ -49,8 +49,15 @@ export const TRANSITION_CAPABILITY: Record<OrderStatus, string> = {
   CANCELED: CAPABILITIES.MENU_MANAGE,
 }
 
-/** 影响别人/不可逆的动作，前端要二次确认（走 ConfirmDialog） */
-const NEEDS_CONFIRM: OrderStatus[] = ['CANCELED']
+/**
+ * 影响别人/不可逆的动作，前端要二次确认（走 ConfirmDialog）。
+ *
+ * `DONE` 是 2026-10-15 加进来的（D-075）：全家任何成员都能点「做好了」之后
+ * （用户要求「家庭任何人都可以点击做好」），误触的代价随之变高——
+ * 而它是**终态**：标好之后这一餐再也不能加菜、不能取消，没有撤销。
+ * 「开始做」（COOKING）仍然点一下生效：它随时能退回去，不值得多问一句。
+ */
+const NEEDS_CONFIRM: OrderStatus[] = ['CANCELED', 'DONE']
 
 /**
  * 点菜可选范围：今天起 7 天（D-022 的 2 天 → D-025 的 3 天 → F4-03 的 7 天）。

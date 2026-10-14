@@ -22,10 +22,20 @@ test('角色只有三档，且必须能识别非法角色', () => {
   assert.ok(!isFamilyRole(undefined) && !isFamilyRole(null) && !isFamilyRole(''))
 })
 
-test('掌勺人拥有全部能力，吃货只能点菜', () => {
+test('掌勺人拥有全部能力；吃货能点菜 + 标记「做好了」，但改不了菜单', () => {
   const all = Object.values(CAPABILITIES)
   assert.deepEqual([...capabilitiesOf('OWNER')].sort(), [...all].sort(), '掌勺人应当拥有全部能力（新增能力点时会提醒维护者）')
-  assert.deepEqual(capabilitiesOf('EATER'), [CAPABILITIES.ORDER_CREATE], '吃货只能点菜')
+  /*
+   * 吃货的两个能力是 2026-10-15 用户明确要求的结果（D-075）：「家庭任何人都可以点击
+   * 做好，但是要记录是谁点的」。所以这里断言的是**恰好这两个**——将来谁又给 EATER
+   * 加能力（比如"取消这餐"），这条会失败，那正是它该拦住的（多一个能力点意味着
+   * 一个普通家庭成员能做更多不可逆的事）。
+   */
+  assert.deepEqual(
+    [...capabilitiesOf('EATER')].sort(),
+    [CAPABILITIES.MENU_CONFIRM, CAPABILITIES.ORDER_CREATE].sort(),
+    '吃货应当恰好是：点菜 + 标记做好了',
+  )
 
   // 帮厨：能干活但不能管人（这是"帮厨"和"掌勺人"的关键区别）
   assert.ok(can('COOK', CAPABILITIES.MENU_MANAGE))
@@ -35,9 +45,15 @@ test('掌勺人拥有全部能力，吃货只能点菜', () => {
   assert.ok(!can('COOK', CAPABILITIES.INVITE_RESET), '帮厨不能重置邀请码')
   assert.ok(!can('COOK', CAPABILITIES.FAMILY_EDIT), '帮厨不能改家庭信息')
 
-  // 吃货连"改菜单"都不行——这是点菜与安排的分界
-  assert.ok(!can('EATER', CAPABILITIES.MENU_MANAGE))
-  assert.ok(!can('EATER', CAPABILITIES.MENU_CONFIRM))
+  // 吃货"改菜单"不行（那是点菜与安排的分界），但**标记做好了可以**——
+  // 这一条是 D-075 的核心：`MENU_CONFIRM` 全仓库只有一个消费点（DONE），
+  // 所以放开它不会连带放开"选好了/开始做/取消这餐"（那三个走 MENU_MANAGE）
+  assert.ok(!can('EATER', CAPABILITIES.MENU_MANAGE), '吃货不能安排菜单')
+  assert.ok(can('EATER', CAPABILITIES.MENU_CONFIRM), '吃货能标"做好了"（谁做的一家人自己清楚）')
+  // 这三件都是 MENU_MANAGE 的产物，必须仍然没有——放开时要确认没顺手带出来
+  for (const action of ['PLANNED', 'COOKING', 'CANCELED'] as const) {
+    assert.ok(!can('EATER', CAPABILITIES.MENU_MANAGE), `吃货不该能推到 ${action}`)
+  }
 })
 
 test('M3/M4 的能力点已预留在同一张表里（不另起一套）', () => {

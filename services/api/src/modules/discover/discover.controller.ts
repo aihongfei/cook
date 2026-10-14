@@ -69,4 +69,19 @@ export class DiscoverController {
   async decide(@CurrentUserId() userId: string, @Query('exclude') exclude?: string) {
     return this.discover.decide(userId, exclude)
   }
+
+  /**
+   * 我做过（M9 / F9-01）：**我点过、且那一餐已经做好的**菜。
+   *
+   * 与「家人最爱」不是一回事：那一份按家庭口径（"我们家做过 3 次"），这一份只算我自己点的
+   * ——"我的手艺账本"。所以它**不受共享开关影响**（那是"家人之间互相可见"的开关，
+   * 而看自己的记录不需要别人允许）。
+   */
+  @Get('cooked')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '我做过：我点过且那一餐已做好的菜（做过几次 · 最近日期，F9-01）' })
+  @ApiQuery({ name: 'limit', required: false, description: '最多给几道，默认 30、上限 60' })
+  async cooked(@CurrentUserId() userId: string, @Query('limit') limit?: string) {
+    return this.discover.cooked(userId, limit)
+  }
 }

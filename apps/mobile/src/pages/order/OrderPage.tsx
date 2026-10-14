@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
-import { useFamily } from '@/api/family'
+import { useFamily, CAPABILITY, can } from '@/api/family'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import ConfirmMenuSheet from './components/ConfirmMenuSheet'
 import DinerCountSheet from './components/DinerCountSheet'
@@ -188,7 +188,12 @@ export default function OrderPage() {
               pending.status === 'CANCELED'
                 ? // 取消不是死路：这一餐之后还能重新点（后端会把它拉回待确认）——说清楚，别让人以为这一天废了
                   '取消后这一餐就作废了。之后想再点，重新点这道菜就行，这一餐会回到「待确认」。'
-                : `把这餐标成「${STATUS_LABEL[pending.status]}」？家里人都能看到这个状态。`,
+                : pending.status === 'DONE'
+                  ? // 「做好了」是**终态**：这一餐之后再也不能加菜、不能取消（2026-10-15 全家都能点它了，
+                    // 误触的代价因此变高——见 D-075 第三条）。所以这里要说清"回不去了"，
+                    // 而不是那句泛泛的"家里人都能看到这个状态"。
+                    '标成「做好了」之后就定了：这一餐不能再加菜，也不能取消了（要留着当记录）。'
+                  : `把这餐标成「${STATUS_LABEL[pending.status]}」？家里人都能看到这个状态。`,
             confirmText: pending.label,
             tone: pending.status === 'CANCELED' ? ('danger' as const) : ('normal' as const),
           }
@@ -358,14 +363,30 @@ export default function OrderPage() {
               </p>
             )}
 
-            {/* 就餐人数（M4 / F4-05）：含没点菜只吃饭的家人，所以和"N 人点了"分开显示。
-                能到这一餐的人才看得到；没定就写"还没定"，别显示 0。 */}
-            <button type="button" className="order-card__diners" onClick={() => setDinersFor(card)}>
+            {/*
+              就餐人数（M4 / F4-05）：含没点菜只吃饭的家人，所以和"N 人点了"分开显示。
+              能到这一餐的人才看得到；没定就写"还没定"，别显示 0。
+
+              ⚠️ 那个「· 改」的判据是**改人数这件事自己**（`menu.manage`），不是
+              "有没有下一步按钮"。原来写的是 `card.nextActions.length > 0`，在 2026-10-15
+              放开「做好了」给吃货（D-075）之后就成了**假入口**：吃货在一餐"准备中"时
+              `nextActions` 有 DONE，于是看到一个「· 改」，点下去 403
+              （后端 `setDiners` 要 MENU_MANAGE）——这正是本项目最不能接受的那种东西
+              （看起来能点，点了没用还不知道为什么）。
+              任何"用 A 现象当 B 能力代理"的判据都会在权限调整时这样裂开，所以这里
+              回到**它自己那一项能力**：前端据此显示/隐藏，判定仍然只由后端下。
+            */}
+            <button
+              type="button"
+              className="order-card__diners"
+              disabled={!can(family.data, CAPABILITY.MENU_MANAGE)}
+              onClick={() => setDinersFor(card)}
+            >
               🍚{' '}
               {card.dinerCount
                 ? `${card.dinerCount} 人吃（${card.ordererCount} 人点了）`
                 : '还没定几个人吃'}
-              {card.nextActions.length > 0 && ' · 改'}
+              {can(family.data, CAPABILITY.MENU_MANAGE) && ' · 改'}
             </button>
 
             {/* 存成常用组合（M4 / F4-04）：刚把这一餐配齐时"下次也照这样点"的念头最强，
