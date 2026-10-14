@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { CloseIcon } from '@/components/icons/TabIcons'
 import { registerBackCloser } from '@/lib/android-back'
+import { useRouteKey } from '@/lib/route-key'
 
 /**
  * 全屏看大图（F16-05；用户 2026-10-13：「图片需要能点击全屏看」）。
@@ -48,6 +49,22 @@ export default function ImageViewer({
        它是从抽屉里点开的、压在抽屉之上，所以登记在最上面，返回时先关它。 */
     return registerBackCloser(onClose)
   }, [onClose])
+
+  /*
+   * **换页就关掉**：这一层画在 `document.body` 上，不属于任何页面——页面被缓存下来时
+   * （见 `layouts/KeepAlivePages`）它不会跟着藏，会盖在**下一张页面**上面，
+   * 而且还在抢系统返回键。用户按下"进菜谱"的那一刻这一层就该消失。
+   *
+   * 记下**打开这一层时的那个地址**、只跟它比：直接拿当前地址当依赖的话，
+   * 挂载那一次也会触发（`useEffect` 挂载必跑），大图一开就自己关了。
+   * 用 `useRouteKey` 而不是 `useLocation`：这个组件在组件测试里是单独渲染的，
+   * 没有路由也不该抛错（见那个 hook 的说明）。
+   */
+  const routeKey = useRouteKey()
+  const openedAt = useRef(routeKey)
+  useEffect(() => {
+    if (routeKey !== null && routeKey !== openedAt.current) onClose()
+  }, [routeKey, onClose])
 
   return createPortal(
     <div className="photo-viewer" role="dialog" aria-modal="true" aria-label="看大图" onClick={onClose}>

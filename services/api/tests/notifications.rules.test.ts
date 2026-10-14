@@ -405,6 +405,30 @@ test('mealKey：菜单/做好了给出是哪一餐；快过期与该备菜是 nu
 })
 
 /*
+ * 四类的小标（`tag`）钉在这里，因为它们**直接显示在点单卡的角标上**，
+ * 而角标紧挨着状态戳——用名词（"菜单"）会读成"这里有一份菜单"，像状态而不像"有事没看"。
+ * 用户 2026-10-14 就是看着那颗角标说的「菜单那条改为选好了」。
+ */
+test('小标写的是动作而不是名词：菜单那条叫「选好了」（与按钮上的原话同一个词）', () => {
+  const rows = buildNotifications(
+    input({
+      plan: [planFact()],
+      done: [doneFact()],
+      fridge: [fridgeFact({ expiresOn: new Date('2026-10-16T00:00:00Z') })],
+      prep: [prepFact()],
+    }),
+    NOW,
+  )
+  const byKind = Object.fromEntries(rows.map((row) => [row.kind, row.tag]))
+  assert.deepEqual(byKind, {
+    plan: '选好了',
+    done: '做好了',
+    expiry: '快过期',
+    prep: '备菜',
+  })
+})
+
+/*
  * 「谁做好的」留痕与「谁定的菜单」是同一时刻的第二件事，判据并排放在 orders.rules 里。
  * 三条钉住：DONE 记、CANCELED 清、其余不动。
  */

@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { registerBackCloser } from '@/lib/android-back'
+import { useRouteKey } from '@/lib/route-key'
 import './ui.scss'
 
 /**
@@ -89,6 +90,17 @@ export default function ConfirmDialog({
     if (!open || pending) return
     return registerBackCloser(onCancel)
   }, [open, pending, onCancel])
+
+  /*
+   * **换页就关掉**：这一层画在 `document.body` 上，不属于任何页面——页面被缓存下来时
+   * （见 `layouts/KeepAlivePages`）它不会跟着藏，会盖在**下一张页面**上面，
+   * 还会继续抢系统返回键。与 ImageViewer 里那条同一个理由、同一个写法。
+   */
+  const routeKey = useRouteKey()
+  const openedAt = useRef(routeKey)
+  useEffect(() => {
+    if (open && routeKey !== null && routeKey !== openedAt.current) onCancel()
+  }, [open, routeKey, onCancel])
 
   if (!open) return null
 

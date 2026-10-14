@@ -1,14 +1,16 @@
-import { useEffect, useRef } from 'react'
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useLayoutEffect, useRef } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { LeafSprig } from '@/components/icons/TabIcons'
 import AiAssistantBall from '@/components/ai/AiAssistantBall'
 import AiAssistantSheet from '@/components/ai/AiAssistantSheet'
-import { useNotifications, type NotificationBoard } from '@/api/notifications'
+import { useNotifications, useMarkArrived, type NotificationBoard } from '@/api/notifications'
 import { useAiAssistantSession } from '@/stores/ai-assistant-session'
 import { tabs } from '@/config/tabs'
 import { tabOf } from '@/pages/back-link'
 import { targetOf } from '@/lib/local-notify'
 import { emitTabRetap } from '@/lib/tab-retap'
+import { pageKeyOf, createScrollMemory } from '@/lib/scroll-memory'
+import KeepAlivePages from './KeepAlivePages'
 import { usePageTurn } from './use-page-turn'
 import './TabLayout.scss'
 
@@ -43,9 +45,68 @@ export default function TabLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const { pathname } = location
+  /*
+   * 「哪一页」= 路径 + 查询串：`/recipes?category=主食` 与 `/recipes` 是两页，
+   * 各自记各自的位置（用户从某个分类进去、返回，该回到那个分类的那一处）。
+   */
+  const pageKey = pageKeyOf(location)
   const bodyRef = useRef<HTMLElement>(null)
   const assistantOpen = useAiAssistantSession((state) => state.open)
-  useEffect(() => { bodyRef.current?.scrollTo?.({ top: 0 }) }, [pathname])
+  /** 滚动位置的记忆（见下面两个 effect） */
+  const memoryRef = useRef(createScrollMemory())
+
+  /*
+   * 换页时把滚动位置摆回**这一页上次停的地方**。
+   *
+   * 页面本身由 `KeepAlivePages` 缓存着（不卸载），但**滚动容器是共用的**（下面那个
+   * `main`），所以位置得单独记——缓存能保住页面里的状态，保不住"滚到哪儿了"。
+   *
+   * 两个 effect 都用 `useLayoutEffect` 而不是 `useEffect`，这是**刻意的**：
+   * 换页那一瞬间浏览器会把 `scrollTop` 夹一下（上一页被藏起来、容器变矮），
+   * 于是会冒出一趟**带着假值**的滚动事件。布局阶段跑在浏览器处理那趟夹取之前，
+   * 所以"卸掉旧监听 → 摆好新位置 → 挂上新监听"这一串能在假事件冒出来之前做完。
+   * 换成 `useEffect`（画完之后才跑）就晚了：那一趟假值会被当成"用户滚到了 0"记下来。
+   */
+  useLayoutEffect(() => {
+    const body = bodyRef.current
+    if (!body) return
+    const restored = memoryRef.current.read(pageKey)
+    // jsdom 里 `scrollTo` 不存在（真实浏览器有），退回直接赋值
+    if (typeof body.scrollTo === 'function') body.scrollTo({ top: restored })
+    else body.scrollTop = restored
+  }, [pageKey])
+
+  /*
+   * 滚动过程中随时记（按帧节流）：这是位置**唯一的来源**。
+   *
+   * 挂的是**当前这一页**的键，而卸载发生在布局阶段的清理里（早于浏览器的夹取），
+   * 所以那趟假事件落不到这个监听上——不必再自己比对"现在还是不是我这一页"。
+   */
+  useLayoutEffect(() => {
+    const body = bodyRef.current
+    if (!body) return
+    const key = pageKeyOf(location)
+    let frame = 0
+    const onScroll = () => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        memoryRef.current.save(key, body.scrollTop)
+      })
+    }
+    body.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      body.removeEventListener('scroll', onScroll)
+    }
+  }, [location])
+
+  /*
+   * 到了某条提醒指向的地方就算看过（用户 2026-10-14：「我点进去怎么还是菜单啊，
+   * 没有去掉红点啊」）。判据是后端给的 `to`——一处生效、`/order/<mealKey>`、`/prep`、
+   * `/fridge` 三处都对（见 `useMarkArrived` 的注释）。
+   */
+  useMarkArrived(pageKey)
 
   /*
    * 手机弹窗提醒的**排程**不在这里（M10 交付二）：它挂在 `main.tsx` 的根层上，
@@ -105,13 +166,15 @@ export default function TabLayout() {
     <div className="tab-layout">
       <main ref={bodyRef} className="tab-layout__body">
         {/*
-          key=pathname：换页时把这一层重挂载一次，让入场动画重新播。不这么做的话新页面只是
-          "啪"地替换掉旧页面（用户 2026-10-12：「整个系统都是不要生硬的」）——CSS 动画只在
-          元素挂载时播一次，同一个 DOM 节点换了内容不会重播。
+          页面**缓存**着（用户 2026-10-14：「你是不是使用类似vue keepalive那种就行了…
+          相当于是有缓存的，不是重新加载页面」）：离开的页不卸载、只藏起来，回来时
+          筛选、翻到第几页、输入框里的字、滚动位置都还在。
+
+          原先这里是 `key={pathname}` 的强制重挂载（为了重播入场动画）——**那正是
+          "返回就回到最上面"的根源**：页面整个重挂载，状态与位置一起没了。
+          动画改挂到当前这一页的类名上（`activeTurnClass`），重挂载不再是它的前提。
         */}
-        <div className={['tab-layout__page', turnClass].filter(Boolean).join(' ')} key={pathname}>
-          <Outlet />
-        </div>
+        <KeepAlivePages activeTurnClass={turnClass} />
       </main>
 
       <nav className="tab-bar">

@@ -927,7 +927,7 @@ it('一餐两条未读时都念得出来，且「做好了」在前（哪个更�
           at: '2026-10-13T10:00:00.000Z',
           to: '/order/2026-10-13-DINNER',
           mealKey: '2026-10-13-DINNER',
-          tag: '菜单',
+          tag: '选好了',
           unread: true,
         },
       ],
@@ -942,7 +942,7 @@ it('一餐两条未读时都念得出来，且「做好了」在前（哪个更�
   await screen.findByText('2026-10-13 · 晚餐')
   // 角标写在**卡片右上角**（用户 2026-10-14 说标题行里的标记他根本没看见），
   // 一餐最多两条，并排念在一颗角标里（`A · B`），不叠两颗
-  expect(document.querySelector('.order-card__corner')?.textContent).toBe('做好了 · 菜单')
+  expect(document.querySelector('.order-card__corner')?.textContent).toBe('做好了 · 选好了')
   // 它不是按钮、也不吃掉点击：点角标等于点这张卡（CSS 里 pointer-events: none）
   expect(document.querySelector('.order-card__corner')?.tagName).toBe('SPAN')
 })
@@ -1004,7 +1004,7 @@ it('再点一次订单 Tab：滚到那条未读提醒所在的卡', async () => 
           at: '2026-10-12T10:00:00.000Z',
           to: '/order/2026-10-12-LUNCH',
           mealKey: '2026-10-12-LUNCH',
-          tag: '菜单',
+          tag: '选好了',
           unread: true,
         },
       ],
@@ -1048,7 +1048,7 @@ it('那条提醒的卡被筛选挡住时：放开筛选再滚（用户要的是"
           at: '2026-10-12T10:00:00.000Z',
           to: '/order/2026-10-12-LUNCH',
           mealKey: '2026-10-12-LUNCH',
-          tag: '菜单',
+          tag: '选好了',
           unread: true,
         },
       ],

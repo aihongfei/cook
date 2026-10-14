@@ -102,7 +102,7 @@ export default function ConfirmMenuSheet({
        * 采购清单是"按定了的菜单算出来的"（D-039），定这一餐之后它自己就会出现，
        * 手写进去的那些在菜单变了之后不会跟着变。
        */}
-      <MealShoppingPreview mealKey={card.mealKey} />
+      <MealShoppingPreview mealKey={card.mealKey} onLeave={closeSheet} />
 
       <button
         type="button"
@@ -130,7 +130,7 @@ export default function ConfirmMenuSheet({
  * - **拿不到就不显示**（404 = 这一餐还没点菜 / 后端老版本）：不能因为一块提示
  *   把整个"定这一餐"的主流程拦住。抽屉里最重要的动作永远是那个「就这些，定了」。
  */
-function MealShoppingPreview({ mealKey }: { mealKey: string }) {
+function MealShoppingPreview({ mealKey, onLeave }: { mealKey: string; onLeave: () => void }) {
   const navigate = useNavigate()
   const preview = useMealPreview(mealKey)
   if (preview.isError || !preview.data) return null
@@ -171,11 +171,18 @@ function MealShoppingPreview({ mealKey }: { mealKey: string }) {
        * 去清单的入口**只给一个**，并且带 `from` 让回程能回到这一页（`readBackLink` 那套）。
        * 定完这一餐清单才会把它算进去——所以这里说清"定了就是清单上的一份"，
        * 用户不会以为跳过去之后还得自己一条条加。
+       *
+       * ⚠️ **先关抽屉再走**（`onLeave`）：页面现在被缓存着（见 `layouts/KeepAlivePages`），
+       * 不关的话这个抽屉会留在藏起来的订单页上，继续抢系统返回键、也看不见它在哪儿。
+       * 原来这里只有一个 `navigate`——页面一重挂载就看不出来了，缓存之后它才现形。
        */}
       <button
         type="button"
         className="confirm-menu__shopping-go"
-        onClick={() => navigate('/shopping', { state: { from: '/order' } })}
+        onClick={() => {
+          onLeave()
+          navigate('/shopping', { state: { from: '/order' } })
+        }}
       >
         去采购清单看看 →
       </button>

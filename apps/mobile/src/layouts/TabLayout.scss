@@ -108,6 +108,18 @@
   }
 }
 
+/*
+ * 缓存页（KeepAlivePages）：离开的页面**不卸载、只藏起来**，回来时原样还在
+ * （用户 2026-10-14：「相当于是有缓存的，不是重新加载页面」）。
+ *
+ * `hidden` 属性浏览器默认就是 `display: none`，这里再写一遍是因为下面这条：
+ * **藏起来的那一页不能占位置**——不然它底下那几十屏内容会撑着滚动容器，
+ * 当前这一页滚不到底、还会出现一片空白。
+ */
+.tab-layout__page[hidden] {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tab-layout__page {
     animation: none;

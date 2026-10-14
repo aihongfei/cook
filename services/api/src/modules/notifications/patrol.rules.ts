@@ -33,7 +33,7 @@ export interface PatrolItem {
   to: string
   /** 事件时刻（ISO）——手机用它推进 `since` */
   at: string
-  /** 小标（"菜单""做好了"…） */
+  /** 小标（"选好了""做好了"…） */
   tag: string
   /**
    * 系统通知要的数字 id（插件与 Android 都要数字）。

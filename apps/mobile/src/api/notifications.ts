@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/stores/auth'
 import { apiClient } from './client'
@@ -122,6 +123,52 @@ export function useMarkAllRead() {
     },
     onSuccess: () => { void client.invalidateQueries({ queryKey: ['notifications'] }) },
   })
+}
+
+/**
+ * 「到过那条提醒指向的地方」就算看过（用户 2026-10-14：「我点进去怎么还是菜单啊，
+ * 没有去掉红点啊」）。
+ *
+ * 判据是**后端给的那个 `to`**，不是每个页面各写一条规则：提醒说"点这里看什么"，
+ * 用户到了这里，这条提醒的使命就完成了。于是 `/order/<mealKey>`（菜单/做好了）、
+ * `/prep`（该备菜）、`/fridge`（快过期）**一处生效、三处都对**，以后加新类别
+ * 也不用回来改这段代码。
+ *
+ * 与 D-078 的「逐条已读」是同一条口径的延伸——那次是"点开通知中心里那一条"，
+ * 这次是"点进了它指的地方"。**不是**"到过某个区域就全清"：别的餐、别的类别的
+ * 未读一条都不动（所以仍然走"只标传过去的 id"这个接口）。
+ *
+ * 放在**外壳**（`TabLayout`）调用：所有页面都在它下面，判据只有这一份。
+ */
+export function useMarkArrived(pathname: string): void {
+  /*
+   * `mutate` 从 v5 起是**稳定引用**：不必把它包进 ref、也不必往依赖里塞整个 mutation
+   * 对象（那会每次渲染都变，effect 就每次都跑）。
+   */
+  const { mutate: markRead } = useMarkAllRead()
+  const { data } = useNotifications()
+  /*
+   * 发过一次的就别再发：`mutate` 到查询刷新之间会有几次重渲染，而这个 effect 每次
+   * 都算一遍。一个 `Set` 记着"已经交出去的 id"，比在依赖数组里跟时间赛跑清楚。
+   */
+  const sent = useRef(new Set<string>())
+
+  /*
+   * 这一段**只读数据、不碰 ref**：`sent` 的读写全在下面的 effect 里——
+   * 渲染期读 ref 是 React 明确不建议的（渲染必须能被重复执行而不产生副作用）。
+   */
+  const ids = (data?.items ?? [])
+    .filter((item) => item.unread && item.to === pathname)
+    .map((item) => item.id)
+  const pendingKey = ids.join(';')
+
+  useEffect(() => {
+    if (!pendingKey) return
+    const batch = pendingKey.split(';').filter((id) => !sent.current.has(id))
+    if (batch.length === 0) return
+    batch.forEach((id) => sent.current.add(id))
+    markRead(batch)
+  }, [pendingKey, markRead])
 }
 
 export function useUpdateNotificationPrefs() {

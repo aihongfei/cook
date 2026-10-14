@@ -14,7 +14,7 @@ import { badgesOfMeal, firstPrepNotice, firstUnreadMealKey, unreadByMeal } from 
  */
 it('只看未读：已读过的不进标记（点过了还挂着，用户会以为没生效）', () => {
   const map = unreadByMeal([
-    { kind: 'plan', mealKey: '2026-10-13-DINNER', unread: false, tag: '菜单' },
+    { kind: 'plan', mealKey: '2026-10-13-DINNER', unread: false, tag: '选好了' },
     { kind: 'done', mealKey: '2026-10-14-LUNCH', unread: true, tag: '做好了' },
   ])
   expect(badgesOfMeal(map, '2026-10-13-DINNER')).toEqual([])
@@ -33,15 +33,15 @@ it('只收带餐次的：快过期 / 该备菜标不到卡上（它们本来就�
 
 it('同一餐两条各占各的：顺序固定「做好了」在前（不随列表时刻变）', () => {
   const map = unreadByMeal([
-    { kind: 'plan', mealKey: '2026-10-13-DINNER', unread: true, tag: '菜单' },
+    { kind: 'plan', mealKey: '2026-10-13-DINNER', unread: true, tag: '选好了' },
     { kind: 'done', mealKey: '2026-10-13-DINNER', unread: true, tag: '做好了' },
   ])
-  expect(badgesOfMeal(map, '2026-10-13-DINNER')).toEqual(['做好了', '菜单'])
+  expect(badgesOfMeal(map, '2026-10-13-DINNER')).toEqual(['做好了', '选好了'])
 })
 
 it('只有一条时也照顺序表走：菜单单独出现就只标菜单', () => {
-  const map = unreadByMeal([{ kind: 'plan', mealKey: '2026-10-13-DINNER', unread: true, tag: '菜单' }])
-  expect(badgesOfMeal(map, '2026-10-13-DINNER')).toEqual(['菜单'])
+  const map = unreadByMeal([{ kind: 'plan', mealKey: '2026-10-13-DINNER', unread: true, tag: '选好了' }])
+  expect(badgesOfMeal(map, '2026-10-13-DINNER')).toEqual(['选好了'])
 })
 
 /*
@@ -52,7 +52,7 @@ it('再点 Tab 滚到最新的那条"有卡的"未读上；已读的、没有卡
   const items = [
     { kind: 'prep', mealKey: null, unread: true, tag: '备菜' }, // 最新的这条没有卡
     { kind: 'done', mealKey: '2026-10-13-DINNER', unread: false, tag: '做好了' }, // 已读
-    { kind: 'plan', mealKey: '2026-10-12-LUNCH', unread: true, tag: '菜单' }, // ← 该滚到这里
+    { kind: 'plan', mealKey: '2026-10-12-LUNCH', unread: true, tag: '选好了' }, // ← 该滚到这里
     { kind: 'done', mealKey: '2026-10-11-DINNER', unread: true, tag: '做好了' },
   ]
   expect(firstUnreadMealKey(items)).toBe('2026-10-12-LUNCH')

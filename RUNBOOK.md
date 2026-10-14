@@ -4390,3 +4390,114 @@ document.querySelector('.tab-layout__body').scrollTop = 0
 1. **"没有角标"常常是"没滚到那一张"**：列表按日子倒序，今天的点单在最下。先滚到底看最后几张卡，再判断角标有没有做出来——第一轮验收就误判过一次（角标是好的，人在顶上找了半天）；
 2. **「该备菜」这条永远不会有角标**：`mealKey: null`，说的正是"这一餐还空着"，空着就没有卡。它的位置在列表顶上那句，不在卡片上；
 3. **`prep` 与 `expiry` 都可能让"红点亮着、列表里没标记"**：`expiry` 归冰箱（红点不在订单）；`prep` 归订单但没有卡。看到订单红点而列表里找不到标记，先看未读里是不是只有这两类。
+
+## R-074 换页不卸载（keep-alive）+ 到过就算看过：怎么跑、怎么验（D-083 与 D-082 第三轮配套，✅ 已验证，2026-10-14）
+
+配套：`DECISIONS.md` **D-083**（缓存键为什么是"路径+查询串"、为什么在渲染期写缓存、为什么滚动位置要单独记、缓存之后才现形的两个浮层问题）与 **D-082 第三轮补充**（角标文案、到达即已读的判据与两条边界）。
+
+### 一、跑测试
+
+```bash
+pnpm --dir apps/mobile test        # 668/668（64 文件；新增 KeepAlivePages 6 条 + useMarkArrived 4 条 + scroll-memory 5 条）
+pnpm --dir apps/mobile typecheck   # tsc -b；**别省**
+pnpm --dir apps/mobile lint        # 18 warnings / 0 errors（与本次改动前同数）
+
+# 后端（角标文案那一条）
+pnpm --dir services/api test                          # 543 例（541 过；2 个既有失败要 /tmp/all-ingredients.json，与本次无关）
+pnpm --dir services/api run test:http:notifications   # 47/47；四个 tag 由规则测试全部钉住（选好了/做好了/快过期/备菜）
+```
+
+**改后端源码后必须重建容器**（R-063 那条教训）：`pnpm --dir services/api` 下跑 `docker compose ... build` 会因为找不到 compose 文件而**静默失败**（它报的是"文件不存在"，而人往往只看到最后一行"up to date"）。一律**回仓库根目录**：
+
+```bash
+docker compose build api && docker compose up -d api
+curl -s 'http://127.0.0.1:3000/api/notifications' -H "Authorization: Bearer $TOKEN" | grep -o '"tag":"[^"]*"'
+# 实测：tag 从「菜单」变成「选好了」
+```
+
+### 二、在模拟器/APK 里验滚动位置（keep-alive 的主判据）
+
+前提：dev 模式打包（`npx vite build --mode development`）+ `adb reverse tcp:3000 tcp:3000` + CDP 连 WebView（配方见 R-062 §六）。**别用坐标点**，一律走 CDP 的 DOM 点击。
+
+```bash
+# ① 打开厨房页，滚一段，在 DOM 上盖个记号（记号是"有没有重挂载"的证据）
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => {
+  ;[...document.querySelectorAll('.tab-bar__item')].find(a => a.getAttribute('href') === '/kitchen').click()
+  return 'ok'
+})()"
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => {
+  const body = document.querySelector('.tab-layout__body')
+  body.scrollTop = 300
+  const card = document.querySelector('.recipe-card')
+  card.dataset.keepAliveProof = 'yes'
+  return body.scrollTop
+})()"
+# ② 切到订单，再切回厨房
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => {
+  ;[...document.querySelectorAll('.tab-bar__item')].find(a => a.getAttribute('href') === '/order').click()
+  return 'ok'
+})()"
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => {
+  ;[...document.querySelectorAll('.tab-bar__item')].find(a => a.getAttribute('href') === '/kitchen').click()
+  return 'ok'
+})()"
+# ③ 回来读位置与记号
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => {
+  const body = document.querySelector('.tab-layout__body')
+  return { path: location.pathname, scrollTop: body.scrollTop, marker: !!document.querySelector('[data-keep-alive-proof]') }
+})()"
+```
+
+实测输出（2026-10-14 23:0x，debug 包）：
+
+```json
+{ "path": "/kitchen", "scrollTop": 300.19049072265625, "marker": true }
+```
+
+**记号还在 = 页面没重挂**；位置回到 300.19 = 滚动位置单独记这一套生效。同一台机器上再走一遍"列表 → 详情 → 返回"：
+
+```bash
+# 菜谱列表滚到底（该页最大 378）→ 点进某道菜的详情 → 返回
+# 实测：返回后 scrollTop = 378.28570556640625（到底），四个缓存页里只有厨房是 hidden=false
+```
+
+### 三、验"到过就算看过"（红点消掉）
+
+要造出**别人做的事**（自己定自己的不提醒自己，见 D-078）：另一个账号把某一餐定下来 → 爸爸的订单 Tab 亮 2 条未读（一条 `选好了`、一条 `该备菜`）。
+
+```bash
+# ① 读卡片：那一餐的卡右上角应有角标、tab 上应有未读数
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => {
+  const cards = [...document.querySelectorAll('.order-card')]
+  return { tab: [...document.querySelectorAll('.tab-bar__item')].map(a => a.textContent.trim()).join(' | '),
+           cards: cards.map(c => ({ key: c.dataset.mealKey,
+             corner: c.querySelector('.order-card__corner') ? c.querySelector('.order-card__corner').textContent.trim() : null,
+             unread: c.className.indexOf('is-unread') >= 0 })) }
+})()"
+# ② 点那张卡的标题链接（真点）→ 读底栏
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => {
+  document.querySelector('a[href=\"/order/2026-10-14-LUNCH\"]').click(); return 'ok'
+})()"
+# ③ 返回列表，再读一次
+```
+
+实测输出：
+
+```json
+// 进入详情：底栏徽标当场从 2 → 1
+{ "path": "/order/2026-10-14-LUNCH", "tab": "厨房 | 订单1订单有 1 条未读 | 发现 | 冰箱 | 我的" }
+// 返回列表：那张卡的角标已消失、不再有 is-unread
+{ "key": "2026-10-14-LUNCH", "corner": null, "unread": false }
+```
+
+再点列表顶上那句「该备菜」（`.order-notice`）进 `/prep` → 徽标彻底消失：
+
+```json
+{ "path": "/prep", "tab": "厨房 | 订单 | 发现 | 冰箱 | 我的" }
+```
+
+### 四、改这一块时要连带注意的三处
+
+1. **缓存页外面的那层 `LocationContext` 一层都不能省**：包在公共父层上的话所有缓存页共用最后那一个地址，藏在后面的订单页会以为自己站在菜谱页上；新加"整屏覆盖"的浮层时也照 `ImageViewer` / `ConfirmDialog` 那条写（换页就关），否则它不会跟着页面藏；
+2. **滚动位置只从滚动事件来**：别在"换页那一刻"顺手记一笔——那时 `scrollTop` 已被浏览器夹过，记下来的是假的（这一条写在了 `TabLayout.tsx` 的注释里）；
+3. **角标文案的唯一来源是后端那条 `tag`**：前端不按 `kind` 再写一张映射表；测试夹具里出现过的文案要跟后端一起改（`order.test.tsx` 与 `unread-badges.test.ts` 里各有一处）。

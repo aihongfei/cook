@@ -227,7 +227,15 @@ export function buildNotifications(input: NotificationInput, now: Date = new Dat
        */
       to: `/order/${fact.mealKey}`,
       mealKey: fact.mealKey,
-      tag: '菜单',
+      /*
+       * 角标上写的是一个**动作**（"选好了"），不是名词（"菜单"）。
+       *
+       * 用户 2026-10-14：「菜单那条改为选好了」。原因在点单卡上看得最清楚：那颗角标
+       * 就贴在状态戳「已安排」旁边，而「菜单」既可以是状态也可以是页面名，读起来像
+       * "这里有一份菜单"，不像"有人做了什么、你还没看"。「选好了」正是掌勺人点的那一步
+       * 在按钮上的原话——做的人和看的人用同一个词。
+       */
+      tag: '选好了',
     })
   }
 
