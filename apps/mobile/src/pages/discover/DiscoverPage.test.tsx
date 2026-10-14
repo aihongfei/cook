@@ -1,7 +1,7 @@
 /// <reference types="node" />
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -9,21 +9,19 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import { Toaster, useToasts } from '@/components/ui/toast'
 import { useAuth } from '@/stores/auth'
+import { useSpreadSession } from '@/stores/spread-session'
 import DiscoverPage from './DiscoverPage'
 
-// 发现页首页那块「今天吃什么」（D-026：随机 + AI 合一）。要盯住的事：
-// ① 「摇一道」真会跳走，而且**跳到随机那一道**（不是永远第一道——那就不叫摇）；
-// ② 空库时说人话（"还没有菜"）而不是静默失败；
-// ③ 两个 AI 入口都开得出来（合并之后它们的入口位置变了，容易改坏）。
+// 发现页首页那块「今天吃什么」（D-026 / D-061 / D-072）。要盯住的事：
+// ① 「摇一桌」开得出来抽屉，并且**摇的是后端配的那一桌**（不是前端自己随机拼的）；
+// ② 空库时说人话（"还没有菜可配"）而不是静默失败；
+// ③ 两个 AI 入口都开得出来（合并之后它们的入口位置变了，容易改坏）；
+// ④ 两条出路并排等宽（用户当场报过"看着歪"）。
 
 /** 样式文件所在目录（读 scss 做断言用，见 corpus-art.test 的同一手法） */
 const srcDir = join(__dirname, '..', '..')
 
 const clients: QueryClient[] = []
-
-function RecipeProbe() {
-  return <div data-testid="recipe-page">菜谱详情</div>
-}
 
 function renderDiscover() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -34,7 +32,6 @@ function renderDiscover() {
       <MemoryRouter initialEntries={['/discover']}>
         <Routes>
           <Route path="/discover" element={<DiscoverPage />} />
-          <Route path="/recipes/:id" element={<RecipeProbe />} />
         </Routes>
       </MemoryRouter>
       <Toaster />
@@ -46,20 +43,44 @@ function recipe(id: string, name: string) {
   return { id, name, image: null, category: '素菜', cuisine: '家常', tags: [], calories: 100, caloriesEstimated: false }
 }
 
-/** 库里有 total 道菜；pageSize=12 的列表分页返回对应那一段 */
-function mockRecipes(total: number) {
-  const all = Array.from({ length: total }, (_, i) => recipe(`r${i}`, `第${i}道菜`))
-  return vi.spyOn(apiClient, 'get').mockImplementation((url: string, config?: unknown) => {
-    if (url === '/recipes') {
-      const page = (config as { params?: { page?: number } } | undefined)?.params?.page ?? 1
-      return Promise.resolve({
-        data: { items: all.slice((page - 1) * 12, page * 12), total, page, pageSize: 12 },
-      } as never)
-    }
+/** 一桌菜：`count` 道，带角色与理由（形状与后端 `GET /discover/spread` 一致） */
+function spread(count: number) {
+  const roles = ['meat', 'veg', 'soup', 'other'] as const
+  const labels: Record<string, string> = { meat: '荤菜', veg: '素菜', soup: '汤', other: '另配' }
+  return {
+    scope: 'family',
+    mealKey: '2026-10-15-DINNER',
+    date: '2026-10-15',
+    meal: 'DINNER',
+    mealLabel: '晚餐',
+    diners: 4,
+    dinersFromMeal: false,
+    count,
+    reason: `按 4 个人算，配了 ${count} 道`,
+    fridgeEmpty: false,
+    items: Array.from({ length: count }, (_, i) => ({
+      ...recipe(`r${i}`, `第${i}道菜`),
+      role: roles[i % 4],
+      roleLabel: labels[roles[i % 4]],
+      reason: `做过 ${i + 1} 次`,
+      have: [],
+      missing: [],
+      soon: [],
+      cooked: i + 1,
+      lastCookedOn: null,
+    })),
+  }
+}
+
+/** 发现页要的那几个接口（`/discover/spread` 换成 `mockSpread` 覆写） */
+function mockApi(overrides: Record<string, unknown> = {}) {
+  return vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
+    if (url in overrides) return Promise.resolve({ data: overrides[url] } as never)
     if (url === '/family') return Promise.resolve({ data: { id: 'f1', name: '家', shared: true, members: [], myCapabilities: [], myRole: 'OWNER', inviteCode: 'X', createdAt: '', memberCount: 1, memberLimit: 10 } } as never)
     if (url === '/orders/plan') return Promise.resolve({ data: { scope: 'family', days: [] } } as never)
-    if (url === '/orders/options') return Promise.resolve({ data: { meals: [], statuses: [], dayOptions: [] } } as never)
+    if (url === '/orders/options') return Promise.resolve({ data: { meals: [], statuses: [], dayOptions: [{ value: '2026-10-15', label: '今天' }] } } as never)
     if (url === '/ai/status') return Promise.resolve({ data: { configured: true, model: 'm' } } as never)
+    if (url === '/recipes') return Promise.resolve({ data: { items: [], total: 0, page: 1, pageSize: 12 } } as never)
     throw new Error(`未预期的请求：${url}`)
   })
 }
@@ -76,50 +97,50 @@ afterEach(() => {
   cleanup()
   // toast 是模块级 store，不清会带到下一条用例
   useToasts.setState({ items: [] })
+  /*
+   * 「摇一桌」的会话状态也是**模块级**的（它要活过路由跳转，见 stores/spread-session）：
+   * 上一条用例把抽屉开着、`asked` 置成了 true，不清掉的话下一条里抽屉是开的、
+   * 而且不会再去摇——症状是"找不到那句头部话术"，看着像组件坏了。
+   */
+  useSpreadSession.getState().close()
   clients.splice(0).forEach((client) => client.clear())
   vi.restoreAllMocks()
 })
 
-it('「摇一道」跳到随机那一道（random 钉死成"取最后一个"时不能还是第一道）', async () => {
-  mockRecipes(30)
-  // random() 固定返回 0.999 → 下标落在最后一个（第 29 道，落在第 3 页）。
-  // 不钉死的话"随机"这件事只能靠概率验，会偶发地假红
-  vi.spyOn(Math, 'random').mockReturnValue(0.999)
+it('「摇一桌」打开抽屉，并摇出**后端配的那一桌**（不是前端自己随机拼的）', async () => {
+  mockApi({ '/discover/spread': spread(4) })
   renderDiscover()
 
-  fireEvent.click(await screen.findByText('摇一道'))
-  expect(await screen.findByTestId('recipe-page')).toBeTruthy()
-  const requestedPages = (apiClient.get as unknown as { mock: { calls: unknown[][] } }).mock.calls
-    .filter(([url]) => url === '/recipes')
-    .map(([, config]) => (config as { params?: { page?: number } } | undefined)?.params?.page)
-  // 第一次问总数（第 1 页），第二次去取目标页（第 3 页）——不是在第 1 页里随便挑一个
-  expect(requestedPages).toEqual([1, 3])
+  fireEvent.click(await screen.findByText('摇一桌'))
+  // 头部那句由后端拼、前端照搬：出现它就说明这一桌真的来自 /discover/spread
+  expect(await screen.findByText('按 4 个人算，配了 4 道')).toBeTruthy()
+  for (let i = 0; i < 4; i += 1) expect(screen.getByText(`第${i}道菜`)).toBeTruthy()
+  // 每道都带自己那句理由（一句真事都没有时后端给空串，界面上就不显示理由）
+  expect(screen.getByText('做过 1 次')).toBeTruthy()
+  // 角色标签（荤菜/素菜/汤/另配）是后端的说法，前端不自己维护第二份对照
+  expect(screen.getByText('汤')).toBeTruthy()
 })
 
-it('库里有菜但只够一页时不发第二次请求（顺手省一次）', async () => {
-  mockRecipes(5)
-  vi.spyOn(Math, 'random').mockReturnValue(0.5) // 落到第 1 页
+it('空库时说人话，给出去处，不给一桌编的', async () => {
+  mockApi({ '/discover/spread': { ...spread(0), reason: '菜谱小书里还没有菜，先去加几道' } })
   renderDiscover()
 
-  fireEvent.click(await screen.findByText('摇一道'))
-  expect(await screen.findByTestId('recipe-page')).toBeTruthy()
-  const pages = (apiClient.get as unknown as { mock: { calls: unknown[][] } }).mock.calls
-    .filter(([url]) => url === '/recipes')
-  expect(pages).toHaveLength(1)
+  fireEvent.click(await screen.findByText('摇一桌'))
+  expect(await screen.findByText('菜谱小书里还没有菜，先去加几道')).toBeTruthy()
+  expect(screen.getByText(/去菜谱小书里加几道/)).toBeTruthy()
 })
 
-it('空库时说人话，不跳走也不静默', async () => {
-  mockRecipes(0)
+it('这一餐没存过人数时，才给"改人数"的入口（存过就以存着的为准，摆不生效的按钮更糟）', async () => {
+  mockApi({ '/discover/spread': spread(3) })
   renderDiscover()
+  fireEvent.click(await screen.findByText('摇一桌'))
 
-  fireEvent.click(await screen.findByText('摇一道'))
-  // 留在发现页（没跳路由），并给出可读的提示
-  await waitFor(() => expect(screen.queryByTestId('recipe-page')).toBeNull())
-  expect(await screen.findByText(/还没有菜/)).toBeTruthy()
+  expect(await screen.findByText('不是 4 个人？')).toBeTruthy()
+  expect(screen.getByRole('button', { name: '2 人' })).toBeTruthy()
 })
 
 it('问答入口（问 AI）还在，且打得开', async () => {
-  mockRecipes(12)
+  mockApi()
   renderDiscover()
 
   expect(await screen.findByText(/问 AI/)).toBeTruthy()
@@ -128,10 +149,10 @@ it('问答入口（问 AI）还在，且打得开', async () => {
 })
 
 it('发现页不再有那三格假数字，也不再有重复的入口胶囊（2026-10-13 信息架构改版，D-040）', async () => {
-  mockRecipes(12)
+  mockApi()
   renderDiscover()
 
-  await screen.findByText('摇一道')
+  await screen.findByText('摇一桌')
   // 三格（85 私房菜 / 12 冰箱食材 / 3 临期）是 M0 拼版面用的写死数据：
   // 库内实际 600 道、冰箱功能还没做。它们该是**冰箱页**的数据，不该在发现页，
   // 更不该是假的。这条守住"别哪天又给加回来"。
@@ -143,7 +164,7 @@ it('发现页不再有那三格假数字，也不再有重复的入口胶囊（2
 })
 
 it('问 AI 那行只有后半句可点：前半句是说明，不该看着像按钮', async () => {
-  mockRecipes(12)
+  mockApi()
   renderDiscover()
 
   const hint = await screen.findByText('下厨上的问题想问问人？')
@@ -157,10 +178,10 @@ it('问 AI 那行只有后半句可点：前半句是说明，不该看着像按
 })
 
 it('两条出路并排一行，AI 收进抽屉（2026-10-13 用户提出重复后合并，D-061）', async () => {
-  mockRecipes(12)
+  mockApi()
   renderDiscover()
 
-  await screen.findByText('摇一道')
+  await screen.findByText('摇一桌')
   expect(screen.getByText('帮我决定')).toBeTruthy()
   /*
    * 「AI 帮你想」**不再单独占一行**：它已经收进「帮我决定」那个抽屉的第二半。
@@ -172,7 +193,7 @@ it('两条出路并排一行，AI 收进抽屉（2026-10-13 用户提出重复�
   const rows = [...document.querySelectorAll('.today__row')].map((row) =>
     [...row.querySelectorAll('button')].map((button) => button.textContent?.replace(/\s+/g, '')),
   )
-  expect(rows).toEqual([['🎲摇一道', '✨帮我决定']])
+  expect(rows).toEqual([['🎲摇一桌', '✨帮我决定']])
 
   /*
    * 两个按钮必须**等宽平分**那一行（用户 2026-10-13：「为什么有时候会歪」那条的延续）：

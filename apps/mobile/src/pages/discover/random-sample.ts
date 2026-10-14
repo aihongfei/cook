@@ -24,14 +24,3 @@ export function sample<T>(pool: readonly T[], count: number, random: () => numbe
   }
   return copy.slice(0, limit)
 }
-
-/**
- * 从 [0, total) 里随机取一个下标；`total <= 0` 时返回 **-1**（"没有东西可挑"，让调用方自己决定怎么说）。
- *
- * 返回 -1 而不是抛异常：空库不是错误，是一个正常状态（"菜谱库还是空的"这种话由界面去说）。
- * 同样夹取上界——`random()` 被桩成 1 时 `Math.floor(1 * total)` 正好越界。
- */
-export function randomIndex(total: number, random: () => number = Math.random): number {
-  if (!Number.isFinite(total) || total <= 0) return -1
-  return Math.max(0, Math.min(Math.floor(random() * total), total - 1))
-}

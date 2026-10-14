@@ -4,6 +4,7 @@ import { CurrentUserId, JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { OrdersService } from './orders.service'
 
 interface AddItemBody { recipeId?: string; dishName?: string; mealDate?: string; meal?: string; note?: string }
+interface BulkItemsBody { recipeIds?: unknown; mealDate?: string; meal?: string }
 interface StatusBody { status?: string }
 interface DinersBody { dinerCount?: number | null }
 interface RepeatBody { mealDate?: string; meal?: string }
@@ -65,6 +66,20 @@ export class OrdersController {
   @ApiOperation({ summary: '点菜：点菜谱里的（recipeId）或自己写一道（dishName），二选一（F3-01/05、F3-10）' })
   async addItem(@CurrentUserId() userId: string, @Body() body: AddItemBody) {
     return this.orders.addItem(userId, body ?? {})
+  }
+
+  /**
+   * 一次加一组（F5-01「摇一桌」的「全都加进这一餐」）。
+   *
+   * **不是 `items` 加个复数参数**：那会让"加一道"的契约（recipeId 或 dishName 二选一）
+   * 变得含糊——批量这一支只收菜谱 id（自己写的菜没有稳定 id，成组加它没有意义）。
+   * 分成两个路由，两边的校验与语义各自清楚。
+   */
+  @Post('items/bulk')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '批量加菜：一组菜谱一次加进某一餐，已有跳过（F5-01）' })
+  async addItems(@CurrentUserId() userId: string, @Body() body: BulkItemsBody) {
+    return this.orders.addItems(userId, body ?? {})
   }
 
   @Delete('items/:id')

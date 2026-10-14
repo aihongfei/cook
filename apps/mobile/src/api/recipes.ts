@@ -1,6 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
-import { randomIndex } from '@/pages/discover/random-sample'
 import { apiClient } from './client'
 
 export interface RecipeSummary {
@@ -132,24 +131,6 @@ export async function deleteRecipe(id: string): Promise<{ id: string; name: stri
     `/recipes/${encodeURIComponent(id)}`,
   )
   return data
-}
-
-/**
- * 随机挑一道菜（F5-01 的最小形态：先问总数，再取其中一条）。
- *
- * 为什么不在后端加个 `/recipes/random`：那要为省一次请求多加一个接口与一套断言；
- * 列表接口本来就回 `total`，两次请求（总数 + 目标页）在家庭应用里够了。
- * 先取第一页是**顺手**的：命中第 1 页时连第二次请求都不用发。
- *
- * 返回 null = "库里一道菜都没有"。那是正常状态而不是异常，由界面去说。
- */
-export async function fetchRandomRecipe(signal?: AbortSignal): Promise<RecipeSummary | null> {
-  const first = await fetchRecipes({}, 1, signal)
-  const index = randomIndex(first.total)
-  if (index < 0) return null
-  const page = Math.floor(index / first.pageSize) + 1
-  const target = page === 1 ? first : await fetchRecipes({}, page, signal)
-  return target.items[index - (page - 1) * first.pageSize] ?? null
 }
 
 export function useRecipeFilters() {

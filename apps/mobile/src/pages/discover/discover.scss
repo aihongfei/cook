@@ -1084,3 +1084,274 @@
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------------
+ * 「摇一桌」（M5 / F5-01，2026-10-15 由「摇一道」升级）
+ *
+ * 一桌菜是**一列**，不是一张卡：每道菜都要能单独「就它了」，也要能一眼看出
+ * "配了几道、荤素汤齐不齐"。所以每道一行（缩略图 + 名字 + 角色标签 + 理由 + 单个动作），
+ * 与「帮我决定」那种"一张卡 + 两个动作"的排版是两套语汇——那边只有一道，这边有多道。
+ *
+ * 复用 `.decide__*` 里的几个原子（lead / waiting / skeleton / chips / link / hint）：
+ * 它们本来就是"抽屉里的一段话与一个标签"这套通用语汇，两个抽屉长得像反而是好事。
+ * --------------------------------------------------------------- */
+.spread__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.spread__head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 头部那句（"4 个人吃，配了 3 道"）是这一屏的标题级信息：比正文重一点 */
+.spread__summary {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #6e3a1c;
+}
+
+/* 改人数那一行：只在"这一餐还没定过人数"时出现（后端以存着的为准，摆不生效的按钮更糟） */
+.spread__diners {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.spread__diners-label {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+.spread__diners-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.spread__diner {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 11.5px;
+  color: #8a4a1e;
+  background: rgb(255 251 242 / 62%);
+  border: 1px solid rgb(224 123 57 / 34%);
+  border-radius: 999px;
+  transition: transform 0.12s ease;
+
+  /* 当前这个人数：实底品牌色，一眼看出"现在按几个人配的" */
+  &.is-on {
+    color: #fff;
+    background: var(--color-brand);
+    border-color: var(--color-brand);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+  }
+}
+
+.spread__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.spread__item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--color-cream);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+
+  /* 已经进菜单的那道退到背景里（与 .ai__pick.is-done 同一处理）：
+     它不再需要用户做什么，而用户接着该看的是剩下几道 */
+  &.is-done {
+    opacity: 0.6;
+  }
+}
+
+.spread__thumb {
+  flex: 0 0 auto;
+  width: 54px;
+  height: 54px;
+  overflow: hidden;
+  background: var(--color-paper);
+  border-radius: 11px;
+}
+
+.spread__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 缺图占位图在这套语汇里是 160×100 的长方形，缩到 54 方框里靠居中撑住 */
+.spread__thumb .recipe-image-placeholder {
+  width: 100%;
+  height: 100%;
+  justify-content: center;
+}
+
+.spread__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+
+.spread__name-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.spread__name {
+  font-size: 14px;
+  color: var(--color-ink);
+  text-decoration: none;
+  /* 可点进详情：淡虚线（与 .decide__name / .ai__pick-name 同一手法），不是装饰 */
+  border-bottom: 1px dashed rgb(150 96 47 / 45%);
+}
+
+/* 角色标签（荤菜/素菜/汤/另配）：后端算的，措辞也由后端下发。
+   四档用同一形状 + 不同冷暖，扫一眼看得出"齐了没"，而不是一列彩色徽章 */
+.spread__role {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  border-radius: 7px;
+
+  &.is-meat {
+    color: #a4503a;
+    background: rgb(214 143 116 / 22%);
+  }
+
+  &.is-veg {
+    color: #5c6b45;
+    background: rgb(188 203 166 / 34%);
+  }
+
+  &.is-soup {
+    color: #4f6b7a;
+    background: rgb(168 196 208 / 28%);
+  }
+
+  &.is-other {
+    color: var(--color-ink-2);
+    background: rgb(234 220 196 / 55%);
+  }
+}
+
+.spread__reason {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-3);
+}
+
+/* 「该先吃」用暖橙提醒（与冰箱页临期同一档语义）：这一桌用上了快过期的食材 */
+.decide__chip.is-soon {
+  color: #b45f30;
+  background: rgb(224 123 57 / 14%);
+}
+
+.spread__one {
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: #8a4a1e;
+  background: var(--color-paper);
+  border: 1px solid rgb(224 123 57 / 34%);
+  border-radius: 999px;
+
+  &:active {
+    transform: scale(0.95);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+  }
+}
+
+.spread__added {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+/* 底部一对动作：整组端走（主按钮）+ 再摇一桌。
+   几何与 .decide__take/.decide__swap 同一套（只有颜色不同、边框都 1px 占位）：
+   两个按钮并排时不等宽是 2026-10-13 用户当场指出的那个问题。 */
+.spread__actions {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.spread__take,
+.spread__again {
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  transition: transform 0.12s ease;
+
+  &:active {
+    transform: scale(0.97);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+  }
+}
+
+/* 「全都加进晚餐」是这一屏唯一的主按钮：用户来这儿就是要定这一餐 */
+.spread__take {
+  flex: 1;
+  color: #ab5527;
+  background: var(--color-paper);
+  border-color: #de9057;
+}
+
+.spread__again {
+  flex: 0 0 auto;
+  color: #8a4a1e;
+  background: rgb(255 251 242 / 62%);
+  border-color: rgb(224 123 57 / 34%);
+}
+
+.spread__done {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spread__diner:active,
+  .spread__one:active,
+  .spread__take:active,
+  .spread__again:active {
+    transform: none;
+  }
+}

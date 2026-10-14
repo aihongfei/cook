@@ -22,6 +22,9 @@ release/
 .DS_Store
 Thumbs.db
 
+# AI 助手的工作状态（计划草稿等本机产物）：不进版本库
+.zcode/
+
 # 日志
 *.log
 npm-debug.log*

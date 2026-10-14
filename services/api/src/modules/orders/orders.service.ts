@@ -9,7 +9,7 @@ import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
   aggregateItems, canAddItem, canRepeatFrom, confirmStampFor, dateKey, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
   parseHistoryQuery, historyRange, hasEarlier, weekdayOf,
-  parseItemTarget, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, planRepeat, revivedStatus,
+  parseItemTarget, parseBulkRecipeIds, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, planRepeat, revivedStatus, splitExisting,
   todayKey, todayMealState, visibleToMember,
   dayOptions, type AggregateItem, type DishRef, type ItemTarget, type MealProgressRow, type PlanDayRow,
 } from './orders.rules'
@@ -162,6 +162,69 @@ export class OrdersService {
     })
     const card = await this.card(mealOrder.id, userId)
     return { ...card, ...await this.tasteWarningFor(userId, item.recipeId, item.recipeName) }
+  }
+
+  /**
+   * 批量加菜（F5-01「摇一桌」的「全都加进这一餐」）。
+   *
+   * 为什么要有它、而不是让前端循环调 `addItem`：**中途失败会加进去一半**。
+   * 一次加五道，第四道撞上"这餐已经安排好了"（或网络断了），用户看到的是餐里多了三道菜
+   * 加一句报错——既不是他要的，也不好收拾。所以这里是"**先一次判定、再逐道写入**"，
+   * 与 `combos.addToMeal` 处理"一键加入"用的是同一个范式（那条路已经验过）。
+   *
+   * 三件事刻意的：
+   * - **重复的跳过而不是报错**：这一桌里有一道这餐已经有了，那是很常见的情况
+   *   （用户先点了排骨，又摇了含排骨的一桌）。跳过并回报 `skipped` 名字，
+   *   用户从回执里看得见"哪几道本来就有"；
+   * - **全都已有时不报错**（也没写库）：回 `added: []` 让界面说"这一桌都在了"，
+   *   报错会让用户以为操作失败；
+   * - **写入仍逐道走 `addItem`**：加菜之后整餐回到「待确认」、口味提醒、同名挂接这些语义
+   *   两处各写一遍必然分叉（与 combos 同一条理由）。
+   */
+  async addItems(
+    userId: string,
+    input: { recipeIds?: unknown; mealDate?: unknown; meal?: unknown },
+  ) {
+    const { familyId } = await this.requireCapability(userId, CAPABILITIES.ORDER_CREATE)
+
+    const slot = parseSlot(input.meal)
+    const mealDate = parseMealDate(input.mealDate)
+    const wanted = parseBulkRecipeIds(input.recipeIds)
+
+    // 这一餐里已经有的菜（谁点的都算）：跳过，不叠加份数
+    const existingRow = await this.prisma.mealOrder.findUnique({
+      where: { familyId_mealDate_meal: { familyId, mealDate, meal: slot } },
+      include: { items: { select: { recipeId: true } } },
+    })
+    const existing = (existingRow?.items ?? [])
+      .map((item) => item.recipeId)
+      .filter((id): id is string => Boolean(id))
+    const { toAdd, skipped } = splitExisting(existing, wanted)
+
+    if (toAdd.length === 0) {
+      // 一道都不用加：**不判定餐次状态也不写库**（没有要写的东西，就没必要要求这一餐能写）
+      return {
+        added: [] as string[],
+        skipped,
+        card: existingRow ? await this.card(existingRow.id, userId) : null,
+      }
+    }
+
+    // 整组要么都进、要么都不进：先一次性判定这一餐收不收（不写库）
+    await this.assertMealAcceptsItems(userId, mealDate, slot)
+
+    for (const recipeId of toAdd) {
+      await this.addItem(userId, { recipeId, mealDate: dateKey(mealDate), meal: slot })
+    }
+
+    const finalRow = await this.prisma.mealOrder.findUnique({
+      where: { familyId_mealDate_meal: { familyId, mealDate, meal: slot } },
+    })
+    return {
+      added: toAdd,
+      skipped,
+      card: finalRow ? await this.card(finalRow.id, userId) : null,
+    }
   }
 
   /**

@@ -461,6 +461,60 @@ export function parseNote(raw: unknown): string | null {
   return note
 }
 
+/**
+ * 一次最多加几道（批量加菜，F5-01「摇一桌」的整组加入用它）。
+ *
+ * 12 与 `combos.rules.COMBO_ITEMS_MAX` 同值**是刻意的**：两个上限说的是同一件事
+ * （"一顿饭一次要加的这一组"），写成两个数字迟早会有人问"为什么这边能加 12 那边只能 5"。
+ */
+export const BULK_ITEMS_MAX = 12
+
+/**
+ * 批量加菜的 id 列表：去重（保序）、上限、非空。
+ *
+ * 与 `combos.rules.parseRecipeIds` 挡的是同一批东西（重复、超量、空列表）——
+ * 那边是"存进一个组合"，这里是"直接加进某一餐"，校验标准不该有第二套。
+ */
+export function parseBulkRecipeIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) throw new BadRequestException('菜要写成一个列表')
+  const ids: string[] = []
+  for (const item of raw) {
+    if (typeof item !== 'string') throw new BadRequestException('菜 id 要写成文字')
+    const id = item.trim()
+    if (!id || ids.includes(id)) continue
+    ids.push(id)
+    if (ids.length > BULK_ITEMS_MAX) throw new BadRequestException(`一次最多加 ${BULK_ITEMS_MAX} 道菜`)
+  }
+  if (ids.length === 0) throw new BadRequestException('一次至少要加 1 道菜')
+  return ids
+}
+
+/**
+ * 挑出"这一餐里还没有的"（批量加菜用）。
+ *
+ * **已有的跳过、不叠加份数**：批量加菜的意图是"这一组菜出现在这一餐"，
+ * 不是"再点一遍"——叠加的结果是同一道菜 ×2，用户点一次却得到双份（还可能被掌勺人
+ * 当成两个人想吃）。跳过之后同一个动作重复点也不会变样（幂等）。
+ *
+ * 与 `combos.rules.planAdd` 同一段逻辑、**刻意各留一份**：那个是"组合"的规则
+ * （`AddOutcome` 是它的返回类型），orders 依赖 combos 会绕出一个反向依赖
+ * （combos 已经依赖 orders）。这段只有十来行，重复比耦合划算——与 `sample`
+ * 在 recommend.rules 里同理。
+ */
+export function splitExisting(
+  existing: readonly string[],
+  wanted: readonly string[],
+): { toAdd: string[]; skipped: string[] } {
+  const has = new Set(existing)
+  const toAdd: string[] = []
+  const skipped: string[] = []
+  for (const id of wanted) {
+    if (has.has(id)) skipped.push(id)
+    else toAdd.push(id)
+  }
+  return { toAdd, skipped }
+}
+
 /** 卡片里的一条菜：同一道菜多人点会合并成一条，份数 +1，备注按人分列 */
 export interface DishLine {
   recipeId: string | null

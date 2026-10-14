@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
 import { publicImageUrl } from '../media/media.storage'
 import type { FamilyRole } from '../family/family.roles'
-import { dateKey, visibleToMember } from '../orders/orders.rules'
+import { MEAL_LABEL, dateKey, parseMealKey, visibleToMember } from '../orders/orders.rules'
 import { PrismaService } from '../recipes/prisma.service'
 import { canWriteRecipe, sourceLabel } from '../recipes/recipe.rules'
 import { expiryState } from '../fridge/fridge.rules'
@@ -33,6 +33,18 @@ import {
   scoreCandidates,
   type RecommendScore,
 } from './recommend.rules'
+import {
+  ROLE_LABEL,
+  SPREAD_DINERS_DEFAULT,
+  dishCountFor,
+  parseSpreadDiners,
+  pickSpread,
+  rankSpread,
+  roleOf,
+  spreadReason,
+  spreadSummary,
+  type SpreadCandidate,
+} from './spread.rules'
 
 /**
  * 家人最爱 / 家人常点（M5 / F5-02）。口径见 D-038。
@@ -400,6 +412,170 @@ export class DiscoverService {
       total: recipes.length,
       /** 冰箱里一条都没记：界面要说"记了冰箱，推荐会跟着变" */
       fridgeEmpty: fridgeRows.length === 0,
+    }
+  }
+
+  /**
+   * 「摇一桌」（F5-01）：**按这一餐几个人吃，配一组菜**。
+   *
+   * 升级前的「摇一道」走公共 `GET /recipes` 纯随机（前端两次请求），有两个毛病：
+   * 不知道几个人吃、**也不看忌口**——而同为随机取菜的 `decide` 与 `recommend` 都过了
+   * `judgeDish` 硬拦。同一件事三种口径，不一致的那个就是错的（详见 D-072）。
+   *
+   * 四件事刻意的：
+   * - **人数的三个来源有优先级**：这一餐已存的就餐人数（F4-05，最准）→ 调用方传的 →
+   *   `SPREAD_DINERS_DEFAULT`。第三档要**如实告诉前端这是默认值**（`dinersFromMeal: false`），
+   *   界面才会说"按 2 个人算"而不是假装用户填过；
+   * - **口味硬拦与其他两处同源**：过敏的菜绝不能出现在"我给你配的一桌"里；
+   * - **每道菜带一句短理由**（能用上冰箱里的什么 / 还差什么 / 做过几次），
+   *   与 `decideReason` 同一条规矩：由后端拼，前端只照搬；
+   * - **不调 AI**：与 `decide` 同一个理由——这个按钮的承诺是"立刻给我一桌"。
+   */
+  async spread(userId: string, rawMealKey: unknown, rawDiners: unknown) {
+    const membership = await this.prisma.familyMember.findUnique({
+      where: { userId },
+      include: { family: true },
+    })
+    if (!membership) throw new NotFoundException('先加入家庭，才能让家里的事有个主意')
+    const { familyId } = membership
+    const role = membership.role as FamilyRole
+    const scope = visibleToMember(membership.family.shared, role)
+
+    // mealKey 决定餐次（午餐还是晚餐，道数跟着变）与"这一餐已存的人数"
+    const mealKey = typeof rawMealKey === 'string' ? rawMealKey.trim() : ''
+    if (!mealKey) throw new NotFoundException('要告诉我配哪一餐（mealKey）')
+    const { mealDate, meal } = parseMealKey(mealKey)
+
+    const now = new Date()
+    const [fridgeRows, itemRows, recipes, profiles, mealRow] = await Promise.all([
+      this.prisma.fridgeItem.findMany({
+        where: { familyId, ...(scope === 'mine' ? { addedById: userId } : {}) },
+        select: { name: true, expiresOn: true },
+      }),
+      this.cookedRows(familyId, scope === 'mine' ? userId : null),
+      this.prisma.recipe.findMany({
+        select: {
+          id: true, name: true, image: true, imageKey: true, category: true, cuisine: true,
+          calories: true, caloriesEstimated: true, spiciness: true, ingredients: true,
+          tags: true, origin: true, familyId: true, createdById: true,
+        },
+      }),
+      this.taste.activeProfiles(familyId),
+      // 这一餐已经定过几个人吃（F4-05）——比调用方带的准，因为它就是用户自己填过的
+      this.prisma.mealOrder.findUnique({
+        where: { familyId_mealDate_meal: { familyId, mealDate, meal } },
+        select: { dinerCount: true },
+      }),
+    ])
+
+    const requested = parseSpreadDiners(rawDiners)
+    const fromMeal = mealRow?.dinerCount ?? null
+    const diners = fromMeal ?? requested ?? SPREAD_DINERS_DEFAULT
+    const count = dishCountFor(diners, meal)
+
+    if (recipes.length === 0) {
+      return {
+        scope,
+        mealKey,
+        date: dateKey(mealDate),
+        meal,
+        mealLabel: MEAL_LABEL[meal],
+        diners,
+        /** 人数是这一餐存着的，还是我们按默认值算的（界面话术据此不同） */
+        dinersFromMeal: fromMeal !== null,
+        count: 0,
+        reason: '菜谱小书里还没有菜，先去加几道',
+        fridgeEmpty: fridgeRows.length === 0,
+        items: [],
+      }
+    }
+
+    const soonNames = new Set(
+      fridgeRows
+        .filter((row) => row.expiresOn !== null && expiryState(row.expiresOn, now) !== null)
+        .map((row) => row.name),
+    )
+    const pantry = fridgeRows.map((row) => row.name)
+    const cooked = countCooked(itemRows)
+
+    const candidates: SpreadCandidate[] = []
+    for (const recipe of recipes) {
+      const ingredients = readIngredientNames(recipe.ingredients)
+      // 口味优先于一切：有人过敏的菜绝不进这一桌（F5-03 同一个判据）
+      if (
+        profiles.length > 0 &&
+        judgeDish({ name: recipe.name, spiciness: recipe.spiciness, ingredients }, profiles).verdict === 'block'
+      ) {
+        continue
+      }
+      const match = matchDish(ingredients, pantry)
+      const have = match?.have ?? []
+      candidates.push({
+        recipeId: recipe.id,
+        name: recipe.name,
+        category: recipe.category,
+        have,
+        missing: match?.missing ?? [],
+        cooked: cooked.get(recipe.id)?.cooked ?? 0,
+        lastCookedOn: cooked.get(recipe.id)?.lastCookedOn ?? null,
+        // 排序用不到，但挑完要在结果里说"该先吃了"
+        soon: have.filter((name) => soonNames.has(name)),
+      })
+    }
+
+    /*
+     * 顺序与 `decide` / `recommend` 一致：**先把最近做过的往后放，再凑搭配**。
+     * 一桌菜里出现两道上周刚做过的菜是这一块最容易犯的错（"怎么又是这两个"）。
+     */
+    const ranked = preferFresh(rankSpread(candidates), recentDayKeys(RECENT_DAYS, now))
+    const picked = pickSpread(ranked, count, Math.random)
+
+    const byId = new Map(recipes.map((recipe) => [recipe.id, recipe]))
+    const items = picked.flatMap((row) => {
+      const source = byId.get(row.recipeId)
+      if (!source) return []
+      return [
+        {
+          id: source.id,
+          name: source.name,
+          image: publicImageUrl(source.imageKey, source.image),
+          category: source.category,
+          cuisine: source.cuisine,
+          tags: source.tags as string[],
+          calories: source.calories,
+          caloriesEstimated: source.caloriesEstimated,
+          origin: source.origin,
+          sourceLabel: sourceLabel(source.origin),
+          mine: canWriteRecipe(source, { userId, familyId }),
+          /** 这道菜在桌上的位置（荤/素/汤/其他）——界面用它画那个小标签 */
+          role: roleOf(row),
+          roleLabel: ROLE_LABEL[roleOf(row)],
+          /** 一句话短理由（后端拼） */
+          reason: spreadReason(row),
+          have: row.have,
+          missing: row.missing,
+          cooked: row.cooked,
+          lastCookedOn: row.lastCookedOn,
+          /** 用上了冰箱里该先吃的东西 */
+          soon: row.soon,
+        },
+      ]
+    })
+
+    return {
+      scope,
+      mealKey,
+      date: dateKey(mealDate),
+      meal,
+      mealLabel: MEAL_LABEL[meal],
+      diners,
+      dinersFromMeal: fromMeal !== null,
+      /** 这一桌配了几道 */
+      count: items.length,
+      /** 头部那句话：说清几个人、配了几道（后端拼，与采购清单那句同一条规矩） */
+      reason: spreadSummary(diners, items.length, fromMeal !== null),
+      fridgeEmpty: fridgeRows.length === 0,
+      items,
     }
   }
 

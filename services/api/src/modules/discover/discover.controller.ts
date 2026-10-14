@@ -37,6 +37,26 @@ export class DiscoverController {
   }
 
   /**
+   * 「摇一桌」（F5-01）：按这一餐几个人吃配一组菜。
+   *
+   * `mealKey` 必填——道数要按午餐/晚餐算（晚饭多一道），而且这一餐可能已经存过就餐人数。
+   * `diners` 可选：这一餐没存过人数、用户又想说"今天六个人"时用它。
+   * 两个都没有就按 `SPREAD_DINERS_DEFAULT` 算，并在响应里如实标 `dinersFromMeal: false`。
+   */
+  @Get('spread')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '摇一桌：按人数与餐次配一组菜，过忌口（F5-01）' })
+  @ApiQuery({ name: 'mealKey', required: true, description: '配哪一餐，如 2026-10-14-DINNER' })
+  @ApiQuery({ name: 'diners', required: false, description: '几个人吃；不给就用这一餐已存的或默认值' })
+  async spread(
+    @CurrentUserId() userId: string,
+    @Query('mealKey') mealKey?: string,
+    @Query('diners') diners?: string,
+  ) {
+    return this.discover.spread(userId, mealKey, diners)
+  }
+
+  /**
    * 帮我决定（F5-05）：**只给一道**。
    *
    * `exclude` 是「换一道」用的：把这一轮已经看过的 id 报回来（逗号分隔），
