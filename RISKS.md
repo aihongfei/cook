@@ -740,5 +740,5 @@ F16-10 让 AI 第一次**真的写库**，于是多出一类全新的假证据�
 - **同一类风险的第二个出口（很容易漏）**：`@media (prefers-reduced-motion: reduce)` 那一支通常是 `animation: none`。**如果可见性挂在动画上，这个媒体查询下就是 100% 纯白屏**（不是偶发）。所以它同时是一条无障碍缺陷，不只是"省电动画"。
 - **一条命名上的教训**：`fade` 原先叫 `none`，于是"没有类"与"叫 none 的类"在代码里长得一样——第一版排查时我因此多绕了一圈。**"缺省的可见"与"一种动画"必须是两个不同的名字。**
 - **排查顺序建议**（下次遇到"页面空白"）：先看 `getComputedStyle` 的 `opacity`/`transform` **而不是**先怀疑接口 ——本轮接口一直是 200。`document.timeline.currentTime === 0` 是"动画时间线冻住"的判据。
-- **验收**：回归测试 `use-page-turn.test.tsx` 钉住"动画不跑时内容仍然可见"；装机实测冷启动 25 秒无操作首页完整渲染。
+- **验收**：回归测试 `use-page-turn.test.tsx` 钉住"动画不跑时内容仍然可见"；装机实测冷启动 25 秒无操作首页完整渲染。**2026-10-14 深夜用 CDP 在 debug 包内复验**：换页时动画类会按 240ms 退休、`opacity` 回到 1，且 `document.timeline.currentTime` 是正常前进的值（**不是**冻在 0）——即"最坏情况不再永久隐藏"这条在真机上成立。见 `RUNBOOK.md` R-062 §六。
 - **相关**：`DECISIONS.md` D-071 七、`RUNBOOK.md` R-062 §四、`apps/mobile/src/layouts/TabLayout.scss`（基样式上留了注释）、`RISKS.md` R-57（只按浏览器验收的布局到 APK 会翻车——本轮是同一类的第二次）。

@@ -3498,3 +3498,70 @@ adb -s emulator-5554 shell input tap 967 2212
 3. **`input text` 打不出中文**（`NullPointerException`），中文只能人来敲——所以装机验收里凡是"要输入中文"的断言，改用英文问句或提前 `adb shell` 写进库。
 
 **一条诚实的边界**：本轮 `adb` 在底部 Tab 栏上的点击**仍然不可靠**（量准了坐标也会落空），所以 ④ 打卡详情这一条**只在浏览器里验过**（点开有全备注 / 时间 / 可点开的照片），**APK 内没验成**——不是功能有问题，是模拟器上没点中。要在真机补一遍。
+
+### 六、补记（2026-10-14 深夜）：用 CDP 把上面「没验成」的那一条验掉了
+
+§五 写过一条诚实的边界：**④ 打卡详情只在浏览器验过，APK 内没验成**，因为 `adb shell input tap` 在底部 Tab 栏上反复落空。这一轮找到了**绕开坐标的路子**，四项已在 APK 内全部实测通过。方法本身值得留下来。
+
+**为什么 `input tap` 在这里注定不稳**：WebView 没有可访问性树（`uiautomator dump` 只有一个空节点），所以只能按像素点；而截图会被缩放、点击坐标系与实际渲染坐标不是一比一。**结论：在 WebView 里别用坐标点，用 CDP 派发点击。**
+
+**做法**（release 包连不上 DevTools，必须用 debug 包）：
+
+```bash
+# ① 打 debug 包（自带 DevTools 端口），并让它指向**本机**后端
+#    ⚠️ build:apk 是 --mode server，嵌的是公网地址；做本机验收要另走这一步：
+pnpm --dir apps/mobile exec vite build          # 不带 --mode → 读 .env → 127.0.0.1:3000
+pnpm --dir apps/mobile exec cap sync android
+cd apps/mobile/android && ./gradlew assembleDebug     # JAVA_HOME 要 JDK 21
+
+# ② 装（release 与 debug 签名不同，跨类型必须先卸）
+adb uninstall com.yushan.cook
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# ③ 后端与图片走宿主（模拟器里的 127.0.0.1 是它自己）
+adb reverse tcp:3000 tcp:3000 && adb reverse tcp:9000 tcp:9000
+
+# ④ 启动并把 WebView 的 DevTools 端口转发出来
+adb shell am start -n com.yushan.cook/.MainActivity
+PID=$(adb shell pidof com.yushan.cook | tr -d '\r')
+adb forward tcp:9222 localabstract:webview_devtools_remote_$PID
+curl -s http://127.0.0.1:9222/json/list      # 有 page 目标就成了
+
+# ⑤ 在页面里求值／派发点击（脚本 /tmp/cdp.mjs，用法见其头部注释）
+node /tmp/cdp.mjs http://127.0.0.1:9222 "JSON.stringify({url:location.href, cards:document.querySelectorAll('.checkin-card').length})"
+```
+
+**页面里点元素**（绕开坐标问题的核心）：
+
+```js
+document.querySelector('.checkin-card').click()                       // 普通点击
+document.querySelector('form').requestSubmit()                        // 表单提交（登录用；input tap 在这里也不稳）
+// 填 React 受控输入框必须用原生 setter + 派发 input 事件，直接改 .value 不生效：
+const set = (el, v) => {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v)
+  el.dispatchEvent(new Event('input', { bubbles: true }))
+}
+```
+
+**看换页动画到底是哪个方向**（① 的验法）：`MutationObserver` 盯 `.tab-layout__page` 的 `class`，记录每一次变化与当时的 `opacity`／`animationName`。实测三段：
+
+| 走法 | 观察到的类 | 动画名 |
+| --- | --- | --- |
+| `/mine` → `/checkins`（进二级页） | `--forward` | `page-in-right` |
+| `/checkins` → `/mine`（回 Tab） | `--fade` | 淡出 |
+| `/mine` → `/fridge`（Tab 之间） | `--fade` | 淡出 |
+| 二级页返回（POP） | `--back` | `page-in-left` |
+
+**顺带证到的一条**：动画类播完会**退休**（类被摘掉、`opacity` 回到 1），且 `document.timeline.currentTime` 是正常前进的值（不是 R-61 那个冻在 0 的情形）——**R-61 的修法在真机上也成立**。
+
+**四项在 APK 内的实测结果**（本次新增的证据）：
+
+1. **① 翻页方向**：见上表，四段全对；
+2. **② 定餐后清单立刻出现**：点「选好了」→「就这些，定了」之后**马上**进采购清单，显示 `1 餐定了菜单，共 1 道菜`、`买到 0/9` 并列出 9 样（葱/姜/蒜/八角/白砂糖/陈皮/花椒/料酒/生抽）——**没有点「开始做」，也没有等 30 秒**。这正是用户报的那个现象的反面，也是本次修复的决定性证据；
+3. **②c 确认页的缺料提示**：同一张确认弹层里有「**这一餐要买 9 样**」+ 逐样清单 + 「记一下冰箱里有什么，这里就能替你算掉一部分」+ 「去采购清单看看 →」，**没有任何自动写入**；
+4. **③ 推荐随机**：连进 3 次厨房页，3/3 次菜名组合不同，期间只出现 12 道菜（有界抽样的证据），且每次确实发了 `GET /discover/recommend?count=6`；
+5. **④ 打卡详情**：卡片是 `<button aria-label="看我 2026-10-14 的打卡详情">`；点开出现详情弹层（完整备注 + `2026-10-14 · 15:19`）；点照片打开全屏大图（`.photo-viewer`，`blob:` 地址——说明"详情页自己取 blob、不走缓存"那条也成立）。
+
+**一个坑**：`debug` 包如果是用 `build:apk` 打的，**嵌的是公网地址**（`--mode server`）。第一次验收时我用本地账号登录失败了，就是因为请求打到了服务器。**做本机验收必须先 `vite build`（不带 mode）再 `cap sync`。**
+
+**另一个坑（这次真踩到）**：模拟器的 `system_server` 会自己崩（日志里 `DeadSystemException` + `The system died`），表现是 `adb install` 报 `Can't find service: package`、`pm list packages` 空、前台 activity 查不到。**那不是包的问题**，`adb emu kill` 再按 §2 重启即可（重启后包还在，但**跨签名类型仍要先卸载**）。
