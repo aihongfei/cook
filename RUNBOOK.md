@@ -4501,3 +4501,105 @@ node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => {
 1. **缓存页外面的那层 `LocationContext` 一层都不能省**：包在公共父层上的话所有缓存页共用最后那一个地址，藏在后面的订单页会以为自己站在菜谱页上；新加"整屏覆盖"的浮层时也照 `ImageViewer` / `ConfirmDialog` 那条写（换页就关），否则它不会跟着页面藏；
 2. **滚动位置只从滚动事件来**：别在"换页那一刻"顺手记一笔——那时 `scrollTop` 已被浏览器夹过，记下来的是假的（这一条写在了 `TabLayout.tsx` 的注释里）；
 3. **角标文案的唯一来源是后端那条 `tag`**：前端不按 `kind` 再写一张映射表；测试夹具里出现过的文案要跟后端一起改（`order.test.tsx` 与 `unread-badges.test.ts` 里各有一处）。
+
+## R-075 公网后端重新部署到最新 + 出两个 APK：怎么跑、怎么验（✅ 已验证，2026-10-14）
+
+背景：用户问「打包最新 apk 了吗」时发现**线上后端落后一整天**——2026-10-14 早上那版还没有 `notifications` 模块，`GET /api/notifications` 实测 **404**，三张新表一个都没建。所以这一条记的是"把线上追平"的完整跑法，以及**怎么判断手上那个 APK 能不能用**。
+
+### 一、先判断线上落后多少（**别跳过，这一步决定后面要不要部署**）
+
+```bash
+# 端点存在性：404 = 这一版还没有它；401 = 存在（只是要登录）
+for ep in notifications orders/today discover/cooked; do
+  printf "/api/%s → %s\n" "$ep" "$(curl -s -m 8 -o /dev/null -w '%{http_code}' "http://120.48.142.161:3000/api/$ep")"
+done
+
+# 容器里有没有那段代码（注意 dist 的路径是 /app/dist/modules/...，不是 /app/dist/...）
+ssh cook 'docker exec cook-api-1 sh -lc "grep -c 选好了 /app/dist/modules/notifications/notifications.rules.js"'
+# 报 "No such file or directory" = 线上还没这个模块
+
+# 库里的表（用容器里的 Prisma 查，别手拼 mysql 口令——引号会打架）
+ssh cook 'docker exec cook-api-1 sh -lc "node -e \"const {PrismaClient}=require('@prisma/client');const p=new PrismaClient();(async()=>{const r=await p.\\\$queryRawUnsafe('SHOW TABLES');console.log(r.map(x=>Object.values(x)[0]).filter(n=>/otif|atrol/i.test(n)).join(', ')||'（无）');await p.\\\$disconnect()})()\""'
+```
+
+### 二、传代码并重建（沿用 R-056 §四，**注意 .env 的位置**）
+
+```bash
+cd /Users/aihf/Downloads/work/cook
+tar czf - --exclude='node_modules' --exclude='dist' --exclude='.env' --exclude='.git' \
+  docker-compose.yml services/ | ssh cook 'tar xzf - -C /opt/cook'
+ssh cook 'find /opt/cook/services -name "._*" -delete'        # 清 macOS 元数据（tar 会刷一屏 LIBARCHIVE 警告，无害）
+ssh cook 'cd /opt/cook && docker compose build api'            # 慢，几分钟
+ssh cook 'cd /opt/cook && docker compose up -d api && sleep 12 && docker compose ps api'
+```
+
+**服务器的 `.env` 在 `/opt/cook/.env`（根级、root 所有）**，不在 `services/` 下——`services/api/.env` 不存在是**正常的**（compose 从 `/opt/cook/.env` 读变量）。别看到"没有 .env"就以为部署漏了密钥。
+
+### 三、看迁移有没有跑（容器入口自动跑，不用手动）
+
+```bash
+ssh cook 'cd /opt/cook && docker compose logs api 2>&1 | grep -iE "migration|applied" | tail -8'
+```
+
+实测输出（本次）：
+
+```
+The following migration(s) have been applied:
+migrations/
+    └─ migration.sql        ← 三个迁移各一段
+All migrations have been successfully applied.
+[api] migrations applied, starting server…
+```
+
+三张表建出来（用上面那段 Prisma 命令查）：`NotificationEvent, NotificationPatrolToken, NotificationPref`。
+
+### 四、验在**公网**上（本地容器绿不算）
+
+三套验收脚本都支持 `BASE_URL`，直接打公网：
+
+```bash
+export BASE_URL=http://120.48.142.161:3000/api
+node services/api/scripts/verify-notifications-http.cjs   # 47/47
+node services/api/scripts/verify-patrol-http.cjs          # 33/33
+node services/api/scripts/verify-meal-detail-http.cjs     # 25/25
+```
+
+**注意**：这三套脚本会在公网库里**新建测试家庭与账号**（见 `NOW.md`「待你决定」第 3 条——开发库与公网库都会攒这个）。
+
+### 五、两个 APK 的区别与出包（**这一节是问"打包了吗"时最该看的**）
+
+| 包 | 命令 | 接口指向 | 用途 |
+| --- | --- | --- | --- |
+| **debug** | `npx vite build --mode development` → `cap sync` → `./gradlew assembleDebug` | `.env` 的 `127.0.0.1:3000` | 本机联调，**必须** `adb reverse tcp:3000 tcp:3000` |
+| **release** | `pnpm --dir apps/mobile run build:apk`（= `--mode server`）→ `./gradlew assembleRelease` | `.env.server` 的 `120.48.142.161:3000` | 装真机用，不依赖任何本机通道 |
+
+**两个包不能混**：dev 包不 `adb reverse` 就什么都请求不到；release 包连的是公网，**线上没部署到最新的话，装上去就是"新界面配旧后端"**（本轮查出来的就是这个）。
+
+release 包发出前四条核对（R-058 三条 + R-059 一条）：
+
+```bash
+cd apps/mobile/android/app/build/outputs/apk/release
+ASSET=$(unzip -l app-release.apk | grep -o 'assets/public/assets/index-[^ ]*\.js' | head -1)
+unzip -p app-release.apk "$ASSET" | grep -c "120.48.142.161:3000"   # ≥1
+unzip -p app-release.apk "$ASSET" | grep -c "127.0.0.1:3000"        # 0
+unzip -p app-release.apk "$ASSET" | grep -c "选好了"                 # ≥1（本轮的角标文案，用来确认打的是最新码）
+unzip -p app-release.apk "$ASSET" | grep -c "tab-layout__page"      # ≥1（keep-alive 在包里）
+curl -s -o /dev/null -w '%{http_code}\n' http://120.48.142.161:3000/api/health        # 200
+curl -s -i -X OPTIONS http://120.48.142.161:3000/api/health -H "Origin: http://localhost" \
+  -H "Access-Control-Request-Method: GET" | grep -i access-control-allow-origin        # http://localhost
+```
+
+⚠️ **`unzip -p` 里面的通配符必须自己先解析**：`unzip -p x.apk assets/public/assets/index-*.js` 在 zsh 下报 `no matches found`（那是**shell** 在展开、不是 unzip），grep 跟着报 0，看起来像"包不对"。用 `unzip -l` 先取到真文件名。
+
+签名核对用 **`apksigner`**，不要用 `jarsigner`——现代 APK 走 v2/v3 方案，`jarsigner -verify` 会说 "jar is unsigned"，那是**误报**：
+
+```bash
+APKSIGNER=$(ls "$HOME/Library/Android/sdk/build-tools"/*/apksigner | tail -1)
+"$APKSIGNER" verify --print-certs app-release.apk | head -3    # 期望 CN=Yushan / SHA-256 5cdba7b7…
+```
+
+### 六、改这一块时要连带注意的三处
+
+1. **"打包了"不等于"能用了"**：APK 是新的、后端是旧的，装上去照样坏——回答"打包了吗"必须**连线上版本一起查**（第一节那三条命令就是干这个的）；
+2. **`services/api/.env` 在服务器上不存在是正常的**（compose 读 `/opt/cook/.env`），别去"补"一个——那会引入一份没人读的配置，下次改错地方；
+3. **三套验收脚本都会写公网库**：跑之前心里有数，跑完别惊讶库里多了几个 `AI 验收家`。
