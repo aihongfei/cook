@@ -8,6 +8,7 @@ import { useAiAssistantSession } from '@/stores/ai-assistant-session'
 import { tabs } from '@/config/tabs'
 import { tabOf } from '@/pages/back-link'
 import { targetOf } from '@/lib/local-notify'
+import { emitTabRetap } from '@/lib/tab-retap'
 import { usePageTurn } from './use-page-turn'
 import './TabLayout.scss'
 
@@ -129,6 +130,15 @@ export default function TabLayout() {
               to={path}
               aria-current={active ? 'page' : undefined}
               className={`tab-bar__item${active ? ' is-active' : ''}`}
+              /*
+                再点一次**当前**这个 Tab：喊一声，让页面自己决定"要不要带我去看什么"
+                （用户 2026-10-14：「重复点击订单tab时自动滚到通知的那个卡片位置」）。
+                外壳不算这件事——"哪一餐有事"的判据只有页面握着（见 lib/tab-retap 的说明）。
+                从别的页点过来不算"再点"：那是一次正常跳转，页面本来就从头渲染。
+              */
+              onClick={() => {
+                if (pathname === path) emitTabRetap(path)
+              }}
             >
               <Icon width={23} height={23} />
               <span>{label}</span>

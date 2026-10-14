@@ -282,15 +282,25 @@ export default function OrderDetailPage() {
                     <div className="od-line" key={line.id}>
                       {line.image && <img className="od-line__img" src={line.image} alt="" loading="lazy" />}
                       <div className="od-line__main">
-                        {line.recipeId ? (
-                          <Link
-                            className="od-line__name od-line__name--link"
-                            to={`/recipes/${line.recipeId}`}
-                            state={{ from: location.pathname }}
-                          >
-                            {line.name} ›
-                          </Link>
-                        ) : (
+                      {line.recipeId ? (
+                        <Link
+                          className="od-line__name od-line__name--link"
+                          to={`/recipes/${line.recipeId}`}
+                          state={{ from: location.pathname }}
+                        >
+                          {/*
+                            箭头放**最右边**（用户 2026-10-14：「详情菜品的箭头放到右侧」）。
+                            原先它紧跟菜名（`名字 ›`），而右边隔着一大段空白——箭头在中文里
+                            就是"这一行能进去"的记号，它该贴在**可点区域的右端**，与列表页
+                            那排卡片、以及各处"能进去"的行同一个位置。名字本身占满剩余宽度
+                            （`flex: 1`），点哪儿都能进。
+                          */}
+                          <span className="od-line__name-text">{line.name}</span>
+                          <span className="od-line__name-arrow" aria-hidden="true">
+                            ›
+                          </span>
+                        </Link>
+                      ) : (
                           <span className="od-line__name">
                             {line.name}
                             <i className="od-line__free">自己写的</i>

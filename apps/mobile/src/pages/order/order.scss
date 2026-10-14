@@ -81,6 +81,51 @@
   color: #c7a97e;
 }
 
+/* 「该备菜」那条提醒（用户 2026-10-14：「还是没有通知的角标啊」）。
+   它与上面两个入口长得**刻意不一样**：那两个是常驻的功能入口，这一条是**有事要说**——
+   所以用品牌色的实边框 + 暖底，扫一眼就知道"这里有件事"。整行可点，去处由后端给
+   （那条提醒本来就是"点进去是备菜页"）。 */
+.order-notice {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 12px var(--spacing-page) 0;
+  padding: 11px 13px;
+  text-decoration: none;
+  cursor: pointer;
+  background: #fff6e9;
+  border: 1.5px solid #e8b877;
+  border-radius: var(--radius-card);
+}
+
+.order-notice:active {
+  opacity: 0.7;
+}
+
+.order-notice__icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+}
+
+.order-notice__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: #8c4a1f;
+}
+
+.order-notice__text small {
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.order-notice__arrow {
+  flex: 0 0 auto;
+  color: #c7a97e;
+}
+
 /* 「点单历史」（F3-09）：与「自己写一道」同一档的整行入口。
    边框用实线而不是虚线：虚线在这个界面里已经被"自己写一道"占住了（那是"共创"的意思），
    历史是"回看"，两者不该长得一模一样。 */
@@ -650,10 +695,17 @@
   display: block;
 }
 
-/* 状态戳与箭头并排：箭头是"能进去"的提示，不参与语义（aria-hidden） */
+/*
+ * 状态戳与箭头都**贴着第一行走**（不是整块垂直居中）。
+ *
+ * 用户 2026-10-14：「这个上移，然后右侧的箭头也一起」。原先这里是 `align-items: center`，
+ * 而标题区左半边是两行（日期 + 谁点的）、高 47px，于是那枚 30px 的戳被居中到
+ * 距顶 9px 的位置——看起来像"掉到两行中间去了"，与日期不在一条线上。
+ * 状态是**这一餐的属性**，跟日期同一条基线才读得通。
+ */
 .order-card__head {
   gap: 8px;
-  align-items: center;
+  align-items: flex-start;
 }
 
 .order-card__arrow {

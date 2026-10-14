@@ -5,6 +5,7 @@ import type { AxiosRequestConfig } from 'axios'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
+import { emitTabRetap } from '@/lib/tab-retap'
 import type { Family } from '@/api/family'
 import type { NotificationBoard } from '@/api/notifications'
 import type { MealCard, OrderBoard } from '@/api/orders'
@@ -974,4 +975,134 @@ it('已读的那条不留标记（标过了还挂着，用户会以为没生效�
   await screen.findByText('2026-10-13 · 晚餐')
   expect(screen.queryByText('做好了')).toBeNull()
   expect(document.querySelector('.order-card')?.className).not.toContain('is-unread')
+})
+
+/*
+ * 再点一次「订单」Tab：滚到那条提醒对应的卡（用户 2026-10-14：「再加一下重复点击
+ * 订单tab时自动滚到通知的那个卡片位置」）。
+ *
+ * 为什么需要它：列表按日子**倒序**，"今天"在最下——提醒经常落在用户一眼看不到的
+ * 那几张卡上（实测那次在第 14 张），他会以为角标没做出来。
+ */
+it('再点一次订单 Tab：滚到那条未读提醒所在的卡', async () => {
+  const scrollSpy = vi.fn()
+  Element.prototype.scrollIntoView = scrollSpy
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ mealKey: '2026-10-13-DINNER', date: '2026-10-13' }),
+        cardFixture({ mealKey: '2026-10-12-LUNCH', date: '2026-10-12', meal: 'LUNCH', mealLabel: '午餐' }),
+      ]),
+    },
+    notifications: {
+      items: [
+        {
+          id: 'plan:2026-10-12-LUNCH',
+          kind: 'plan',
+          title: '昨天午餐的菜单定下来了',
+          body: null,
+          at: '2026-10-12T10:00:00.000Z',
+          to: '/order/2026-10-12-LUNCH',
+          mealKey: '2026-10-12-LUNCH',
+          tag: '菜单',
+          unread: true,
+        },
+      ],
+      unread: 1,
+      unreadByArea: { order: 1 },
+      unreadByKind: { plan: 1 },
+      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+    },
+  })
+  renderOrder()
+  await screen.findByText('2026-10-13 · 晚餐')
+
+  emitTabRetap('/order')
+  await waitFor(() => expect(scrollSpy).toHaveBeenCalled())
+
+  // 滚的是**那一张**卡（`data-meal-key`），不是列表顶部、也不是别的卡
+  const target = document.querySelector('[data-meal-key="2026-10-12-LUNCH"]') as HTMLElement
+  expect(scrollSpy.mock.instances[0]).toBe(target)
+  expect(scrollSpy.mock.calls[0][0]).toMatchObject({ block: 'center' })
+})
+
+it('那条提醒的卡被筛选挡住时：放开筛选再滚（用户要的是"带我去看"，不是"没找到"）', async () => {
+  const scrollSpy = vi.fn()
+  Element.prototype.scrollIntoView = scrollSpy
+  // 切到「只看我的」之后，后端那份列表里没有那张卡
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ mealKey: '2026-10-13-DINNER', date: '2026-10-13' }),
+        cardFixture({ mealKey: '2026-10-12-LUNCH', date: '2026-10-12', meal: 'LUNCH', mealLabel: '午餐' }),
+      ]),
+      mine: boardFixture([cardFixture({ mealKey: '2026-10-13-DINNER', date: '2026-10-13' })]),
+    },
+    notifications: {
+      items: [
+        {
+          id: 'plan:2026-10-12-LUNCH',
+          kind: 'plan',
+          title: '昨天午餐的菜单定下来了',
+          body: null,
+          at: '2026-10-12T10:00:00.000Z',
+          to: '/order/2026-10-12-LUNCH',
+          mealKey: '2026-10-12-LUNCH',
+          tag: '菜单',
+          unread: true,
+        },
+      ],
+      unread: 1,
+      unreadByArea: { order: 1 },
+      unreadByKind: { plan: 1 },
+      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+    },
+  })
+  renderOrder()
+  await screen.findByText('2026-10-13 · 晚餐')
+
+  fireEvent.click(screen.getByRole('button', { name: '只看我的' }))
+  await waitFor(() => expect(screen.queryByText('2026-10-12 · 午餐')).toBeNull())
+
+  emitTabRetap('/order')
+  // 它自己切回「全家点菜单」，那张卡回来了，然后才滚
+  await waitFor(() => expect(screen.getByText('2026-10-12 · 午餐')).toBeTruthy())
+  await waitFor(() => expect(scrollSpy).toHaveBeenCalled())
+})
+
+/*
+ * 「该备菜」那条：红点亮在订单，但它**没有卡可标**（那一餐还空着）。
+ * 列表顶上单独说一句——否则用户看到的是"红点亮着、列表里一处标记都没有"。
+ */
+it('只有「该备菜」未读时：列表顶上说一句，去处是备菜页（后端给的那条）', async () => {
+  mockGet({
+    boards: { family: boardFixture() },
+    notifications: {
+      items: [
+        {
+          id: 'prep:2026-10-13',
+          kind: 'prep',
+          title: '接下来 3 餐还没安排',
+          body: '最近的是今天晚餐',
+          at: '2026-10-13T00:00:00.000Z',
+          to: '/prep',
+          mealKey: null,
+          tag: '备菜',
+          unread: true,
+        },
+      ],
+      unread: 1,
+      unreadByArea: { order: 1 },
+      unreadByKind: { prep: 1 },
+      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+    },
+  })
+  renderOrder()
+
+  // 顶上那句用的是后端给的标题与副标题（前端不另拼）
+  expect(await screen.findByText('接下来 3 餐还没安排')).toBeTruthy()
+  expect(screen.getByText('最近的是今天晚餐')).toBeTruthy()
+  expect(document.querySelector('.order-notice')?.getAttribute('href')).toBe('/prep')
+  // 卡片上仍然一个角标都没有（这一条本来就没有卡）
+  expect(document.querySelectorAll('.order-card__corner').length).toBe(0)
 })

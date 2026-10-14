@@ -48,3 +48,36 @@ export function badgesOfMeal(map: Map<string, string>, mealKey: string): string[
     .map((kind) => map.get(`${mealKey}:${kind}`))
     .filter((tag): tag is string => Boolean(tag))
 }
+
+/**
+ * 最新那条**能落到卡上**的未读提醒是哪一餐（没有就 `null`）。
+ *
+ * 列表本身就是"新的在前"，所以取第一条就够。用来回答"再点一次订单 Tab 该滚到哪"。
+ */
+export function firstUnreadMealKey(items: MealBadgeSource[]): string | null {
+  for (const item of items) {
+    if (item.unread && item.mealKey) return item.mealKey
+  }
+  return null
+}
+
+/**
+ * 「该备菜」那条（未读时）——它**没有卡**，所以在订单列表顶上单独说一句，
+ * 否则红点亮着而列表里一处标记都没有（用户 2026-10-14 报的就是这个感觉：
+ * 「还是没有通知的角标啊」——那一次他的未读恰好只有一条备菜）。
+ *
+ * 只认 `prep`：四类里只有它归**订单**这一支却没有卡（快过期归冰箱，红点不在这儿）。
+ * 标题与去处都用后端给的那条（前端不另拼一句话——与"文案由后端给"同一条）。
+ */
+export interface PrepNotice {
+  title: string
+  body: string | null
+  to: string
+}
+
+export function firstPrepNotice(
+  items: { kind: string; unread: boolean; title: string; body: string | null; to: string }[],
+): PrepNotice | null {
+  const item = items.find((row) => row.unread && row.kind === 'prep')
+  return item ? { title: item.title, body: item.body, to: item.to } : null
+}

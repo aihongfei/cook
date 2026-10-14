@@ -4352,3 +4352,41 @@ node /tmp/cdp.mjs http://127.0.0.1:9222 "({ url: location.pathname, back: docume
 1. **`mealKey` 只给"有卡的那两类"**：新增提醒类别时先想清楚"列表上有没有它对应的一张卡"——没有就给 `null`，不要图省事把 `id` 里的东西切出来；
 2. **角标文案就是后端那条的 `tag`**：不要在前端按 `kind` 再写一张"什么类别写什么字"的表（后端加了一类而前端不知道，就会显示空白角标）；
 3. **`.order-card__tools` 里那三个按钮的样式挂在类名上**：详情页的「改人数」是单独出现的（不在那一排里），把样式写进容器选择器它就没样式了。
+
+### 五、第二轮（用户现场反馈五处）：怎么验
+
+```bash
+pnpm --dir apps/mobile test        # 653/653（61 文件）
+pnpm --dir apps/mobile typecheck   # tsc -b
+pnpm --dir apps/mobile lint        # 18 warnings / 0 errors（与改动前同数）
+```
+
+**四件事各自的验法**（都在浏览器里实测过，`http://127.0.0.1:5173/order`）：
+
+1. **状态戳与箭头贴合第一行**——量三个元素相对卡片顶部的偏移，戳与箭头应当与日期同高（不再是居中到两行中间）：
+
+```js
+const card = document.querySelector('.order-card.is-unread')
+const r = (el) => Math.round(el.getBoundingClientRect().top - card.getBoundingClientRect().top)
+({ date: r(card.querySelector('.order-card__date')), stamp: r(card.querySelector('.stamp')), arrow: r(card.querySelector('.order-card__arrow')) })
+// 实测：date 15 / stamp 13 / arrow 15（戳高 30px 对 23px 的行，差 2px 是字形本身）
+```
+
+2. **再点一次订单 Tab 滚到那张卡**——真点，别只派发事件（要连同"从别的页点不算再点"一起验）：
+
+```js
+// 先滚回顶部（模拟刚进页面），再点底栏「订单」
+document.querySelector('.tab-layout__body').scrollTop = 0
+// → 点 Tab → 等 1.5 秒（smooth 动画）
+// 实测：scrollTop 0 → 3047，那张卡的 top/bottom = 551/762，完全落在视口（786）里
+```
+
+3. **「该备菜」顶上那一句**：找一个未读只有 `prep` 的账号（这一条没有卡可标），列表顶上应当出现 `.order-notice`，href 是后端给的 `/prep`；同时卡片上**一个角标都不该有**（它本来就没有卡）。
+
+4. **详情页菜品箭头贴右**：量 `link` 与里面箭头的右边界——两者应当相同（实测 link `114→359`、箭头 `353→359`）。名字不长时箭头也必须在最右，不能跟在名字后面。
+
+### 六、这一块最容易再看走眼的三件事
+
+1. **"没有角标"常常是"没滚到那一张"**：列表按日子倒序，今天的点单在最下。先滚到底看最后几张卡，再判断角标有没有做出来——第一轮验收就误判过一次（角标是好的，人在顶上找了半天）；
+2. **「该备菜」这条永远不会有角标**：`mealKey: null`，说的正是"这一餐还空着"，空着就没有卡。它的位置在列表顶上那句，不在卡片上；
+3. **`prep` 与 `expiry` 都可能让"红点亮着、列表里没标记"**：`expiry` 归冰箱（红点不在订单）；`prep` 归订单但没有卡。看到订单红点而列表里找不到标记，先看未读里是不是只有这两类。

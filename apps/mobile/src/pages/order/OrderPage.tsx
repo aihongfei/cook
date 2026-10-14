@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { useFamily, CAPABILITY, can } from '@/api/family'
 import { useNotifications } from '@/api/notifications'
+import { onTabRetap } from '@/lib/tab-retap'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import ConfirmMenuSheet from './components/ConfirmMenuSheet'
 import DinerCountSheet from './components/DinerCountSheet'
@@ -24,7 +25,7 @@ import Page from '@/components/ui/Page'
 import { STATUS_TONE } from '@/components/ui/status-tone'
 import { toast } from '@/components/ui/toast'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
-import { badgesOfMeal, unreadByMeal } from './unread-badges'
+import { badgesOfMeal, firstPrepNotice, firstUnreadMealKey, unreadByMeal } from './unread-badges'
 import '../shared.scss'
 import './order.scss'
 
@@ -123,6 +124,55 @@ export default function OrderPage() {
    */
   const notifications = useNotifications()
   const badges = unreadByMeal(notifications.data?.items ?? [])
+  // 「该备菜」那条没有卡可标（那一餐还空着），所以在列表顶上单独说一句
+  const prepNotice = firstPrepNotice(notifications.data?.items ?? [])
+
+  /*
+   * 再点一次底栏的「订单」：滚到那条提醒对应的卡（用户 2026-10-14：「再加一下重复
+   * 点击订单tab时自动滚到通知的那个卡片位置」）。
+   *
+   * 为什么需要它：列表按日子**倒序**，而"今天"恰恰在最下——提醒经常落在用户一眼
+   * 看不到的那几张卡上（验收时那条就在 14 张卡的第 14 张），他会以为角标没做出来。
+   *
+   * 两段分工：**动状态的都在点击那一刻做**（弹开挡住它的筛选、把"要看哪一餐"记下来），
+   * 下面那个 effect 只做"滚"这一件 DOM 事，不改任何 state——effect 里改 state 会引发
+   * 连锁重渲染（lint 会为这一点报警），而这里本来就有一个真实的点击作为起因，
+   * 没有理由把决定推迟到渲染之后。
+   *
+   * `seq` 是为了"连点两次仍要滚"：同一餐第二次点，`key` 没变、state 不变，
+   * effect 就不会再跑——加一个自增序号让它每次都变。
+   */
+  const [jump, setJump] = useState<{ key: string; seq: number } | null>(null)
+  useEffect(
+    () =>
+      onTabRetap('/order', () => {
+        const target = firstUnreadMealKey(notifications.data?.items ?? [])
+        if (!target) return
+        setJump((prev) => ({ key: target, seq: (prev?.seq ?? 0) + 1 }))
+        /*
+         * 卡被筛掉了就先放开筛选（用户要的是"带我去看那条提醒"，让他自己发现是被
+         * 「只看我的 / 待确认」挡住了没有道理）。放开之后数据会重取，下面那个 effect
+         * 跟着 `orders.data` 再跑一次，那时卡就在了。
+         */
+        if (!document.querySelector(`[data-meal-key="${target}"]`)) {
+          setFilter('ALL')
+          setScope('family')
+        }
+      }),
+    [notifications.data],
+  )
+
+  /*
+   * 滚过去。找不到就**安静收场**（那一餐可能已被撤掉、或翻到 60 张卡之外）——
+   * 不假装找到、不弹提示：这是"顺手带你去"，不是一次可能失败的操作。
+   */
+  useEffect(() => {
+    if (!jump) return
+    // jsdom 里没有 scrollIntoView（真实浏览器有），测试用间谍函数替它
+    document
+      .querySelector(`[data-meal-key="${jump.key}"]`)
+      ?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+  }, [jump, orders.data])
 
   const counts = orders.data?.counts ?? {}
   // 一个都没有的状态不占位置（免得顶上挂一排 0）——但当前选中的那个必须留着，否则切不回去
@@ -314,6 +364,23 @@ export default function OrderPage() {
           />
         )}
 
+        {/*
+          「该备菜」那条在列表顶上单独说一句（用户 2026-10-14：「还是没有通知的角标啊」）。
+          它**没有卡可标**——说的正是"某一餐还空着"，空着才没有点单卡；但它的红点恰恰
+          亮在订单这一支，所以列表里一处标记都没有时用户会觉得"通知没做出来"。
+          那条提醒本来"点进去是备菜页"（`to` 由后端给），在这里也给同一个去处。
+        */}
+        {prepNotice && (
+          <Link className="order-notice" to={prepNotice.to} state={{ from: location.pathname }}>
+            <span className="order-notice__icon">🥬</span>
+            <span className="order-notice__text">
+              {prepNotice.title}
+              {prepNotice.body && <small>{prepNotice.body}</small>}
+            </span>
+            <span className="order-notice__arrow">›</span>
+          </Link>
+        )}
+
         {orders.data?.cards.map((card) => {
           const cardBadges = badgesOfMeal(badges, card.mealKey)
           return (
@@ -334,6 +401,8 @@ export default function OrderPage() {
               .filter(Boolean)
               .join(' ')}
             key={card.mealKey}
+            // 再点一次「订单」Tab 时靠它找这张卡（见上面那段 jumpTo 的说明）
+            data-meal-key={card.mealKey}
             onClick={(event) => {
               if ((event.target as HTMLElement).closest('button, a, input, select, textarea')) return
               navigate(`/order/${card.mealKey}`, { state: { from: location.pathname } })

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, it } from 'vitest'
+import { TAB_RETAP_EVENT } from '@/lib/tab-retap'
 import TabLayout, { tabBadge } from './TabLayout'
 
 /*
@@ -122,4 +123,26 @@ it('红点：只有某一类未读时，另一个 Tab 不亮', () => {
   const onlyExpiry = { unread: 1, unreadByArea: { fridge: 1 } } as never
   expect(tabBadge('/fridge', onlyExpiry)).toBe(1)
   expect(tabBadge('/order', onlyExpiry)).toBe(0)
+})
+
+/*
+ * 再点一次**当前**这个 Tab：外壳只负责喊一声（用户 2026-10-14：「重复点击订单tab时
+ * 自动滚到通知的那个卡片位置」）。判据是"人在这一页"——从别的页点过来是一次正常
+ * 跳转，不是"再点"，那时页面本来就从头渲染、滚动位置归零。
+ */
+it('再点当前 Tab 会喊一声；从别的页点过来不喊', () => {
+  const events: string[] = []
+  const spy = (event: Event) => events.push((event as CustomEvent<{ path: string }>).detail.path)
+  window.addEventListener(TAB_RETAP_EVENT, spy)
+  try {
+    renderAt('/order')
+    fireEvent.click(tabLink('订单'))
+    expect(events).toEqual(['/order'])
+
+    // 人在订单页，点「冰箱」是**跳转**（页面换了，不需要"滚到哪儿"这件事）
+    fireEvent.click(tabLink('冰箱'))
+    expect(events).toEqual(['/order'])
+  } finally {
+    window.removeEventListener(TAB_RETAP_EVENT, spy)
+  }
 })

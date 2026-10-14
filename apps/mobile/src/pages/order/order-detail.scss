@@ -160,7 +160,17 @@
   font-size: 13px;
   color: #4a3225;
 
+  /*
+   * 能点的那一道：**名字占满整行、箭头贴右端**（用户 2026-10-14：「详情菜品的箭头放到右侧」）。
+   * 原先箭头跟在菜名后面，右边空一大截——箭头是"这一行能进去"的记号，就该在可点区域的
+   * 右端（与列表卡、各处的"能进去"的行同一个位置）。`justify-content: space-between`
+   * 让名字靠左、箭头靠右，中间那段空白也是可点区域。
+   */
   &--link {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    justify-content: space-between;
     color: #b4571f;
     text-decoration: none;
 
@@ -168,6 +178,17 @@
       opacity: 0.7;
     }
   }
+}
+
+.od-line__name-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.od-line__name-arrow {
+  flex: 0 0 auto;
+  font-size: 14px;
+  color: #c7a97e;
 }
 
 /* 「自己写的」那道菜（F3-10）在后端没有 recipeId，点不进菜谱详情——标出来，
