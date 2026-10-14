@@ -138,23 +138,58 @@ const ALIAS = new Map([
 ])
 
 function plainName(raw) {
-  const text = String(raw ?? '')
+  return String(raw ?? '')
     // 括号里的补充说明（"番茄（大）"）
     .replace(/[（(【[][^）)】\]]*[）)】\]]/g, '')
     // 数字与跟随其后的单位（"1个"、"500克"、"2茶勺"）
     .replace(/[0-9０-９]+\s*[个只条根颗棵克gG斤两片块袋盒包把勺碗杯升毫升mlML寸朵瓣头束]*/g, '')
     // 末尾的用量词（"盐 少许"、"鸡精 少许"——库里真的有这种写法，名字里就带着量）
     .replace(/\s+(少许|适量|若干|多点|一点点|一把|一小把)$/g, '')
-    // 切法（末/丝/丁/片/块/段/条/粒/蓉/泥/馅）：不影响"是不是同一样东西"
-    .replace(/(末|碎|沫|丝|丁|片|块|段|条|粒|蓉|泥|馅)$/g, '')
+    // 名字里带空格的（"豆芽 一把"）：取前半段
+    .split(/\s+/)[0]
+    .replace(/[、,，。.\-—/／+＋*＊:：;；"'"'`~～!！?？]/g, '')
     .trim()
-  // 名字里带空格的（"豆芽 一把"）：取前半段
-  return text.split(/\s+/)[0] ?? text
 }
 
+/**
+ * 剥掉切法词（末/丝/丁/片/块/段/条/粒/蓉/泥/馅）——**但剥完不许短于两个字**。
+ *
+ * 那条长度底线是必须的，少了它会出**真事故**（2026-10-15 撞上）：
+ * `面条` 被剥成 `面`、`粉丝` 成 `粉`、`肉丝` 成 `肉`、`蛋清` 成 `蛋`——
+ * 每一个都变成了**另一样东西**，于是"只差 挂面"（服务端）与"真实缺 面"（我这份）
+ * 对不上，红的是核对而不是代码。服务端那份同样有这条线（`pantry.rules.stripPrep`，
+ * 那里写明"长度 2 的名字保护"）。
+ *
+ * 「独立核对」的独立指**不复用服务端那份规则**（名字表独立判断），
+ * 不表示可以写得比它粗糙——这条已经害过这个脚本两次（上一次是调料表列漏，
+ * 见 SEASONINGS 上面那段）。剥不剥是**算法的质量**，不是"另一个口径"。
+ */
+function stripPrep(raw) {
+  let text = raw
+  for (let round = 0; round < 4; round += 1) {
+    const before = text
+    for (const suffix of ['末', '碎', '沫', '丝', '丁', '片', '块', '段', '条', '粒', '蓉', '泥', '馅']) {
+      if (text.length > suffix.length + 1 && text.endsWith(suffix)) {
+        text = text.slice(0, -suffix.length)
+        break
+      }
+    }
+    if (text === before) break
+  }
+  return text
+}
+
+/**
+ * 代表名：**先查别名，再剥切法，剥完再查一次**（与服务端同一条顺序，理由也一样——
+ * 已知的名字优先于机械剥词）。顺序反过来会让别名表里的条目永远轮不到：
+ * 原先先剥再查，`面条` 已经被剥成 `面`，表里那对 `['面条','挂面']` 根本查不到。
+ */
 function key(raw) {
   const base = plainName(raw)
-  return ALIAS.get(base) ?? base
+  const known = ALIAS.get(base)
+  if (known) return known
+  const stripped = stripPrep(base)
+  return ALIAS.get(stripped) ?? stripped
 }
 
 const isSeasoning = (raw) => SEASONINGS.has(plainName(raw))

@@ -2436,6 +2436,11 @@ docker compose exec -T api sh -c "grep -c '能用上' dist/modules/discover/deci
 pnpm --dir services/api test                      # 386/386
 pnpm --dir services/api run test:http:decide       # 23/23
 
+> ⚠️ **这个脚本的"独立核对"自己出过两次假红**（2026-10-15 回归时又撞到一次）：服务端说"只差 挂面"、
+> 脚本算出"真实缺 面"——根因是脚本那份归一化**先把切法剥掉再查别名**，且**没有两字保护**，
+> 于是 `面条` 被剥成 `面`，表里那对 `['面条','挂面']` 永远轮不到。修法与规矩见 `RISKS.md` **R-62**。
+> **红的时候先确认红的是核对还是被测代码**（这个脚本的核对已经红过两次，两次都是核对自己错）。
+
 # 前端
 pnpm --dir apps/mobile run test                    # 470/470
 pnpm --dir apps/mobile run dev                     # http://127.0.0.1:5173/discover
