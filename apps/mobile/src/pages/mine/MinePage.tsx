@@ -5,6 +5,7 @@ import { logout, useAuthOptions, useMe, useUpdateProfile } from '@/api/auth'
 import { useCheckInStats } from '@/api/checkins'
 import { useFamily } from '@/api/family'
 import { useFavorites } from '@/api/favorites'
+import { useCooked } from '@/api/cooked'
 import { useTasteFamily } from '@/api/taste'
 import { useRecipes } from '@/api/recipes'
 import Heatmap from '@/components/ui/Heatmap'
@@ -40,6 +41,12 @@ export default function MinePage() {
   const checkins = useCheckInStats({ enabled: Boolean(family.data) })
   // 收藏数只用于入口那一行的副标题（F1-09）；没登录时后端 401，hook 自己不发请求
   const favorites = useFavorites()
+  /*
+   * 「做过的」那个数（F9-01）。这里要的是 `total`，但**故意用默认那份查询**（不是 limit=1）：
+   * 它和「我的菜谱」的「做过的」tab 是**同一个 query key**，于是用户点进那一行时列表已经在缓存里
+   * ——省掉一次转圈。为省几十条数据换一次白等的加载，不划算（家庭场景这个列表本来就不长）。
+   */
+  const cooked = useCooked()
   const taste = useTasteFamily()
   /*
    * 「我的菜谱」那一行的数量（F1-12）：借列表接口的第一页要 `total`，**不另开统计接口**——
@@ -71,6 +78,21 @@ export default function MinePage() {
     : family.data
       ? `${family.data.name} · ${family.data.memberCount} 位成员`
       : '还没建家：创建或用邀请码加入'
+
+  /*
+   * 「我的菜」那一行的副标题（F9-02 / D-076）：把"做过的"与"收藏的"两个数并起来说。
+   *
+   * 两个数据源都**可能还没回来**（或为空），所以不写成固定句式：
+   * 只报已经知道的那些；一个都没有时说这一项是干什么的（与原来两行各自的做法一致）。
+   * 不做"0 道"那种写法——它看着像"你没有"，而其实可能只是还没加载完。
+   */
+  const myDishesSub = (() => {
+    const parts: string[] = []
+    if (cooked.data && cooked.data.total > 0) parts.push(`做过的 ${cooked.data.total} 道`)
+    if (favorites.data && favorites.data.total > 0) parts.push(`收藏的 ${favorites.data.total} 道`)
+    if (own.data && (own.data.pages[0]?.total ?? 0) > 0) parts.push(`原创的 ${own.data.pages[0]?.total ?? 0} 道`)
+    return parts.length > 0 ? parts.join(' · ') : '做过的、收藏的和自己写的，都在这儿'
+  })()
 
   const save = () => {
     updateProfile.mutate(
@@ -162,24 +184,22 @@ export default function MinePage() {
           </div>
         )}
 
-        {/* 我收藏的菜（M1 / F1-09）：放在「我的打卡」上面——收藏是随手的，
-            比"回看照片"更常翻；而且它不需要家庭（收藏是私人偏好） */}
+        {/*
+          我的菜（F1-12 + F9-02，三视角见 D-076）：**一行**进「我的菜谱」，
+          里面三个 tab（做过的 / 收藏的 / 原创的）。
+
+          原先这里是**两行**（我收藏的菜 / 我的菜谱），加上新做的「我做过」就是三行——
+          而它们回答的是同一个问题："我自己跟菜有关的那些"。项目纪律是"一件事一个入口"
+          （D-066），所以收成一行。两个数合并成一个副标题："做过的 N 道 · 收藏 M 道"——
+          放两个数是因为它们是两个不同的维度（我做过什么 / 我要做什么），
+          而**标题只写一个**（"我的菜"），否则又变成两行的味道了。
+        */}
         <SectionTitle title="我的菜" />
-        <Link className="me-entry" to="/favorites" state={{ from: '/mine' }}>
-          <span className="me-entry__icon">❤️</span>
-          <span className="me-entry__text">
-            我收藏的菜
-            <small>{favorites.data ? `${favorites.data.total} 道` : '想做的时候来这儿找'}</small>
-          </span>
-          <span className="me-entry__arrow">›</span>
-        </Link>
-        {/* 我的菜谱（F1-12）：与收藏并列放在"我的菜"下——两行都是"翻我自己的菜"，
-            数量口径也一样（有数就报数，没有就说这项是干什么的） */}
         <Link className="me-entry" to="/recipes/mine" state={{ from: '/mine' }}>
-          <span className="me-entry__icon">📝</span>
+          <span className="me-entry__icon">🍽️</span>
           <span className="me-entry__text">
             我的菜谱
-            <small>{own.data ? `${own.data.pages[0]?.total ?? 0} 道 · 自己上传的` : '自己上传的菜，随时能改'}</small>
+            <small>{myDishesSub}</small>
           </span>
           <span className="me-entry__arrow">›</span>
         </Link>

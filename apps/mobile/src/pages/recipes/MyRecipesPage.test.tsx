@@ -10,11 +10,12 @@ import { useAuth } from '@/stores/auth'
 import MyRecipesPage from './MyRecipesPage'
 
 /**
- * 我的菜谱（F1-12）。要盯住的事：
- * ① **只问自己家的**——列表请求必须带 `mine=1`（不带就把整个库拉回来了）；
- * ② 卡片上认得出"这是自己上传的"（与库里导入的区分开，这正是用户提的那句）；
- * ③ 一条都没有时**给下一步**（这一页的价值就是往里加第一道菜），不是一片空白；
- * ④ 打不开时能重试。
+ * 我的菜谱（F1-12 + F9-02 三视角，见 D-076）。要盯住的事：
+ * ① **三个 tab 都在，且切换真的换内容**（做过的 / 收藏的 / 原创的）；
+ * ② **tab 在 URL 里**——点进详情再返回要回到原来那个 tab（组件 state 活不过路由跳转）；
+ * ③ 「原创的」那一支**只问自己家的**（请求必须带 `mine=1`，不带就把整个库拉回来了）；
+ * ④ 一条都没有时**给下一步**（这一页的价值就是往里加第一道菜），不是一片空白；
+ * ⑤ 打不开时能重试。
  */
 
 const clients: QueryClient[] = []
@@ -36,7 +37,7 @@ function mount() {
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', state: { from: '/mine' } }]}>
+      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', search: '?tab=mine', state: { from: '/mine' } }]}>
         <Routes>
           <Route path="/recipes/mine" element={<MyRecipesPage />} />
           <Route path="/recipes/new" element={<div data-testid="form-page" />} />
@@ -56,6 +57,10 @@ function mockGet(items: RecipeSummary[] | null, total = items?.length ?? 0) {
     }
     if (url === '/orders/options') return { data: { meals: [], statuses: [], dayOptions: [] } }
     if (url === '/family') return { data: null }
+    // 另外两个 tab 要的（「做过的」/「收藏的」）：这一份用例盯的是「原创的」，
+    // 但它们**在同一个组件里**，切 tab 时会被请求到（空数据即可）
+    if (url === '/discover/cooked') return { data: { items: [], total: 0, limit: 30 } }
+    if (url === '/favorites') return { data: { items: [], total: 0, limit: 200 } }
     throw new Error(`未预期的请求：${url}`)
   }) as never)
 }
@@ -148,4 +153,115 @@ it('顶部「＋ 新建菜谱」始终在（不能因为列表空了/加载中�
   expect(link.getAttribute('href')).toBe('/recipes/new')
   fireEvent.click(link)
   await waitFor(() => expect(screen.getByTestId('form-page')).toBeTruthy())
+})
+
+// ---------------------------------------------------------------------------
+// 三视角（F9-02 / D-076）：做过的 / 收藏的 / 原创的
+// ---------------------------------------------------------------------------
+
+/** 三个 tab 要的接口都回同一份"有内容"的数据，用来验"切了真的换内容" */
+/** 三个新 tab 都要登录态才有请求（`/discover/cooked` 与 `/favorites` 的 enabled 都看 token） */
+function signIn() {
+  useAuth.getState().setSession({
+    token: 't', refreshToken: 'r',
+    user: { id: 'u1', account: 'a', nickname: '妈妈', avatar: '🍳', email: null, createdAt: '' },
+  })
+}
+
+function mockAllThree() {
+  return vi.spyOn(apiClient, 'get').mockImplementation((async (url: string) => {
+    if (url === '/discover/cooked') {
+      return { data: { items: [{ id: 'c1', name: '我做的排骨', image: null, category: '荤菜', cuisine: '家常', tags: [], calories: 300, caloriesEstimated: false, cooked: 3, lastCookedOn: '2026-10-12', cookedLabel: '做过 3 次 · 最近 3 天前' }], total: 1, limit: 30 } }
+    }
+    if (url === '/favorites') {
+      return { data: { items: [{ id: 'f1', name: '我收的菜', image: null, category: '素菜', cuisine: '家常', tags: [], calories: 100, caloriesEstimated: false, favoritedAt: '2026-10-14T00:00:00.000Z' }], total: 1, limit: 200 } }
+    }
+    if (url === '/recipes') return { data: { items: [own], total: 1, page: 1, pageSize: 12 } }
+    if (url === '/orders/options') return { data: { meals: [], statuses: [], dayOptions: [] } }
+    if (url === '/family') return { data: null }
+    throw new Error(`未预期的请求：${url}`)
+  }) as never)
+}
+
+it('三个 tab 都在，默认（不给 tab 参数时）落在「做过的」', async () => {
+  signIn()
+  mockAllThree()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      {/* 不带 tab 参数 = 从「我的」页那一行进来的默认落点 */}
+      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', state: { from: '/mine' } }]}>
+        <Routes>
+          <Route path="/recipes/mine" element={<MyRecipesPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  expect(await screen.findByText('做过的')).toBeTruthy()
+  expect(screen.getByText('收藏的')).toBeTruthy()
+  expect(screen.getByText('原创的')).toBeTruthy()
+  // 默认那一个 tab 的内容（"做过的"）在屏上，另外两个的不在
+  expect(await screen.findByText('我做的排骨')).toBeTruthy()
+  expect(screen.queryByText('我收的菜')).toBeNull()
+  expect(screen.queryByText('外婆的红烧肉')).toBeNull()
+})
+
+it('切到「收藏的」真的换内容（不是把三个列表都堆在一起）', async () => {
+  signIn()
+  mockAllThree()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', state: { from: '/mine' } }]}>
+        <Routes>
+          <Route path="/recipes/mine" element={<MyRecipesPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  fireEvent.click(await screen.findByText('收藏的'))
+  expect(await screen.findByText('我收的菜')).toBeTruthy()
+  // 换过去了：原来那个 tab 的内容退场
+  await waitFor(() => expect(screen.queryByText('我做的排骨')).toBeNull())
+})
+
+it('**tab 在 URL 里**：从 URL 直接进「收藏的」也落在那个 tab（点详情返回时才回得来）', async () => {
+  signIn()
+  mockAllThree()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', search: '?tab=favorites', state: { from: '/mine' } }]}>
+        <Routes>
+          <Route path="/recipes/mine" element={<MyRecipesPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  expect(await screen.findByText('我收的菜')).toBeTruthy()
+  expect(screen.queryByText('我做的排骨')).toBeNull()
+})
+
+it('认不出的 tab 值落回第一个（URL 是不可信输入）', async () => {
+  signIn()
+  mockAllThree()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', search: '?tab=乱写的', state: { from: '/mine' } }]}>
+        <Routes>
+          <Route path="/recipes/mine" element={<MyRecipesPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  expect(await screen.findByText('我做的排骨')).toBeTruthy()
 })

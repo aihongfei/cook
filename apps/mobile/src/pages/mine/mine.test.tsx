@@ -134,17 +134,40 @@ it('保存把昵称、头像与邮箱发给后端，成功后收起表单并提�
 })
 
 /*
- * 「我的菜谱」入口（F1-12）：与「我收藏的菜」同一个形状（`.me-entry`），
- * 顺序上紧跟它放在「我的菜」这一节里——两行都是"翻我自己的菜"。
+ * 「我的菜」这一节（F1-12 + F9-02 / D-076）：从**两行收成一行**——
+ * 原先「我收藏的菜」与「我的菜谱」各占一行，加上新做的「我做过」就是三个入口，
+ * 而它们回答的是同一个问题（"我自己跟菜有关的那些"）。项目纪律是"一件事一个入口"（D-066），
+ * 现在只留这一行，进去是三个 tab。
  */
-it('「我的菜谱」入口在「我的菜」里，指向 /recipes/mine 并带上来源', async () => {
+it('「我的菜」收成一行：指向 /recipes/mine，且没有第二个并列入口', async () => {
   renderMine()
 
   const link = await screen.findByRole('link', { name: /我的菜谱/ })
   expect(link.getAttribute('href')).toBe('/recipes/mine')
   expect(link.classList.contains('me-entry')).toBe(true)
-  // 数量拿不到时给说明文字（与收藏那一行同一条口径：有数报数，没有就说它是干什么的）
-  expect(link.textContent).toContain('自己上传的菜，随时能改')
+  // 数量拿不到时给说明文字（有数报数，没有就说这一项是干什么的）
+  expect(link.textContent).toContain('做过的、收藏的和自己写的')
+
+  /*
+   * 这条是这次改动的重点：**「我收藏的菜」那一行不该再单独出现**。
+   * 收藏没有消失（它是「我的菜谱」里的第二个 tab），但入口只能有一个——
+   * 哪天有人把它加回「我的」页，用户面对的又是三个并列入口。
+   */
+  expect(screen.queryByRole('link', { name: /我收藏的菜/ })).toBeNull()
+
+  /*
+   * 「我的菜」这一节里**只有一个**入口。
+   *
+   * ⚠️ 判据不能用"文本里有没有'收藏'两个字"：那一行的副标题本身就把三个 tab 列出来了
+   * （"做过的、收藏的和自己写的"），所以它必然含"收藏"——第一版这么写，红了，
+   * 而产品是对的、断言是错的。要看的是**入口的个数**，不是词的出现。
+   */
+  const dishEntries = [...document.querySelectorAll('.me-entry')].filter((node) =>
+    /我的菜谱/.test(node.textContent ?? ''),
+  )
+  expect(dishEntries).toHaveLength(1)
+  // 那一行本身把三个视角说清了（用户不用点进去才知道里面有什么）
+  expect(dishEntries[0].textContent).toContain('做过的、收藏的和自己写的')
 })
 
 it('打卡块的张数只出现一处，且打卡墙入口在"连续打卡"同一行的右侧', async () => {  const FAMILY = {

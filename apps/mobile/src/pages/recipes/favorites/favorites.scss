@@ -32,9 +32,11 @@
  * 和点单历史的做法一致：**这个项目的横向边距统一由块自己带**。
  */
 .favorites__summary {
-  margin: 0 var(--spacing-page) 12px;
-  font-size: 12.5px;
+  margin: 10px var(--spacing-page) 12px;
+  font-size: 12px;
   color: var(--color-ink-3);
+  /* 靠右：与同一页「做过的」「原创的」两处计数同一个位置（见 tsx 里的说明） */
+  text-align: right;
 }
 
 .favorites__grid {
