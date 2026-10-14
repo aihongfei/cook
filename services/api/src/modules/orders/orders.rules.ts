@@ -117,6 +117,28 @@ export function confirmStampFor(target: OrderStatus): 'keep' | 'stamp' | 'clear'
   return 'keep'
 }
 
+/**
+ * 迁到 `target` 时，**「谁做好的」留痕**该怎么处理（M10 / F10-02，2026-10-15）。
+ *
+ * 与上面那条 `confirmStampFor` 是**同一时刻的第二件事**，所以也放在这里、同一个形状：
+ * 状态一改，两个留痕要一起写。分成两处各写一遍的话，迟早出现"状态是 DONE、
+ * 但没人认领"或者"已经取消了、还留着谁做好的"这种自相矛盾的行。
+ *
+ * 判据同样只有一条：**这一步是不是"做好了"**。
+ * - `stamp`  DONE：记上"谁、什么时候做好"——通知（F10-02）就是靠它才知道
+ *            "这一餐**刚**做好"（`updatedAt` 不行：它任何字段一改就动，见 schema 里的说明）；
+ * - `clear`  取消：这一餐作废了，"谁做的"不再成立；
+ * - `keep`   其余（选好了 / 开始做）：还没做好，也没作废，留痕不动。
+ *
+ * **不做成 `target === 'DONE' ? ...` 一行三元**：三岔的判据要能在单测里钉住
+ * （与 `confirmStampFor` 完全同一条理由）。
+ */
+export function doneStampFor(target: OrderStatus): 'keep' | 'stamp' | 'clear' {
+  if (target === 'DONE') return 'stamp'
+  if (target === 'CANCELED') return 'clear'
+  return 'keep'
+}
+
 /** 我在这个状态下能做哪几步（后端算好给前端，前端不硬编码状态机） */
 export function nextActionsFor(
   role: FamilyRole,

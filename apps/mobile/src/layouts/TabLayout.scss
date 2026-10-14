@@ -138,6 +138,8 @@
 }
 
 .tab-bar__item {
+  /* 红点（`.tab-bar__dot`）挂在这一层上，所以它必须是定位上下文 */
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -180,6 +182,37 @@
 .tab-bar__item.is-active .tab-bar__bar {
   opacity: 1;
   transform: none;
+}
+
+/*
+ * 未读红点（M10 / D-078）。
+ *
+ * 三件事刻意的：
+ * - **跟着文字走**（`position: absolute` 挂在那条 `Link` 上、落在文字右上角），
+ *   不盖在图标上：五个 Tab 图标都是线稿，盖上去会糊成一块；
+ * - **`pointer-events: none`**：它是个标记不是按钮，点它应该等于点这个 Tab——
+ *   否则在圆点上点一下会"什么都没发生"（本项目在"点不动的箭头"上踩过，见 D-066）；
+ * - **深浅用品牌暖色而不是正红**：这个应用整体是手绘暖色，一颗 #f00 会像系统推送气泡，
+ *   与界面语汇不搭（与 AI 悬浮球那条同一考虑）。
+ */
+.tab-bar__dot {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 15px;
+  color: var(--color-paper);
+  text-align: center;
+  background: #d4552b;
+  border: 1.5px solid var(--color-paper);
+  border-radius: 999px;
+  /* 落在文字右上角：`--spacing-tabbar` 那 58px 里，文字带在 34px 上下 */
+  transform: translateX(14px);
+  pointer-events: none;
 }
 
 /* 两角的手绘草枝 */
@@ -287,4 +320,20 @@
   .ai-ball__inner {
     animation: none;
   }
+}
+
+/*
+ * 视觉隐藏但读屏可读（红点的数量走这里说，见 tsx 里的说明）。
+ * 不用 `display: none`——那样读屏也读不到；这是"藏起来但仍在无障碍树里"的标准写法。
+ */
+.tab-bar__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip-path: inset(50%);
 }

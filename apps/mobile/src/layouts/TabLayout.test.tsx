@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, it } from 'vitest'
-import TabLayout from './TabLayout'
+import TabLayout, { tabBadge } from './TabLayout'
+
+/*
+ * 外壳在这一层问了未读数（M10 的 Tab 红点），所以渲染它需要一个 QueryClient。
+ * **不给 mock 数据**：这些用例验的是"哪个 Tab 亮"，红点有没有数据都不影响；
+ * 让它去请求（然后失败/挂起）反而是更接近真实的一种加载态。
+ */
 
 // 菜谱列表/详情不在底部 Tab 里，要借一个 Tab 表示"人在哪一块"。
 // 用户报的正是这块：从发现页「摇一道」过去，底栏亮的却是厨房——
@@ -13,14 +20,17 @@ import TabLayout from './TabLayout'
 // 只验其中一个的话，另一个坏了照样静默通过。
 
 function renderAt(pathname: string, state?: unknown) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter initialEntries={[{ pathname, state }]}>
-      <Routes>
-        <Route element={<TabLayout />}>
-          <Route path="*" element={<div data-testid="page" />} />
-        </Route>
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[{ pathname, state }]}>
+        <Routes>
+          <Route element={<TabLayout />}>
+            <Route path="*" element={<div data-testid="page" />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 
@@ -77,4 +87,39 @@ it('从菜谱小书自己跳过来（from 是菜谱小书）也回厨房——�
 it('非菜谱页不借 Tab：高亮完全交给路由（冰箱页只有冰箱亮）', () => {
   renderAt('/fridge')
   expect(activeTabs()).toEqual(['冰箱'])
+})
+
+/*
+ * 未读红点（M10 / D-078）。用户 2026-10-15 选定"各 Tab 各亮各的"。
+ *
+ * `tabBadge` 是纯函数，所以直接测它——壳里那些 DOM 断言验的是"亮哪个 Tab"，
+ * 而"该亮几条、归哪个 Tab"是另一件事，两件都值得钉住。
+ */
+it('红点归属：订单收「吃」那三类，冰箱只收「快过期」，其余 Tab 不亮', () => {
+  /*
+   * 数字**由后端按区域算好**（`unreadByArea`）——前端不再把四类"三加一"加一遍。
+   * 这里给的就是后端那种形状，不是把 kind 拆开让前端自己加。
+   */
+  const board = {
+    unread: 5,
+    unreadByArea: { order: 5, fridge: 3 },
+  } as never
+
+  expect(tabBadge('/order', board)).toBe(5)
+  expect(tabBadge('/fridge', board)).toBe(3)
+  // 这三块没有对应的提醒类别——不许"顺手"给它们也亮一个
+  expect(tabBadge('/kitchen', board)).toBe(0)
+  expect(tabBadge('/discover', board)).toBe(0)
+  expect(tabBadge('/mine', board)).toBe(0)
+})
+
+it('红点：数据没回来 / 没登录时不亮（不默认亮着）', () => {
+  expect(tabBadge('/order', undefined)).toBe(0)
+  expect(tabBadge('/order', { unread: 0, unreadByArea: {} } as never)).toBe(0)
+})
+
+it('红点：只有某一类未读时，另一个 Tab 不亮', () => {
+  const onlyExpiry = { unread: 1, unreadByArea: { fridge: 1 } } as never
+  expect(tabBadge('/fridge', onlyExpiry)).toBe(1)
+  expect(tabBadge('/order', onlyExpiry)).toBe(0)
 })

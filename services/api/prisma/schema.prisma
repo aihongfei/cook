@@ -21,44 +21,50 @@ model AppMeta {
 /// 密码只存 scrypt 派生结果，格式 `scrypt$N$r$p$salt$hash`（自描述，便于日后换参数或算法）。
 /// 口味/忌口档案（M8）与家庭成员关系（F2-05）后续都挂在这个 id 上。
 model User {
-  id             String          @id @default(cuid())
-  account        String          @unique @db.VarChar(64)
-  nickname       String          @db.VarChar(32)
+  id                 String              @id @default(cuid())
+  account            String              @unique @db.VarChar(64)
+  nickname           String              @db.VarChar(32)
   /// emoji 头像（与手绘风一致，见 apps/mobile 的 me__avatar）
-  avatar         String          @default("🐰") @db.VarChar(16)
-  passwordHash   String          @db.VarChar(255)
+  avatar             String              @default("🐰") @db.VarChar(16)
+  passwordHash       String              @db.VarChar(255)
   /// 找回密码用的邮箱。首版**不做验证**（不要求收信确认），只作为重置链接的收件地址。
-  email          String?         @unique @db.VarChar(160)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  refreshTokens  RefreshToken[]
-  passwordResets PasswordReset[]
+  email              String?             @unique @db.VarChar(160)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  refreshTokens      RefreshToken[]
+  passwordResets     PasswordReset[]
   /// 首版一个账号同时只属于一个家庭（DB 层用唯一约束兜住，见 FamilyMember）
-  membership     FamilyMember?
+  membership         FamilyMember?
   /// 这个账号点过的菜（M3）
-  orderItems     OrderItem[]
+  orderItems         OrderItem[]
   /// 这个账号的打卡照片（M9 / F9-07）
-  checkIns       CheckIn[]
+  checkIns           CheckIn[]
   /// 这个账号组过的常用组合（M4 / F4-04）
-  combos         Combo[]
+  combos             Combo[]
   /// 这个账号定下来的餐（M4 / F4-05 的确认留痕）
-  confirmedMeals MealOrder[]
+  confirmedMeals     MealOrder[]
+  /// 这个账号标成「做好了」的餐（M10 / F10-02）
+  doneMeals          MealOrder[]         @relation("MealDoneBy")
+  /// 这个账号的消息提醒开关与已读位置（M10 / F10-04）
+  notificationPref   NotificationPref?
+  /// 这个账号的通知历史（M10 的事件日志）
+  notificationEvents NotificationEvent[]
   /// 这个账号收藏的菜（M1 / F1-09）
-  favorites      Favorite[]
+  favorites          Favorite[]
   /// 这个账号放进冰箱的食材（M6 / F6-01）
-  fridgeItems    FridgeItem[]
+  fridgeItems        FridgeItem[]
   /// 这个账号让 AI 干过的写库动作（F16-10 / AI 助手）——撤销要认人
-  aiActions      AiAction[]
+  aiActions          AiAction[]
   /// 这个账号上传的自建菜谱（F1-12）
-  recipes        Recipe[]
+  recipes            Recipe[]
   /// 这个账号传给 AI 的图片附件
-  aiAttachments  AiAttachment[]
+  aiAttachments      AiAttachment[]
   /// 这个账号的口味与健康档案（M8 / F8-01、F8-02）
-  tasteProfile   TasteProfile?
+  tasteProfile       TasteProfile?
   /// 这个账号勾掉的采购条目（M7 / F7-03）
-  shoppingChecks ShoppingCheck[]
+  shoppingChecks     ShoppingCheck[]
   /// 这个账号加到采购清单里的条目（M7 / F7-03）
-  shoppingExtras ShoppingExtra[]
+  shoppingExtras     ShoppingExtra[]
 
   @@index([createdAt])
 }
@@ -79,29 +85,29 @@ model PasswordReset {
 
 /// 家庭：一人创建，其他人凭六位邀请码加入（D-021）。
 model Family {
-  id            String         @id @default(cuid())
-  name          String         @db.VarChar(32)
+  id             String          @id @default(cuid())
+  name           String          @db.VarChar(32)
   /// 六位邀请码，字符集去掉了易混的 I/O/0/1；长期有效，掌勺人可重置（重置即旧码失效）
-  inviteCode    String         @unique @db.VarChar(8)
+  inviteCode     String          @unique @db.VarChar(8)
   /// 家庭级共享开关（F2-07）：关掉后家庭成员之间不互相可见（M3 起由各功能读取）
-  shared        Boolean        @default(true)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  members       FamilyMember[]
+  shared         Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  members        FamilyMember[]
   /// 这一家的点单（M3）
-  mealOrders    MealOrder[]
+  mealOrders     MealOrder[]
   /// 这一家的打卡照片（M9 / F9-03）
-  checkIns      CheckIn[]
+  checkIns       CheckIn[]
   /// 这一家的常用组合（M4 / F4-04）
-  combos        Combo[]
+  combos         Combo[]
   /// 这一家的冰箱食材（M6 / F6-01）
-  fridgeItems   FridgeItem[]
+  fridgeItems    FridgeItem[]
   /// 这一家自建的菜谱（F1-12）
-  recipes       Recipe[]
+  recipes        Recipe[]
   /// 这一家的 AI 写库记录（F16-10）
-  aiActions     AiAction[]
+  aiActions      AiAction[]
   /// 这一家的 AI 附件（对话里的图片）
-  aiAttachments AiAttachment[]
+  aiAttachments  AiAttachment[]
   /// 这一家的采购清单勾选（M7 / F7-03）
   shoppingChecks ShoppingCheck[]
   /// 这一家自己往采购清单上加的条目（M7 / F7-03）
@@ -241,6 +247,17 @@ model MealOrder {
   confirmedById String?
   confirmedBy   User?       @relation(fields: [confirmedById], references: [id], onDelete: SetNull)
   confirmedAt   DateTime?
+  /// 谁把这一餐标成「做好了」（M10 / F10-02 的通知要认这个，2026-10-15）+ 什么时候。
+  ///
+  /// 为什么不能拿 `updatedAt` 顶替：它**任何**字段一改就动（改人数、上传成品照都算），
+  /// 而通知要回答的是"这一餐**刚**做好"——拿一个会乱动的时间戳当判据，误报是必然的。
+  /// 与上面那对 `confirmedById/At` 对称：一个是"谁定的菜单"，一个是"谁做好的"。
+  ///
+  /// 「做好了」是终态（不能再加菜、不能取消），所以这两个值一旦写上就不会变；
+  /// 仍然按 `confirmStampFor` 的同一形状给了 clear 分支——状态机哪天允许退回去，这里不用再想一遍。
+  doneById      String?
+  doneBy        User?       @relation("MealDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+  doneAt        DateTime?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
   items         OrderItem[]
@@ -533,15 +550,15 @@ model TasteProfile {
 /// 上周勾掉的"葱"如果这周还亮着勾，用户会以为自己买过了——**宁可让他重新勾一次，
 /// 也不要拿上周的勾当这周的**。过期行在每次读取时顺手删掉（不留垃圾）。
 model ShoppingCheck {
-  id        String   @id @default(cuid())
-  familyId  String
-  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  familyId    String
+  family      Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
   /// 勾掉的那样东西（食材名，与清单上的 `name` 同一口径）
-  name      String   @db.VarChar(40)
+  name        String   @db.VarChar(40)
   /// 谁在超市里划掉的（共享关掉时只认自己勾的，与清单可见性同一套闸门）
   checkedById String
-  checkedBy User   @relation(fields: [checkedById], references: [id], onDelete: Cascade)
-  checkedAt DateTime @default(now())
+  checkedBy   User     @relation(fields: [checkedById], references: [id], onDelete: Cascade)
+  checkedAt   DateTime @default(now())
 
   /// 同一家、同一样只留一条：勾是一个状态，不是一串事件
   @@unique([familyId, name])
@@ -570,4 +587,115 @@ model ShoppingExtra {
   /// 同一家同名只留一条（与冰箱同名同区只留一条同一规矩：两条同名会让人不知道怎么算）
   @@unique([familyId, name])
   @@index([familyId, createdAt])
+}
+
+/// 消息提醒的**四个开关**（M10 / F10-04，2026-10-15）。
+///
+/// 为什么是一张自己的表，而不是往 `TasteProfile` 上加几个字段：那两件事没有关系。
+/// 口味是"家里吃什么"，这里是"什么该打扰我"——合表会让两边都得读一份自己不需要的数据，
+/// 而且以后任一边加字段都要动同一行。
+///
+/// **四个开关各自独立**（`F10-01` 菜单安排 / `F10-02` 饭已做好 / `F10-03` 快过期 / 备菜）：
+/// 一个总开关看着简洁，但用户真正想关的往往是**其中一个**——"饭好了要告诉我、
+/// 别天天催我备菜"是很常见的组合。关掉一个不影响其余三个。
+///
+/// **已读状态不在这张表上**——它逐条记在 `NotificationEvent.readAt` 里
+/// （用户 2026-10-15：「需要真的已读时才清」；按"推进水位线"设计过一版，被这句话否掉了）。
+/// 这里**只存"什么该打扰我"**。
+///
+/// 一行不给（用户从没打开过通知中心 / 从没改过开关）时按**默认全开**处理，
+/// 这是"没反对"而不是"同意过"——所以界面上那四个开关必须如实展示当前生效值。
+model NotificationPref {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /**
+   * 这里**只有四个开关**——"已读"不在这张表上，而是**逐条**记在 `NotificationEvent.readAt` 上。
+   * 用户 2026-10-15 把这件事说得很准：「需要**真的已读**时才清」「通知那边点进去才清除」。
+   * 所以判据不是"他进过哪个区域"（那样只要点一下底栏，他没看过的那些也跟着灭了——
+   * 红点最坏的失败方式就是说谎），而是"这一条他有没有点开过"。
+   */
+
+  /// F10-01 菜单安排：某一天某一餐的菜单定下来了
+  mealPlan Boolean @default(true)
+  /// F10-02 饭已做好：我点过菜的那一餐做好了
+  mealDone Boolean @default(true)
+  /// F10-03 之一：冰箱里有东西快过期 / 已经过期
+  expiry   Boolean @default(true)
+  /// F10-03 之二：接下来几天有餐次还空着（备菜提醒）
+  prep     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// 通知的事件日志（M10，2026-10-15；用户要求"同一个账号换设备了也需要都留存"）。
+///
+/// ## 为什么有了"现状看板"还要这张表
+///
+/// 看板（`GET /notifications` 里现算的那些）回答的是"**现在**家里有什么事"，
+/// 它有几条**刻意的自我清理**：那一餐被取消，「菜单定下来了」那条就没了；超过 30 天的餐次不进列表。
+/// 那是看板该有的样子（它永远等于事实），但它**不是历史**——
+/// 用户要的是"我过去收到过哪些通知，换设备也要都还在"。
+///
+/// 两者是**不同的东西**，不违反"同一个事实只存一份"：
+/// - 看板说的是"这一餐现在是什么状态"（事实的唯一来源仍是 `MealOrder`）；
+/// - 日志说的是"**某时刻发生过一件事，并且通知了谁**"——这是一件**它自己的**事实，
+///   不会因为那一餐后来被取消就不再成立（它就是发生过）。
+///
+/// ## 谁写、什么时候写
+///
+/// - **有明确时刻的事件**（菜单定下来、饭做好了）：在**状态变更的那一刻**写，
+///   与那次变更同一个请求里（见 `NotificationsService.recordMealEvent`）；
+/// - **状态型的提醒**（快过期、该备菜）没有"发生的那一刻"——它们是"现在这个状态"。
+///   所以按天**懒补一条**（`expiry:<userId>:<日期>` 这种确定性 id + upsert，重复读不会写重）。
+///   语义是诚实的："那天你第一次看到时，确实有东西快过期"——
+///   哪怕你后来把那盒奶喝了，这句话在当时也是真的。
+///
+/// ## 为什么按账号存、不是按家庭存 + 已读表
+///
+/// 提醒是**给我的**（开关也按账号，用户 2026-10-15 选定）。一家最多 10 人，
+/// 写入时扇出十行毫无压力，而"按家庭存 + 每人一张已读表"要多一次 join、
+/// 且每个查询都得记得带上那层关系——换来的是省下几行数据，不划算。
+model NotificationEvent {
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 家庭（清库/排查时按家看；用户退出家庭后这些行仍留着——那是他自己的历史）
+  familyId String
+
+  /// 四类之一（`plan` / `done` / `expiry` / `prep`），与看板同一套 kind（前端共用一份图标表）
+  kind   String  @db.VarChar(12)
+  /// 标题与副标题：**当时**拼好存下来的那句
+  ///
+  /// 为什么不存"事实引用"、渲染时再拼：日志要能如实回放**当时那句话**。
+  /// 存引用的话，那一道菜改了名、这一餐被取消了，回看历史时句子就跟着变了——
+  /// 而那正是"历史"不该有的行为（见 `RUNBOOK.md` R-069 里那条反证）。
+  title  String  @db.VarChar(120)
+  body   String? @db.VarChar(200)
+  /// 点进去看哪儿（当时定的去处）
+  toPath String  @db.VarChar(64)
+
+  /// 事件时刻（排序与保留策略都用它）
+  at DateTime
+
+  /// 这一条**什么时候被读过**（逐条，不是按区域一笔勾掉）
+  ///
+  /// 用户 2026-10-15：「需要**真的已读**时才清」「通知那边点进去才清除通知」
+  /// —— 点开那一条（并跳到它指的地方）才算读过它；另有「一键已读」把当时那一批一起推平。
+  /// null = 还没读过。底栏红点 = 这一区未读的**条数**。
+  readAt DateTime?
+
+  /// 幂等键：同一件事对同一个人只写一条
+  ///
+  /// 有明确时刻的事件用 `plan:<mealKey>:<userId>`；按天懒补的用 `expiry:<userId>:<日期>`。
+  /// **不能只靠"读的时候查一下有没有"**：并发两次请求会各写一条（本项目在
+  /// "并发的两次点菜各建一餐"上踩过，那次是靠唯一约束兜住的）。
+  dedupeKey String @db.VarChar(160)
+
+  createdAt DateTime @default(now())
+
+  @@unique([dedupeKey])
+  @@index([userId, at])
 }

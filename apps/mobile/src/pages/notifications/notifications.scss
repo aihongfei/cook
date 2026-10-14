@@ -1,0 +1,166 @@
+/* 通知中心（M10 / D-078）。列表用的还是 `.rows` / `.row` 那套（与「我的」页同一张卡片），
+   只在"未读"与那小标上多一点自己的东西——**不另造一套行样式**：
+   两处长得不一样的话，用户会以为其中一个是另一种东西。 */
+
+.notifications {
+  padding-bottom: 18px;
+}
+
+.notifications__summary {
+  /* 边距由 `.notifications__head` 给（它与「全部已读」并排），这里只管字 */
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+
+.notifications__list,
+.notifications__prefs {
+  margin-top: 8px;
+}
+
+/*
+ * 一条提醒是 `<button>` 不是 `<div>`：**整行可点**（点进去就是该处理的那件事）。
+ * 所以要把浏览器给按钮的默认样子清掉——否则它会是灰底方角，与上面那张纸卡片不是一套。
+ */
+.notifications__row {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+}
+
+.notifications__row:active {
+  opacity: 0.6;
+}
+
+/* 未读的那条：左边一条品牌色竖标。**不用加粗**——中文加粗在小字号下会糊 */
+.notifications__row.is-unread .row__main {
+  border-left: 3px solid var(--color-brand);
+  padding-left: 9px;
+  margin-left: -12px;
+}
+
+.notifications__tag {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  font-size: 10.5px;
+  color: var(--color-ink-3);
+  background: var(--color-cream-2);
+  border-radius: 999px;
+}
+
+/* 四类提醒各有自己的底色（图标块），扫一眼就知道是哪一类 */
+.row__icon.is-plan { background: #fdeee0; }
+.row__icon.is-done { background: #f7e6dc; }
+.row__icon.is-expiry { background: #fbf2d8; }
+.row__icon.is-prep { background: #e9f1e2; }
+
+.notifications__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+
+.notifications__go {
+  width: auto;
+  padding: 9px 20px;
+  text-decoration: none;
+}
+
+/*
+ * 原生 checkbox 改成小开关的样子。
+ *
+ * 用 `appearance: none` + 自己画：这是全站唯一一个"设置项开关"，
+ * 而原生 checkbox 在暗色系统主题下会变成另一种颜色（与页面不搭）。
+ * 尺寸 22×40 是拇指能稳点的最小值（再小就会点空）。
+ */
+.notifications__switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 22px;
+  margin: 0;
+  cursor: pointer;
+  appearance: none;
+  background: var(--color-line);
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+
+.notifications__switch::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  content: '';
+  background: var(--color-paper);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgb(120 90 60 / 30%);
+  transition: transform 0.15s ease;
+}
+
+.notifications__switch:checked {
+  background: var(--color-brand);
+}
+
+.notifications__switch:checked::after {
+  transform: translateX(18px);
+}
+
+.notifications__switch:disabled {
+  opacity: 0.5;
+}
+
+/*
+ * 那条边界说明（"提醒只在这个应用里看得到"）。
+ *
+ * **必须留着**：没有推送通道时，「饭已做好」这类别人触发的提醒**不会有手机弹窗**。
+ * 不说的话，用户会以为提醒坏了（他期待的是"手机响一下"）。
+ * 说法要具体到"什么会弹、什么不会"，不能写成"部分功能受限"那种谁都不懂的话。
+ */
+.notifications__note {
+  margin: 10px var(--spacing-page) 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-3);
+}
+
+/* 数量那一行与「全部已读」并排（按钮靠右，与同一页「做过的」那种居中的说明不同：
+   这不是说明，是一个能点的动作，所以贴着右边不抢视线） */
+.notifications__head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px var(--spacing-page) 0;
+}
+
+.notifications__head .notifications__summary {
+  margin: 0;
+}
+
+.notifications__read-all {
+  flex: 0 0 auto;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-brand);
+  cursor: pointer;
+  background: none;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.notifications__read-all:active {
+  opacity: 0.6;
+}
+
+.notifications__read-all:disabled {
+  opacity: 0.5;
+}

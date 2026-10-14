@@ -7,7 +7,7 @@ import { TasteService } from '../taste/taste.service'
 import { judgeDish, type TasteJudgement } from '../taste/taste.rules'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
-  aggregateItems, canAddItem, canRepeatFrom, confirmStampFor, dateKey, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
+  aggregateItems, canAddItem, canRepeatFrom, confirmStampFor, dateKey, doneStampFor, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
   parseHistoryQuery, historyRange, hasEarlier, weekdayOf,
   parseItemTarget, parseBulkRecipeIds, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, planRepeat, revivedStatus, splitExisting,
   todayKey, todayMealState, visibleToMember,
@@ -468,6 +468,9 @@ export class OrdersService {
      * 确认留痕（M4 / F4-05）：定下这一版菜单时记「谁、什么时候」；取消时清掉（这一版作废了）；
      * 开始做/做好了不动它（做的还是那一版菜单）。判据在 orders.rules 的 confirmStampFor，
      * 服务层只负责把它翻成写入的字段值——三岔的判断不写在这里，单测才钉得住。
+     *
+     * 「谁做好的」留痕（M10 / F10-02）与它是**同一时刻的第二件事**，所以一起写：
+     * 分开两处的话迟早出现"状态是已做好、但没人认领"那种自相矛盾的行。
      */
     const stampFor = confirmStampFor(target)
     const stamp =
@@ -477,7 +480,15 @@ export class OrdersService {
           ? { confirmedById: null, confirmedAt: null }
           : {}
 
-    await this.prisma.mealOrder.update({ where: { id: mealOrder.id }, data: { status: target, ...stamp } })
+    const doneFor = doneStampFor(target)
+    const done =
+      doneFor === 'stamp'
+        ? { doneById: userId, doneAt: new Date() }
+        : doneFor === 'clear'
+          ? { doneById: null, doneAt: null }
+          : {}
+
+    await this.prisma.mealOrder.update({ where: { id: mealOrder.id }, data: { status: target, ...stamp, ...done } })
     return this.card(mealOrder.id, userId)
   }
 

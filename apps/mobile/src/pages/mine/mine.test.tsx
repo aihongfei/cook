@@ -39,7 +39,14 @@ const ME = {
   createdAt: new Date().toISOString(),
 }
 
-function mockGet(family: unknown = null) {
+/**
+ * 装一份 `apiClient.get` 的假实现。
+ *
+ * `unread` 给"未读几条"（M10 那一行的副标题要它）。
+ * **不做第二次 spyOn 去覆盖某一条**：spyOn 叠在已 spy 的方法上时，
+ * 里层那份先匹配上，外层的实现根本轮不到（第一次写这条用例就是这么红的）。
+ */
+function mockGet(family: unknown = null, unread = 0) {
   vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
     if (url === '/auth/options') {
       return Promise.resolve({
@@ -53,6 +60,13 @@ function mockGet(family: unknown = null) {
     }
     if (url === '/auth/me') return Promise.resolve({ data: ME } as never)
     if (url === '/family') return Promise.resolve({ data: family } as never)
+    /*
+     * 未读数（M10）：那一行的副标题用它。默认**给 0**——这些用例里它是个背景数据，
+     * 不是被测行为；要验"有未读时显示几条"就单独给一份（见下面那条）。
+     */
+    if (url === '/notifications') {
+      return Promise.resolve({ data: { items: [], unread, unreadByKind: {}, prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true } } } as never)
+    }
     if (url === '/checkins/stats') {
       return Promise.resolve({
         data: {
@@ -225,19 +239,41 @@ it('口味与忌口只有一个入口（在「我的设置」里），且它真�
   expect(links[0].className).toContain('row')
 })
 
-it('设置里不画点不动的箭头：没做的功能标「还没做」，AI 设置整节不再出现', async () => {
+it('消息提醒那一行是真入口（M10 落地后不再是「还没做」的占位）', async () => {
   renderMine()
   await screen.findByRole('link', { name: /口味/ })
 
-  // 消息提醒（M10）还没做：留一行说明，但**不是链接、没有箭头**，而是一颗「还没做」
-  const soon = screen.getByText('家庭消息提醒').closest('.row') as HTMLElement
-  expect(soon.className).toContain('row--soon')
-  expect(soon.querySelector('.row__arrow')).toBeNull()
-  expect(soon.querySelector('.row__tag')?.textContent).toBe('还没做')
-  expect(soon.closest('a')).toBeNull()
+  /*
+   * 这一行原来是"还没做"的占位（不画箭头、标一颗 tag），2026-10-15 M10 落地后变成真入口。
+   * 要盯住的是**它真的能点**——占位变入口时最容易忘的就是把它接上，
+   * 于是用户看到一个点了没反应的箭头（那正是这个项目在 D-066 定下的规矩要防的事）。
+   */
+  const link = screen.getByText('家庭消息提醒').closest('a') as HTMLAnchorElement
+  expect(link).toBeTruthy()
+  expect(link.getAttribute('href')).toBe('/notifications')
+  expect(link.querySelector('.row__arrow')).toBeTruthy()
+  // 没有未读时说清这一页管什么（不写"0 条"）
+  expect(link.querySelector('.row__sub')?.textContent).toContain('菜单安排')
 
   // AI 是部署时配的（.env / D-009），界面上没有可改的东西 —— 那两行连同整节都下线了
   expect(screen.queryByText('AI 模型配置')).toBeNull()
   expect(screen.queryByText('提示词模板')).toBeNull()
   expect(screen.queryByText('AI 设置')).toBeNull()
+})
+
+it('有未读时那一行的副标题报数（那是用户点它的理由）', async () => {
+  // beforeEach 已经装了一份 unread=0 的；这里换一份有 3 条未读的
+  vi.restoreAllMocks()
+  mockGet(null, 3)
+  renderMine()
+
+  /*
+   * 等**副标题变**，不是等那一行出现：那一行在查询回来之前就渲染了（副标题先落到
+   * "这一页管什么"那句默认文案）。第一次写这条用例就是栽在这儿——
+   * 拿到的是加载态那一帧，看起来像"未读没生效"。
+   */
+  await waitFor(() => {
+    const link = screen.getByText('家庭消息提醒').closest('a') as HTMLAnchorElement
+    expect(link.querySelector('.row__sub')?.textContent).toBe('3 条新消息')
+  })
 })

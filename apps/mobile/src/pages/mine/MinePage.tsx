@@ -6,6 +6,7 @@ import { useCheckInStats } from '@/api/checkins'
 import { useFamily } from '@/api/family'
 import { useFavorites } from '@/api/favorites'
 import { useCooked } from '@/api/cooked'
+import { useNotifications } from '@/api/notifications'
 import { useTasteFamily } from '@/api/taste'
 import { useRecipes } from '@/api/recipes'
 import Heatmap from '@/components/ui/Heatmap'
@@ -27,7 +28,7 @@ import './mine.scss'
  *   现在只留「我的设置」里这一行，**且它真的能点**（带实时状态：几项忌口 / 几位家人还没写）；
  * - **没做的东西不画成能点的样子**：原来「AI 设置」那一整节（AI 模型配置 / 提示词模板）两行都带箭头、点了毫无反应——
  *   而 AI 本来就是**部署时用 `.env` 配的**（D-009），不是用户能在界面上改的东西。
- *   已整节下线；消息提醒（M10）还没开工，保留一行但**没有箭头、标着「还没做」**，不装成入口。
+ *   已整节下线；消息提醒（M10）**已落地**（2026-10-15），那一行现在是真入口、副标题带未读数。
  *   规矩：设置行**要么能点，要么明说还没做**——画一个点不动的箭头，用户只会以为 App 坏了。
  */
 export default function MinePage() {
@@ -47,6 +48,8 @@ export default function MinePage() {
    * ——省掉一次转圈。为省几十条数据换一次白等的加载，不划算（家庭场景这个列表本来就不长）。
    */
   const cooked = useCooked()
+  /* 未读数只用于「家庭消息提醒」那一行的副标题（M10）；与外壳的红点是同一份查询 */
+  const notifications = useNotifications()
   const taste = useTasteFamily()
   /*
    * 「我的菜谱」那一行的数量（F1-12）：借列表接口的第一页要 `total`，**不另开统计接口**——
@@ -268,17 +271,24 @@ export default function MinePage() {
             <span className="row__arrow">›</span>
           </Link>
           {/*
-            消息提醒（M10）还没做：**不画箭头、不装成入口**，但要留一句话——
-            "以后会有这个设置"本身是有用的信息，而一个点不动的箭头只会让人以为坏了。
+            消息提醒（M10 / F10-04）：**原来是"还没做"的占位行，现在接上真入口**。
+            副标题带上未读数——那是这一行唯一"会变"的东西，也是用户点它的理由。
+            没有未读时说清这一页管什么（与家庭共享那一行同一口径：有数就报数，
+            没数就说它是干什么的）。**不写"0 条"**：那看着像"你没有消息"，
+            而其实可能只是还没加载完（与「我的菜」那一行同一条）。
           */}
-          <div className="row row--soon">
+          <Link className="row" to="/notifications" state={{ from: '/mine' }}>
             <div className="row__icon">🔔</div>
             <div className="row__main">
               家庭消息提醒
-              <div className="row__sub">菜单安排与饭已做好通知</div>
+              <div className="row__sub">
+                {notifications.data && notifications.data.unread > 0
+                  ? `${notifications.data.unread} 条新消息`
+                  : '菜单安排、饭已做好、快过期、该备菜'}
+              </div>
             </div>
-            <span className="row__tag">还没做</span>
-          </div>
+            <span className="row__arrow">›</span>
+          </Link>
         </div>
 
         <button

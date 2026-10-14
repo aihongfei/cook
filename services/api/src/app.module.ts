@@ -11,6 +11,7 @@ import { FamilyModule } from './modules/family/family.module'
 import { FavoritesModule } from './modules/favorites/favorites.module'
 import { FridgeModule } from './modules/fridge/fridge.module'
 import { HealthModule } from './modules/health/health.module'
+import { NotificationsModule } from './modules/notifications/notifications.module'
 import { OrdersModule } from './modules/orders/orders.module'
 import { RecipesModule } from './modules/recipes/recipes.module'
 import { ShoppingModule } from './modules/shopping/shopping.module'
@@ -31,6 +32,7 @@ import { TasteModule } from './modules/taste/taste.module'
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
     HealthModule,
     AiModule,
+    NotificationsModule,
     AuthModule,
     FamilyModule,
     OrdersModule,

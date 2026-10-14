@@ -3,11 +3,35 @@ import { Link, Outlet, useLocation } from 'react-router-dom'
 import { LeafSprig } from '@/components/icons/TabIcons'
 import AiAssistantBall from '@/components/ai/AiAssistantBall'
 import AiAssistantSheet from '@/components/ai/AiAssistantSheet'
+import { useNotifications, type NotificationBoard } from '@/api/notifications'
 import { useAiAssistantSession } from '@/stores/ai-assistant-session'
 import { tabs } from '@/config/tabs'
 import { tabOf } from '@/pages/back-link'
 import { usePageTurn } from './use-page-turn'
 import './TabLayout.scss'
+
+/**
+ * 某个 Tab 上该亮几条（M10 / D-078）。
+ *
+ * **抽成纯函数是为了能单独测**：这里有三条容易写错的判断——
+ * ① 「该备菜」归**订单** Tab（它点进去是备菜页，而备菜是从订单那一支进去的）；
+ * ② 没加入家庭 / 没登录 / 数据还没回来时**一条都不亮**（不能默认亮着）；
+ * ③ 数字上限：超过 9 条显示 `9+`（三位数会把底栏撑变形）。
+ *
+ * 各 Tab 的分工（用户 2026-10-15 选定"各 Tab 各亮各的"）：
+ * - 订单 ← 菜单安排 + 饭已做好 + 该备菜（都是"吃"这件事）
+ * - 冰箱 ← 快过期
+ * - 其余三个 Tab 不亮（厨房/发现/我的没有对应的提醒类别）
+ */
+export function tabBadge(path: string, board: NotificationBoard | undefined): number {
+  if (!board) return 0
+  // 数字由后端按区域算好（`unreadByArea`）——前端不再"三加一"加一遍：
+  // 那种算术写两处，迟早有一处漏改（表现是"订单的红点少了一个"）
+  const { unreadByArea } = board
+  if (path === '/order') return unreadByArea.order ?? 0
+  if (path === '/fridge') return unreadByArea.fridge ?? 0
+  return 0
+}
 
 /**
  * 应用外壳：内容区（滚动） + 底部 5 Tab 导航。
@@ -42,6 +66,9 @@ export default function TabLayout() {
    */
   const turnClass = usePageTurn()
 
+  // 未读红点（M10）：在**外壳**这一层问一次，五个 Tab 共用这一份（不在每个 Tab 里各问一次）
+  const notifications = useNotifications()
+
   return (
     <div className="tab-layout">
       <main ref={bodyRef} className="tab-layout__body">
@@ -64,6 +91,7 @@ export default function TabLayout() {
            * 改成自己算，两个高亮（class 与 aria-current）就同源于一个判断，不会再分叉。
            */
           const active = path === borrowedTab || pathname === path || pathname.startsWith(`${path}/`)
+          const badge = tabBadge(path, notifications.data)
           return (
             <Link
               key={path}
@@ -73,6 +101,23 @@ export default function TabLayout() {
             >
               <Icon width={23} height={23} />
               <span>{label}</span>
+              {/*
+                未读红点（M10 / F10-04，D-078）：**各 Tab 各亮各的**（用户 2026-10-15 选定）——
+                「菜单/饭好了」亮订单、「快过期」亮冰箱、「该备菜」也亮订单（它点进去是备菜页，
+                而备菜是从订单那一支进去的）。放在文字**右上角**而不是图标上：图标是线稿，
+                盖上去会糊；而且这个位置与"角标"的通用直觉一致。
+                `aria-label` 里说清有几条——读屏用户看不到那个圆点。
+              */}
+              {badge > 0 && (
+                <i className="tab-bar__dot" aria-hidden="true">
+                  {badge > 9 ? '9+' : badge}
+                  {/*
+                    数量要让读屏也能听到：`<i>` 上的 aria-label 在多数读屏里不被朗读
+                    （它是装饰元素），所以数量以一段视觉隐藏的文字另说一遍。
+                  */}
+                </i>
+              )}
+              {badge > 0 && <span className="tab-bar__sr">{`${label}有 ${badge} 条未读`}</span>}
               <i className="tab-bar__bar" />
             </Link>
           )
