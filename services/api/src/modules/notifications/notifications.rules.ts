@@ -209,7 +209,12 @@ export function buildNotifications(input: NotificationInput, now: Date = new Dat
       title: `${fact.whenLabel}的菜单定下来了`,
       body: `${fact.byName}定了 ${fact.dishCount} 道菜`,
       at: fact.at.toISOString(),
-      to: `/order`,
+      /*
+       * 直接进**那一餐的详情**（用户 2026-10-15：「通知可以点击跳转到对应的地方去」）。
+       * 原先给的是 `/order` 列表页——用户还得在里面找是哪一餐。既然详情页按 `mealKey`
+       * 取数、而这条提醒的 id 里就有 `mealKey`，没有理由让他自己找。
+       */
+      to: `/order/${fact.mealKey}`,
       tag: '菜单',
     })
   }
@@ -233,7 +238,8 @@ export function buildNotifications(input: NotificationInput, now: Date = new Dat
       title: `${fact.whenLabel}做好了`,
       body: `你点的 ${dishes}${more} 可以吃了`,
       at: fact.at.toISOString(),
-      to: `/order`,
+      // 同上：进**这一餐**的详情，而不是列表页里自己找
+      to: `/order/${fact.mealKey}`,
       tag: '做好了',
     })
   }

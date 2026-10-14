@@ -23,6 +23,7 @@ import RecipeFormPage from '@/pages/recipes/RecipeFormPage'
 import RecipeListPage from '@/pages/recipes/RecipeListPage'
 import RecipeDetailPage from '@/pages/recipes/RecipeDetailPage'
 import OrderPage from '@/pages/order/OrderPage'
+import OrderDetailPage from '@/pages/order/OrderDetailPage'
 import HistoryPage from '@/pages/order/history/HistoryPage'
 import RequireAuth from './RequireAuth'
 
@@ -56,7 +57,12 @@ export const router = createBrowserRouter([
       { path: 'cooked', element: <CookedPage /> },
       { path: 'notifications', element: <NotificationsPage /> },
       { path: 'order', element: <OrderPage /> },
+      /*
+       * 静态路径写在 `:mealKey` 之前：`/order/history` 与 `/order/2026-10-15-DINNER`
+       * 形状不同、v6 本来就分得开，但读路由表的人不必先知道匹配规则才敢确认。
+       */
       { path: 'order/history', element: <HistoryPage /> },
+      { path: 'order/:mealKey', element: <OrderDetailPage /> },
       { path: 'prep', element: <PrepPage /> },
       { path: 'shopping', element: <ShoppingPage /> },
       { path: 'combos', element: <CombosPage /> },

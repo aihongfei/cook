@@ -61,6 +61,21 @@ export class OrdersController {
     return this.orders.history(userId, { to, pageSize })
   }
 
+  /**
+   * 某一餐的详情（用户 2026-10-15：「订单里卡片增加下详情吧，可以点击进去看详细的」）。
+   *
+   * **必须排在最后**：`:mealKey` 会吃掉同层的任何一段路径，写在 `today` / `plan` /
+   * `history` 前面的话，`GET /orders/today` 会被它当成一个 mealKey（Nest 按声明顺序匹配）。
+   * 参数形状是第二道防线（`parseMealKey` 只认 `YYYY-MM-DD-LUNCH|DINNER`），
+   * 但"路由到哪一条"这件事不该靠参数校验兜。
+   */
+  @Get(':mealKey')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '某一餐的详情（点卡片进入；可见性与列表同一口径）' })
+  async detail(@CurrentUserId() userId: string, @Param('mealKey') mealKey: string) {
+    return this.orders.detail(userId, mealKey)
+  }
+
   @Post('items')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '点菜：点菜谱里的（recipeId）或自己写一道（dishName），二选一（F3-01/05、F3-10）' })

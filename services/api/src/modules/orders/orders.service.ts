@@ -60,6 +60,14 @@ export interface MealCardView {
    */
   confirmedBy: { nickname: string; avatar: string } | null
   confirmedAt: string | null
+  /**
+   * 谁把这一餐标成「做好了」、什么时候（M10 / F10-02）。
+   *
+   * 与 `confirmedBy` 是**两件事**：定菜单与做饭可以是两个人，这一版把两者
+   * 一起下发，详情页才能把"谁定的、谁做的"分开说清。
+   */
+  doneBy: { nickname: string; avatar: string } | null
+  doneAt: string | null
   /** 这一餐的成品照张数（F9-08）。按视图范围算：看不到的照片不计入（见 cardFromRow 说明） */
   photoCount: number
   /**
@@ -107,6 +115,8 @@ const MEAL_ORDER_INCLUDE = {
   checkIns: { select: { userId: true } },
   // 「谁定的这餐」要跟着卡片下发（列表里每张卡都可能带着它），只取显示要用的两个字段
   confirmedBy: { select: { nickname: true, avatar: true } },
+  // 「谁做的这餐」（M10）同样跟着走：详情页要能说清"妈妈定、爸爸做"
+  doneBy: { select: { nickname: true, avatar: true } },
 } satisfies Prisma.MealOrderInclude
 
 @Injectable()
@@ -546,6 +556,35 @@ export class OrdersService {
   }
 
   /**
+   * 某一餐的详情（用户 2026-10-15：「订单里卡片增加下详情吧，可以点击进去看详细的」）。
+   *
+   * 按 `mealKey` 取而不是按行 id：`mealKey`（`2026-10-13-DINNER`）是前端**已经在用**的
+   * 稳定标识（流转接口、缓存键都是它），通知里的去处也带着它——详情页因此能直接由
+   * 地址栏里的那一段取数，刷新、分享、从通知点进来都成立（用行 id 就得先有一份映射）。
+   *
+   * **可见性必须与列表一字不差**：共享开关关掉时，吃货看不到自己没参与的餐次——
+   * 详情页若不守这条，就出现"列表里没有、直接输地址却看得到"的洞。
+   * 所以这里复刻的是列表那一句判据（`items.some(userId)`）本身，**不是**"差不多的口径"：
+   * 只要详情放行的比列表多一条，那个洞就存在。
+   */
+  async detail(userId: string, mealKey: string): Promise<MealCardView> {
+    const { familyId, role } = await this.requireMember(userId)
+    const family = await this.requireFamily(familyId)
+    const { mealDate, meal } = parseMealKey(mealKey)
+
+    const row = await this.prisma.mealOrder.findUnique({
+      where: { familyId_mealDate_meal: { familyId, mealDate, meal } },
+      include: MEAL_ORDER_INCLUDE,
+    })
+    if (!row) throw new NotFoundException('这一餐还没有人点菜')
+
+    if (visibleToMember(family.shared, role) === 'mine' && !row.items.some(item => item.userId === userId)) {
+      throw new NotFoundException('这一餐还没有人点菜')
+    }
+    return this.cardFromRow(row, userId, role, family.shared)
+  }
+
+  /**
    * 设定就餐人数（M4 / F4-05）：含**没点菜只吃饭的家人**，所以它和"有几个人点了菜"是两回事。
    * 需要 `menu.manage`（与安排菜单同一批人）。传 null/空 = 清除设定。
    */
@@ -780,6 +819,9 @@ export class OrdersService {
       // 确认留痕（M4 / F4-05）：走的是列表与单卡共用的 MEAL_ORDER_INCLUDE，所以每个视图都带得上
       confirmedBy: row.confirmedBy,
       confirmedAt: row.confirmedAt?.toISOString() ?? null,
+      // 「谁做的这餐」（M10 / F10-02）：与"谁定的"并列下发，详情页把两件事分开说
+      doneBy: row.doneBy,
+      doneAt: row.doneAt?.toISOString() ?? null,
       // 能不能拿这一餐去「再点一次」（F3-06）：口径只有 canRepeatFrom 一份，前端不复刻
       canRepeat: canRepeatFrom(row.status, dateKey(row.mealDate), todayKey()),
       nextActions: nextActionsFor(role, row.status),
@@ -842,6 +884,8 @@ function emptyCard(mealDate: Date, meal: MealSlot): MealCardView {
     // 卡都空了，留痕自然也没有（撤回最后一份菜会把整餐删掉，见 removeItem）
     confirmedBy: null,
     confirmedAt: null,
+    doneBy: null,
+    doneAt: null,
     photoCount: 0,
     // 空卡没内容可照抄，不给这个入口
     canRepeat: false,

@@ -1,0 +1,220 @@
+/*
+ * 某一餐的详情（用户 2026-10-15：「订单里卡片增加下详情吧，可以点击进去看详细的」）。
+ *
+ * 三段式：**这一餐是什么**（状态与两个留痕）→ **谁点了什么**（逐份，不合并）→
+ * **这一餐的总览与动作**。动作按钮沿用列表页那一套类名（`.order-card__action` /
+ * `.order-card__diners` / `.order-card__repeat`）：它们是同一批按钮，样式与反馈不该两样。
+ */
+
+.order-detail {
+  padding-bottom: 24px;
+}
+
+/* ① 头部：状态 + 三个时间锚点 */
+.od-hero {
+  padding: 14px var(--spacing-page) 12px;
+  margin: 12px var(--spacing-page) 0;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.od-hero__top {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.od-hero__date {
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+.od-hero__day {
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #6e3a1c;
+}
+
+.od-hero__summary {
+  margin: 9px 0 0;
+  font-size: 12.5px;
+  color: #4a3225;
+}
+
+.od-hero__submitted,
+.od-hero__stamp {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+/* 「谁做的」比「谁定的」重一档：它是终态那一步的留痕（M10 / F10-02） */
+.od-hero__stamp--done {
+  color: #a3552a;
+}
+
+.od-hero .order-card__diners {
+  margin-top: 8px;
+  text-align: left;
+}
+
+/* ② 分段块：谁点了什么 / 这一餐 */
+.od-block {
+  padding: 14px;
+  margin: 12px var(--spacing-page) 0;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.od-block__title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6e3a1c;
+}
+
+.od-block__plain {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: #4a3225;
+}
+
+/* 按人分组：一个人一小节 */
+.od-person + .od-person {
+  padding-top: 11px;
+  margin-top: 11px;
+  border-top: 1px dashed #eadbc2;
+}
+
+.od-person__head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 7px;
+}
+
+.od-person__avatar {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+  line-height: 26px;
+  text-align: center;
+  background: var(--color-cream-2);
+  border-radius: 9px;
+}
+
+.od-person__name {
+  font-size: 12.5px;
+  color: #6e3a1c;
+}
+
+.od-person__me {
+  padding: 1px 5px;
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--color-brand);
+  border-radius: 999px;
+}
+
+.od-person__count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+/* 逐份一行：缩在分组下面，所以左边留出头像那一栏的空 */
+.od-line {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 6px 0 6px 34px;
+}
+
+.od-line + .od-line {
+  border-top: 1px dashed #f0e4d0;
+}
+
+.od-line__img {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 9px;
+}
+
+.od-line__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.od-line__name {
+  font-size: 13px;
+  color: #4a3225;
+
+  &--link {
+    color: #b4571f;
+    text-decoration: none;
+
+    &:active {
+      opacity: 0.7;
+    }
+  }
+}
+
+/* 「自己写的」那道菜（F3-10）在后端没有 recipeId，点不进菜谱详情——标出来，
+   否则用户会以为链接坏了 */
+.od-line__free {
+  padding: 1px 5px;
+  margin-left: 5px;
+  font-size: 10px;
+  font-style: normal;
+  color: var(--color-ink-3);
+  background: var(--color-cream-2);
+  border-radius: 999px;
+}
+
+.od-line__note {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: #8a7259;
+}
+
+.od-line__at {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--color-ink-3);
+}
+
+.od-line .order-card__withdraw {
+  flex: 0 0 auto;
+  align-self: center;
+  margin-left: 0;
+}
+
+/* ③ 回到列表：与返回按钮不同的意图（那个是"从哪来回哪去"，这个是"去看别的餐"） */
+.od-back-list {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  margin-top: 11px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: #8a7259;
+  cursor: pointer;
+  background: var(--color-cream);
+  border: 1.5px solid var(--color-line);
+  border-radius: 12px;
+
+  &:active {
+    opacity: 0.7;
+  }
+}

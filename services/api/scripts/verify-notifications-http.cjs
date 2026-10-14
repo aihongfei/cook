@@ -146,7 +146,12 @@ async function main() {
     planRow?.unread === true,
     `unread=${planRow?.unread} 未读总数=${babaBoard?.unread}`,
   )
-  check('⑦ 去处对（点进去能跳到那一餐）', planRow?.to === '/order', `to=${planRow?.to}`)
+  // 去处是**那一餐的详情**，不是列表页（用户 2026-10-15：「通知可以点击跳转到对应的地方去」）
+  check(
+    '⑦ 去处对（点进去直达那一餐的详情，不用自己在列表里找）',
+    planRow?.to === `/order/${planKey}`,
+    `to=${planRow?.to}`,
+  )
   check(
     '⑦ 文案由后端拼、`body` 有内容（前端不拼句子）',
     typeof planRow?.title === 'string' && planRow.title.length > 0 && typeof planRow?.body === 'string',

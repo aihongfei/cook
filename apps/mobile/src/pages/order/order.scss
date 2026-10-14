@@ -613,3 +613,45 @@
   background: none;
   border: 0;
 }
+
+/* ---- 卡片进详情（用户 2026-10-15：「订单里卡片增加下详情吧，可以点击进去看详细的」） ---- */
+
+/* 整张卡可点：指针形状与按下反馈都要给，否则用户不知道这儿能点 */
+.order-card--link {
+  cursor: pointer;
+
+  &:active {
+    border-color: #d0b189;
+  }
+}
+
+/*
+ * 标题区是**真链接**（键盘与读屏的入口，见 OrderPage 的注释）：
+ * 它内部两行本来是块级，这里改回列布局让它们各占一行且整块可点。
+ */
+.order-card__headlink {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.order-card__head .order-card__date,
+.order-card__head .order-card__who {
+  display: block;
+}
+
+/* 状态戳与箭头并排：箭头是"能进去"的提示，不参与语义（aria-hidden） */
+.order-card__head {
+  gap: 8px;
+  align-items: center;
+}
+
+.order-card__arrow {
+  flex: 0 0 auto;
+  font-size: 15px;
+  color: #c7a97e;
+}

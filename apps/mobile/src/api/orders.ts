@@ -72,6 +72,12 @@ export interface MealCard {
    */
   confirmedBy: { nickname: string; avatar: string } | null
   confirmedAt: string | null
+  /**
+   * 谁把这一餐标成「做好了」（M10 / F10-02）；与 `confirmedBy` 是**两件事**：
+   * 定菜单与做饭常常不是同一个人，详情页要能把两者分开说。
+   */
+  doneBy: { nickname: string; avatar: string } | null
+  doneAt: string | null
   /** 这一餐的成品照张数（F9-08）；按可见范围算，看不到的不计入 */
   photoCount: number
   /**
@@ -182,6 +188,17 @@ export async function fetchOrders(options: {
   return data
 }
 
+/**
+ * 某一餐的详情（用户 2026-10-15：「订单里卡片增加下详情吧，可以点击进去看详细的」）。
+ *
+ * 按 `mealKey` 取——它与列表、流转接口、通知去处用的是同一个标识，
+ * 所以详情页刷新、从通知点进来、把地址发给别人都成立。
+ */
+export async function fetchMeal(mealKey: string): Promise<MealCard> {
+  const { data } = await apiClient.get<MealCard>(`/orders/${mealKey}`)
+  return data
+}
+
 export async function fetchToday(): Promise<TodayBoard> {
   const { data } = await apiClient.get<TodayBoard>('/orders/today')
   return data
@@ -277,6 +294,23 @@ export function useOrders(
     queryFn: () => fetchOrders({ family: scope === 'family', status }),
     // 没加入家庭时后端会 404（点单是家庭内的），所以调用方要先确认有家庭再请求
     enabled: Boolean(token) && options.enabled !== false,
+    staleTime: 15_000,
+  })
+}
+
+/**
+ * 某一餐的详情。
+ *
+ * 缓存键放在 `['orders', 'meal', mealKey]` 下面（前缀与列表同一棵树）：
+ * 任何改变点单的动作都会作废 `['orders']`，于是详情页也跟着刷新——
+ * 用户在这里改了状态，退回去列表不会还是旧的。
+ */
+export function useMeal(mealKey: string | undefined) {
+  const token = useAuth((state) => state.token)
+  return useQuery({
+    queryKey: ['orders', 'meal', mealKey],
+    queryFn: () => fetchMeal(mealKey as string),
+    enabled: Boolean(token) && Boolean(mealKey),
     staleTime: 15_000,
   })
 }

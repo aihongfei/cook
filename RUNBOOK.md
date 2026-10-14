@@ -3937,3 +3937,84 @@ pnpm --dir apps/mobile test             # 579/579（55 文件）
 - **只有应用内**：关掉 App 收不到任何弹窗。手机通知属于交付二（本机通知），厂商推送通道要单独决定（调研见 `docs/context/RESEARCH.md`）。
 - 通知页底部有一句明话把这件事告诉用户，不让它成为"我以为会响"的落差。
 - 往上翻 **30 天**（`LOOKBACK_DAYS`）：再往前的提醒不再出现，但事件日志仍留在库里。
+
+## R-070 某一餐的详情：跑法、验法与那条"两处必须一致"的断言（F3-04 增强，✅ 已验证，2026-10-14）
+
+配套：`DECISIONS.md` **D-079**（为什么按 mealKey 取、为什么与列表共用同一张卡、卡片怎么变成可点的）。
+
+### 一、跑测试
+
+```bash
+# 接口验收（真请求，自带前置数据：自己注册、建家、三个人）
+pnpm --dir services/api run test:http:meal-detail      # 25/25
+
+# 相关的三套回归（改了点单卡与通知去处，这几套都要重跑）
+pnpm --dir services/api run test:http:orders           # 125/125
+pnpm --dir services/api run test:http:cooked           # 20/20
+pnpm --dir services/api run test:http:notifications    # 44/44
+
+# 前端
+pnpm --dir apps/mobile test                            # 591/591（56 文件）
+pnpm --dir apps/mobile typecheck                       # tsc -b；**这一步别省**
+```
+
+### 二、那条最该留着的断言：详情与列表**逐字段一致**
+
+```js
+const inList = (list.body?.cards ?? []).find((card) => card.mealKey === mealKey)
+const detail = await callWithRetry('GET', `/orders/${mealKey}`, { token: mama.token })
+check(
+  '② 与列表里那张卡是**同一个形状同一份口径**（逐字段比对）',
+  JSON.stringify(detail.body) === JSON.stringify(inList),
+  `...不一致字段：${Object.keys(detail.body ?? {}).filter(
+    (key) => JSON.stringify(detail.body[key]) !== JSON.stringify(inList[key]),
+  ).join('、') || '（无）'}`,
+)
+```
+
+不只判 `status === 200`：**一个"详情页自己能取到数"的实现照样可以通过那种弱断言**，而用户会在详情页看到与刚才那张卡不一样的内容。逐字段比对是把"两处口径一致"本身变成可判定的；不一致时它还会**列出是哪几个字段**，排查不用重新读两个接口。
+
+### 三、可见性那条要用**对照**验，不能只验"能取到"
+
+共享开关关掉后：
+
+| 谁 | 取哪一餐 | 应当 |
+| --- | --- | --- |
+| 姑姑（**没点过**这一餐的吃货） | 爸爸点的那一餐 | **404**（与列表一致：列表里也没有它） |
+| 爸爸（**点过**的吃货） | 同一餐 | **200** |
+
+只验后一半（"点过的人能取到"）会让"详情比列表宽松"这个洞完全测不出来——**它正是这一页最容易出的错**：列表有 `visibleToMember` 收窄，详情页是新写的一段判定，少写一句就漏。
+
+### 四、路由顺序那条也要验（否则是"上线才发现"
+
+`@Get(':mealKey')` 与 `@Get('today')` / `plan` / `history` 在同一层。Nest 按**声明顺序**匹配，`:mealKey` 写在前头就会把这些静态路径吃掉。脚本里四条各发一次真实请求：
+
+```
+⑥ `/orders/today` 没被 `:mealKey` 吃掉（这条一旦挂了就是路由顺序错）
+⑥ `/orders/plan` 正常
+⑥ `/orders/history` 正常
+⑥ `/orders/options` 正常（免登录）
+```
+
+### 五、浏览器实测（真实账号）
+
+**这一步踩了一个坑，值得记**：自动化工具的"点击"在这个页面上**连续三次没落上去**（locator 找到、`isVisible=true`、`elementFromPoint` 命中的就是那个 `<a>`，但点在它的中心坐标上没有任何反应、URL 不变）。而在页面上下文里派发一次真实 `MouseEvent('click')` 立刻导航成功（`/order` → `/order/2026-10-18-LUNCH`）。
+
+**结论：那是自动化输入的命中问题，不是页面的问题。** 判据是两条一起看——① 同样的坐标在页面内派发点击能通；② 单元测试里 `fireEvent.click` 也能通。**遇到"点了没反应"先分清是产品坏了还是工具点空了**，否则会去改一个本来正确的实现（这也是 R-054"反应在屏幕外"的反面：那次是真坏）。
+
+页面内容（快照原文节选）：
+
+```
+- link "← 返回订单": /url: /order
+- generic: 这一餐 / 谁点的、谁定的、谁做的，都在这儿
+- generic: 2026-10-18 · 午餐 / 10-18的午餐 / 已做好
+- paragraph: 共 1 道 · 1 人点了（含我点的 1 份）
+- paragraph: 🔒 妈妈 10 / 14 18:08 定下这餐
+- paragraph: 🍲 妈妈 10 / 14 18:08 标了「做好了」
+- heading "谁点了什么" [level=2]   →  🐰 爸爸我 · 1 份 · 【桂圆银耳羹】 ›
+- heading "这一餐" [level=2]        →  📷 上传这餐的成品照 / 🔁 再点一次 / 回到点菜单
+```
+
+### 六、类型检查**不是可选项**（这一刀它抓出两处真错）
+
+测试全绿（591/591）而 `tsc -b` 报了两条：`emptyCard` 没补新增的 `doneBy`/`doneAt`、详情页的 `ConfirmMenuSheet` 漏了 `onAdjustDiners`。**两条都是运行时才会炸的**（撤到空卡时字段缺、点「去定人数」时函数是 undefined），vitest 不做类型检查所以一条都没拦住。规矩：**改完接口形状必须跑 `tsc`，不能只看测试绿不绿。**

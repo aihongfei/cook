@@ -78,7 +78,8 @@ test('菜单安排：别人定的才提醒，自己定的不提醒自己', () =>
   assert.equal(rows[0].id, 'plan:2026-10-15-DINNER')
   assert.match(rows[0].title, /今天晚餐的菜单定下来了/)
   assert.match(rows[0].body ?? '', /妈妈定了 3 道菜/)
-  assert.equal(rows[0].to, '/order')
+  // 去处直接是**那一餐的详情**（不是列表页）——通知点进去要能落到对的地方
+  assert.equal(rows[0].to, '/order/2026-10-15-DINNER')
 })
 
 test('饭已做好：只提醒**我点过菜**的那些餐，且不是我自己标的', () => {
@@ -357,9 +358,9 @@ test('每一条都带稳定 id 与去处：前端不按 kind 硬编码跳转表'
   assert.deepEqual(
     rows.map((row) => [row.kind, row.to]).sort(),
     [
-      ['done', '/order'],
+      ['done', '/order/2026-10-15-DINNER'],
       ['expiry', '/fridge'],
-      ['plan', '/order'],
+      ['plan', '/order/2026-10-15-DINNER'],
       ['prep', '/prep'],
     ].sort(),
   )

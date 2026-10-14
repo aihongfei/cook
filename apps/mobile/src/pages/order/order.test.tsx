@@ -30,6 +30,7 @@ function renderOrder() {
       <MemoryRouter initialEntries={['/order']}>
         <Routes>
           <Route path="/order" element={<OrderPage />} />
+          <Route path="/order/:mealKey" element={<h2>这一餐详情</h2>} />
           <Route path="/family" element={<h1>家庭页</h1>} />
         </Routes>
       </MemoryRouter>
@@ -133,6 +134,9 @@ function cardFixture(overrides: Partial<MealCard> = {}): MealCard {
     // 确认留痕（M4 / F4-05）：null = 还没定下这一版
     confirmedBy: null,
     confirmedAt: null,
+    // 「谁做的这餐」（M10 / F10-02）：与"谁定的"并列下发，详情页分开说
+    doneBy: null,
+    doneAt: null,
     // 能不能「再点一次」（F3-06）：由后端按状态与日期算好，前端只负责显示按钮
     canRepeat: false,
     // 后端按角色算好的下一步（前端只负责渲染，不自己推状态机）
@@ -792,4 +796,41 @@ it('整桌都已经有了：只说"都有了"，不编一个"加了 0 道"', asy
   )
   // 后端给的话就照念，前端不自己拼一句（两处拼迟早说岔）
   expect(useToasts.getState().items.map((item) => item.text).join('|')).not.toContain('点了 0 道')
+})
+
+/*
+ * 卡片进详情（用户 2026-10-15：「订单里卡片增加下详情吧，可以点击进去看详细的」）。
+ *
+ * 这里验的是**入口能不能用**，以及那条最容易踩坏的边界：整卡 onClick 挂在外层，
+ * 而卡片里有一堆真按钮——点内层按钮**不能**顺带把人带去详情页
+ * （点「撤回我这份」结果跳走了，是最典型的那种"点错了还不知道为什么"）。
+ */
+it('点卡片空白处进这一餐的详情', async () => {
+  mockGet({ boards: { family: boardFixture() } })
+  renderOrder()
+
+  const date = await screen.findByText('2026-10-13 · 晚餐')
+  fireEvent.click(date)
+  expect(await screen.findByText('这一餐详情')).toBeTruthy()
+})
+
+it('点卡片里的按钮（撤回我这份）**不会**误进详情页', async () => {
+  mockGet({ boards: { family: boardFixture() } })
+  renderOrder()
+
+  const withdraw = await screen.findByRole('button', { name: '撤回我这份' })
+  fireEvent.click(withdraw)
+  // 走的是撤回的二次确认，不是跳详情
+  expect(await screen.findByText(/撤回后要重新加一次/)).toBeTruthy()
+  expect(screen.queryByText('这一餐详情')).toBeNull()
+})
+
+it('卡片标题区是真链接：键盘与读屏也能进详情（不只是鼠标可点）', async () => {
+  mockGet({ boards: { family: boardFixture() } })
+  renderOrder()
+
+  await screen.findByText('2026-10-13 · 晚餐')
+  const links = screen.getAllByRole('link', { name: /2026-10-13/ })
+  expect(links.length).toBe(1)
+  expect(links[0].getAttribute('href')).toBe('/order/2026-10-13-DINNER')
 })

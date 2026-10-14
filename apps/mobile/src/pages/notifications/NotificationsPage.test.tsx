@@ -40,6 +40,8 @@ function renderPage() {
         <Routes>
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/order" element={<div data-testid="order-page" />} />
+          {/* 提醒的去处是**那一餐的详情**（不是列表页） */}
+          <Route path="/order/:mealKey" element={<div data-testid="order-detail-page" />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -53,7 +55,8 @@ const ITEMS = [
     title: '今天晚餐做好了',
     body: '你点的 红烧排骨 可以吃了',
     at: '2026-10-15T18:30:00',
-    to: '/order',
+    // 去处是那一餐的详情（后端给整条路径，前端不按 kind 拼）
+    to: '/order/2026-10-15-DINNER',
     tag: '做好了',
     unread: true,
   },
@@ -114,7 +117,9 @@ it('点一条提醒按后端给的去处跳（路由表不写在前端）', asyn
   renderPage()
 
   fireEvent.click(await screen.findByText('今天晚餐做好了'))
-  expect(await screen.findByTestId('order-page')).toBeTruthy()
+  // 后端给的 to 是 **`/order/2026-10-15-DINNER`**（那一餐的详情）：点进来直接是这一餐，
+  // 而不是列表页让他自己找——前端一个字的跳转表都没有，路径整条来自后端
+  expect(await screen.findByTestId('order-detail-page')).toBeTruthy()
 })
 
 it('**打开页面本身不清红点**（用户要的是"真的已读"才清）', async () => {
@@ -136,8 +141,8 @@ it('点开那一条才标它已读（先标记再跳走，顺序不能反）', a
   fireEvent.click(await screen.findByText('今天晚餐做好了'))
   // 标记请求带的是**那一条**的 id，不是"全部"、也不是空
   await waitFor(() => expect(posts).toContainEqual({ url: '/notifications/read', body: { id: 'done:2026-10-15-DINNER' } }))
-  // 而且**同时**跳到了它指的地方（不跳的话用户点了没反应）
-  expect(await screen.findByTestId('order-page')).toBeTruthy()
+  // 而且**同时**跳到了它指的地方（不跳的话用户点了没反应）——就是那一餐的详情
+  expect(await screen.findByTestId('order-detail-page')).toBeTruthy()
 })
 
 it('点已读的那条不再重复提交（省一次没必要的写）', async () => {

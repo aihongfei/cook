@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { useFamily, CAPABILITY, can } from '@/api/family'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
@@ -81,6 +81,7 @@ function formatConfirmedAt(iso: string): string {
 
 export default function OrderPage() {
   const location = useLocation()
+  const navigate = useNavigate()
   const family = useFamily()
   const [scope, setScope] = useState<'family' | 'mine'>('family')
   const [filter, setFilter] = useState<string>('ALL')
@@ -300,16 +301,42 @@ export default function OrderPage() {
         )}
 
         {orders.data?.cards.map((card) => (
-          <article className="order-card" key={card.mealKey}>
+          /*
+           * 整张卡可点，进**这一餐的详情**（用户 2026-10-15：「订单里卡片增加下详情吧，
+           * 可以点击进去看详细的」）。
+           *
+           * 卡片**不是** `<button>`：里面还有一堆真按钮（撤回、改人数、存组合、流转…），
+           * 按钮套按钮是无效 HTML、点内层还会连带触发外层。所以外层只挂一个点击处理，
+           * 遇到内层可交互元素就**放行不跳**（`closest` 一次判定，不必给每个内层按钮
+           * 各加一句 stopPropagation——那种写法每加一个按钮就漏一个）。
+           *
+           * 同时把标题区做成真 `<Link>`：整卡 onClick 只对鼠标/触摸成立，
+           * 键盘与读屏需要那个链接才进得去（与打卡卡片可点那次同一条理由，见 CheckInPage）。
+           */
+          <article
+            className="order-card order-card--link"
+            key={card.mealKey}
+            onClick={(event) => {
+              if ((event.target as HTMLElement).closest('button, a, input, select, textarea')) return
+              navigate(`/order/${card.mealKey}`, { state: { from: location.pathname } })
+            }}
+          >
             <div className="order-card__head">
-              <div>
-                <div className="order-card__date">
+              <Link
+                className="order-card__headlink"
+                to={`/order/${card.mealKey}`}
+                state={{ from: location.pathname }}
+              >
+                <span className="order-card__date">
                   {card.date} · {card.mealLabel}
-                </div>
-                <div className="order-card__who">{card.orderers.join(' · ')} 点的</div>
-              </div>
+                </span>
+                <span className="order-card__who">{card.orderers.join(' · ')} 点的</span>
+              </Link>
               <span className={['stamp', STATUS_TONE[card.status]].filter(Boolean).join(' ')}>
                 {card.statusLabel}
+              </span>
+              <span className="order-card__arrow" aria-hidden="true">
+                ›
               </span>
             </div>
 
