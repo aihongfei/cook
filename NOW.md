@@ -1145,6 +1145,20 @@ M2 只剩 F2-08（多家庭切换，P2）；M3 只剩 F3-07（掌勺人视图，
 
 **留下的资产**：两张源渲染图、切好的图层（`previews/assets/fridge3d/`）、完整预览页。**Tripo 的冰箱 GLB 已生成但未导出**（账号权益在 `studio.tripo3d.ai`，Pro 站；用户提供的 API key 经实测**无 API 额度**——Studio 积分与 API credits 是两套账，要自动化需另购 API credits，20 credits ≈ $0.2/个模型）。将来重启 M17 时从「导出那个 GLB」开始，不用重做。
 
+## 提示词模板库（F16-03 / D-074 / R-065，✅ 已交付，2026-10-15）
+
+把原先散在 4 处的提示词集中进 `services/api/src/modules/ai/ai.prompts.ts`（冰箱识别 / 挑菜建议 / 快问示例 / 主对话）。
+
+**核心是一条硬界线——文案可以换，接线不能换**：每套拆两截，**按"改动会不会静默失效"分**而不是按"重不重要"分。文案（语气、原则、例子）可用 `AI_PROMPTS_DIR/<名字>.md` 覆盖、**改完不用重启**；接线（JSON 契约、工具名、条数上限、候选清单、家里的数据）由代码常量插进来——把"按 picks 数组回"改成别的，模型会照办然后解析失败，用户看到的是"功能坏了"而不是"你改错了"，**同类事故本项目出过一次真的**（D-041）。
+
+三种失败一律回落内置并打 warn（读不到 / 空文件 / **缺必需占位符**）：**配坏提示词绝不能让功能不可用**。占位符校验与替换共用同一个正则——第一版两套写法，手写 `{{ max }}` 的作者会莫名被回落。
+
+**主对话那套刻意不可覆盖**：它每一段都对应一个真实故障（D-052/D-070/D-071），整体就是一份接线；一个会让"已经加好了"这种事重新出现的口子，不值得开。
+
+顺带补上 `fridge-scan.rules.ts` 的**零测试缺口**（原一条都没有，要动它的提示词先得有张网）——17 条里两条钉住刻意行为："一样都没认出来"是**正常结果不是错误**（前端据此给下一步，抛异常会把"没认出来"变成"坏了"）、保质期**一律不填**（模型给了也丢）。
+
+**验证**：后端 **496/496**、`tsc` 0 错；**真容器实测三项**（一次性容器 + stub，跑完即销毁、全程没碰主容器）：覆盖生效（stub 看到自定义文案 + 代码拼的接线）、缺占位符立刻回落（日志有 warn）、两次调用之间**没有重启**。
+
 ## AI 流式 + 结构化输出（F16-02 / D-073 / R-064，✅ 已交付，2026-10-15）
 
 `chatStreamEvents` **补上 `jsonSchema` 形参**——这是 F16-06/07/08（拍照识别菜品 / 营养分析 / 拍照生成菜谱）的地基：那三件事都要**既早点出字、又要一份能解析的 JSON**，而补上之前只能二选一。
@@ -1329,7 +1343,7 @@ M2 只剩 F2-08（多家庭切换，P2）；M3 只剩 F3-07（掌勺人视图，
 - 调研：`docs/context/RESEARCH.md`
 - 方案：`docs/context/PLAN.md`
 - 功能清单：`docs/context/FEATURES.md`
-- 接口验收脚本：`services/api/scripts/verify-recipes-http.cjs`（菜谱）、`verify-auth-http.cjs`（注册登录）、`verify-family-http.cjs`（家庭）、`verify-orders-http.cjs`（点单）、`verify-checkins-http.cjs`（打卡）、`verify-ai-http.cjs`（AI 推荐与问答，配 `ai-stub-upstream.cjs` 可离线验）、`verify-fridge-http.cjs`（冰箱库存）、`verify-ai-actions-http.cjs`（AI 对话里办事 + 撤销，同样走 stub）、**`verify-ai-shopping-http.cjs`（AI 办采购清单）、`verify-ai-taste-http.cjs`（AI 写口味忌口）、`verify-ai-readonly-http.cjs`（AI 帮我决定/家人最爱/打卡）**、**`verify-meal-preview-http.cjs`（一餐要买什么 + AI 的 `preview_meal_shopping`）、`verify-recommend-http.cjs`（首页推荐随机化与有界性）**、`verify-taste-http.cjs`（口味档案与过滤）、`verify-cookable-http.cjs`（手边食材能做什么，含 offset 翻页）、`verify-stock-match-http.cjs`（采购清单与库存比对）、`verify-decide-http.cjs`（帮我决定）、`verify-shopping-edit-http.cjs`（清单编辑与一键补货，`pnpm run test:http:shopping-edit`）、**`verify-spread-http.cjs`（摇一桌：搭配/道数/忌口阳型对照/整组加入，`pnpm run test:http:spread`）**、**`verify-ai-stream-schema.cjs`（流式+结构化，自带 stub，`pnpm run test:ai-stream-schema`）**；操作步骤见 `RUNBOOK.md` R-003b/R-010/R-012/R-014/R-015/**R-018**/**R-041**/**R-042**/**R-043**/**R-045**/**R-046**/**R-047**/**R-048**/**R-049**/**R-050**/**R-051**/**R-052**/**R-053**/**R-054**/**R-055**/**R-057**/**R-058**/**R-059**/**R-061**/**R-062**/**R-063**/**R-064**
+- 接口验收脚本：`services/api/scripts/verify-recipes-http.cjs`（菜谱）、`verify-auth-http.cjs`（注册登录）、`verify-family-http.cjs`（家庭）、`verify-orders-http.cjs`（点单）、`verify-checkins-http.cjs`（打卡）、`verify-ai-http.cjs`（AI 推荐与问答，配 `ai-stub-upstream.cjs` 可离线验）、`verify-fridge-http.cjs`（冰箱库存）、`verify-ai-actions-http.cjs`（AI 对话里办事 + 撤销，同样走 stub）、**`verify-ai-shopping-http.cjs`（AI 办采购清单）、`verify-ai-taste-http.cjs`（AI 写口味忌口）、`verify-ai-readonly-http.cjs`（AI 帮我决定/家人最爱/打卡）**、**`verify-meal-preview-http.cjs`（一餐要买什么 + AI 的 `preview_meal_shopping`）、`verify-recommend-http.cjs`（首页推荐随机化与有界性）**、`verify-taste-http.cjs`（口味档案与过滤）、`verify-cookable-http.cjs`（手边食材能做什么，含 offset 翻页）、`verify-stock-match-http.cjs`（采购清单与库存比对）、`verify-decide-http.cjs`（帮我决定）、`verify-shopping-edit-http.cjs`（清单编辑与一键补货，`pnpm run test:http:shopping-edit`）、**`verify-spread-http.cjs`（摇一桌：搭配/道数/忌口阳型对照/整组加入，`pnpm run test:http:spread`）**、**`verify-ai-stream-schema.cjs`（流式+结构化，自带 stub，`pnpm run test:ai-stream-schema`）**；操作步骤见 `RUNBOOK.md` R-003b/R-010/R-012/R-014/R-015/**R-018**/**R-041**/**R-042**/**R-043**/**R-045**/**R-046**/**R-047**/**R-048**/**R-049**/**R-050**/**R-051**/**R-052**/**R-053**/**R-054**/**R-055**/**R-057**/**R-058**/**R-059**/**R-061**/**R-062**/**R-063**/**R-064**/**R-065**
 - UI 设计稿：`docs/ui-preview/`（选定方向实现稿 `handpainted/index.html`）
 - 代码仓库：`https://github.com/aihongfei/cook`（私有）
 - 参考原图：`参考图片/`

@@ -116,6 +116,12 @@ services:
       AI_MODEL: ${AI_MODEL:-}
       AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-}
       AI_JSON_SCHEMA: ${AI_JSON_SCHEMA:-}
+      # 提示词模板目录（F16-03）：放 <名字>.md 覆盖内置文案，改完不用重启。
+      # **要挂进容器才有用**（默认给的是容器内路径，配了目录但没挂载时读不到会回落内置、
+      # 只打一条 warn，功能照常——这是有意的：配错提示词绝不该让 AI 功能不可用）。
+      # 用法：把目录挂到 /app/prompts（见下方 volumes 说明）并保持这个值不变，
+      # 或在 .env 里给成容器内的绝对路径。
+      AI_PROMPTS_DIR: ${AI_PROMPTS_DIR:-}
       # ---- 找回密码的发信通道（F2-04）----
       # console=只写日志（开发期）；smtp=真发信。**部署到公网前必须改成 smtp**，
       # 否则 `forgot` 接口会把重置链接直接回给调用方（见 RISKS R-16）。

@@ -2,7 +2,7 @@ import { HttpException, HttpStatus, Injectable, ServiceUnavailableException } fr
 import { PrismaService } from '../recipes/prisma.service'
 import { AiUpstreamError, chatJson, chatStreamEvents, type StreamEvent, type WireMessage } from './ai.client'
 import {
-  AI_HINT_MAX, EXAMPLE_TEXT_MAX, HINT_TEXT_MAX, PROMPTS_EXAMPLES_MAX, PROMPTS_HINTS_MAX,
+  AI_HINT_MAX, EXAMPLE_TEXT_MAX, HINT_TEXT_MAX,
   SUGGEST_CANDIDATES, SUGGEST_MATCHES_MAX, SUGGEST_PICKS_MAX, SUGGEST_PICKS_MIN, AI_MESSAGES_MAX,
   AI_MESSAGE_MAX, AiReplyError,
   extractKeywords, formatCandidates, parseHint, parsePicks, parsePrompts, readAiConfig,
@@ -11,7 +11,8 @@ import {
   type AiConfig, type AiPrompts, type CandidateDish, type SuggestedPick,
 } from './ai.rules'
 import { parseChatMessagesWithImages, toModelContent, type ChatMessage } from './ai-attachment.rules'
-import { FRIDGE_SCAN_PROMPT, FRIDGE_SCAN_SCHEMA, parseFridgeScan, type FridgeScanResult } from './fridge-scan.rules'
+import { FRIDGE_SCAN_SCHEMA, OCR_MAX_ITEMS, parseFridgeScan, type FridgeScanResult } from './fridge-scan.rules'
+import { buildChatPrompt, buildFridgeScanPrompt, buildHintsPrompt, buildRecommendPrompt } from './ai.prompts'
 import { AiAttachmentService } from './ai-attachment.service'
 import {
   AI_TOOLS, FRIDGE_ADD_MAX, MENU_ADD_MAX, PROPOSALS_MAX, SEARCH_RESULTS_MAX, TOOL_ADD_COMBO_TO_MEAL,
@@ -117,27 +118,19 @@ export class AiService {
       return { picks: [], hint, candidates: 0 }
     }
 
-    const systemPrompt = [
-      '你是家庭厨房的掌勺参谋。只能从下面这份候选菜清单里挑菜，不要编造清单之外的菜。',
-      `按 picks 数组回：每条的 id 必须是候选清单里的 id，reason 是一句话说明为什么适合这一餐（20 字内）。`,
-      // 条数（用户 2026-HttpException10-13：「两个菜有点少了，可以多一些」）：原来没写清楚要几道，
-      // 模型常只给 2 道。写进提示词而不是加进解析器——给少了是"少一点"，不是"答错了"，
-      // 为它整个丢弃、让用户重问一遍更糟（上限仍由 SUGGEST_PICKS_MAX 兜住）
-      `挑 ${SUGGEST_PICKS_MIN}～${SUGGEST_PICKS_MAX} 道：用户要看着选，只给两道不够挑；也不要凑数，清单里确实不合适的就别选。`,
-      '挑选原则：口味均衡、荤素搭配、考虑家里人数与当下时令；同等条件下优先快手菜。',
-      // 候选清单每次都是随机抽的，但模型偏爱清单开头那几条——不说明的话同一句话问两遍
-      // 会把清单前两道再报一遍，看起来就像写死的（用户 2026-10-13 的原话：「是固定的吗」）
-      '清单每次都是随机抽的，**不要只挑排在前面的**；同一个问题再问一次时，尽量换几道不一样的。',
-      '',
-      '候选清单：',
-      formatCandidates(candidates),
-      '',
-      context.meal ? `要安排的这一餐：${context.meal}` : '',
-      context.note ? `家里情况：${context.note}` : '',
-      hint ? `用户说：${hint}` : '用户没有特别说明，按家常口味推荐。',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    /*
+     * 提示词由 `ai.prompts` 拼（F16-03）：文案可以按 `AI_PROMPTS_DIR/recommend.md` 覆盖，
+     * **接线部分（JSON 契约、候选清单、这一餐）固定**——见那个文件的文件头。
+     * 条数走 `SUGGEST_PICKS_MIN/MAX` 插进文案（那里也是同一组常量，不是另抄一遍数字）。
+     */
+    const systemPrompt = buildRecommendPrompt({
+      min: SUGGEST_PICKS_MIN,
+      max: SUGGEST_PICKS_MAX,
+      candidates: formatCandidates(candidates),
+      meal: context.meal,
+      note: context.note,
+      hint,
+    })
 
     // 解析必须**在 ask 里面**做（用 parse 回调传入），不能放在调用之后——
     // 放外面的话"模型答非所问"这条错误就绕过了下面的分类，照样冒成 500。
@@ -175,22 +168,12 @@ export class AiService {
     const config = this.requireConfig()
     const context = await this.promptsContext(userId)
 
-    const systemPrompt = [
-      '你是这个家庭的厨房助手。任务：为两个入口各写一批**能直接点的短句**。',
-      '① hints（快问）——「AI 帮你想」里的快捷按钮，用户点一下就等于说了这句话。'
-        + '写他**想吃什么、家里什么情况**（如"清淡点""孩子也能吃""冰箱有剩青菜"），'
-        + `${HINT_TEXT_MAX} 字以内，像家里人随口说的，不是"请推荐一道清淡的菜"这种书面语。`,
-      `② examples（示例问题）——「问 AI」里示范"这个入口能问多细"的问题（如"鱼怎么煎不破皮"），`
-        + `${EXAMPLE_TEXT_MAX} 字以内，要是真下厨时卡住的那种具体问题。`,
-      `各写 ${PROMPTS_HINTS_MAX} 条与 ${PROMPTS_EXAMPLES_MAX} 条：一次只显示一部分，用户点「换一批」要能换出新的。`,
-      '不要写"推荐一道菜"这种空话（那是按钮已经说清的事）；两批内部都别重复；'
-        + '不要出现具体品牌；不要客套话。',
-      '',
-      '这家人的情况：',
+    // 文案可由 `AI_PROMPTS_DIR/hints.md` 覆盖；条数与字数上限是**接线**，由常量插进来
+    const systemPrompt = buildHintsPrompt({
+      hintMax: HINT_TEXT_MAX,
+      exampleMax: EXAMPLE_TEXT_MAX,
       context,
-      '',
-      '按 JSON 回：{"hints": ["..."], "examples": ["..."]}',
-    ].filter(Boolean).join('\n')
+    })
 
     // temperature 给高一点：这几组句子要的是**每次不一样**，太保守时换个家也还是那几句
     return this.ask(
@@ -257,7 +240,7 @@ export class AiService {
     return this.ask(
       config,
       {
-        systemPrompt: FRIDGE_SCAN_PROMPT,
+        systemPrompt: buildFridgeScanPrompt({ maxItems: OCR_MAX_ITEMS }),
         // 图挂在最后这条 user 消息上（`ChatRequest.images` 的约定）
         messages: [{ role: 'user', content: '看看这张照片里有什么。' }],
         images: [image],
@@ -348,112 +331,18 @@ export class AiService {
     context: { meal: string | null; note: string; summary: string; familyId: string | null; taste: string | null },
     signal?: AbortSignal,
   ): AsyncGenerator<ChatEvent> {
-    const systemPrompt = [
-      '你是这个家庭的厨房助手，回答要亲切、简短（通常 3 句话内），给可执行的建议而不是泛泛而谈。',
-      '家里已有的安排（别推荐重复的菜）：',
-      context.summary || '（今天还没有安排）',
-      context.note ? `家里情况：${context.note}` : '',
-      // 实测踩过：模型会往"已做好"的那一餐里加菜，用户点下去只拿到一句
-      // 「这餐已经做好了，换个餐次再点吧」——白点一次。所以把这条规则明说，
-      // 并要求它改提别的餐次（status 就在上面的安排里，模型看得到）。
-      '上面标了「已做好」或「已取消」的那一餐**不要再加菜**（加进去会被接口拒掉），改提别的餐次或先问用户。',
-      '',
-      `今天是 ${todayKey()}。`,
-      '你要推荐或提到某道具体的菜时，**必须先调用 ${TOOL_SEARCH_DISHES} 拿到真实的菜**——你记忆里的菜名库里不一定有，编出来的菜用户点不进去。',
-      `用户想吃某道菜、或你判断该加进菜单时，调用 ${TOOL_PROPOSE_MENU_ITEMS} 把菜提出来。它只是**提议**，`
-        + '界面上会出现确认按钮，用户点了才会真的加进菜单，所以不要对用户说"已经加好了"。',
-      '如果你提到了具体的菜（不管有没有提议），在回答的最后顺带问一句要不要加进菜单，例如'
-        + '「要我把这两道加进今天晚餐吗？」——这是用户明确要的：他希望在对话里就能直接点菜。',
-      /*
-       * 冰箱那一档（D-052 的 A 档）：与加菜**不是同一种**，必须让模型分清，
-       * 否则它会把"直接写"的谨慎程度套到冰箱上（每次都反问一遍，用户要的
-       * "对话里顺手记一下"就变成了填表单），或者反过来把菜单也直接写掉。
-       */
-      `冰箱是**可以直接帮你记的**：用户说"记一下冰箱里有什么"或明确要改/删冰箱里的东西时，`
-        + `用 ${TOOL_READ_FRIDGE} 看清楚现状，再调 ${TOOL_ADD_FRIDGE_ITEMS} / ${TOOL_UPDATE_FRIDGE_ITEM} / ${TOOL_REMOVE_FRIDGE_ITEM}。`
-        + '这几件**会真的写库**，界面上会给用户一张可撤销的回执卡，所以你可以说"记好了"——'
-        + '但**只说你真的记成的那些**（工具结果里会列出成没成），没记成的照实说原因。',
-      /*
-       * 全应用 CRUD（用户 2026-10-13：「软件的 CRUD ai 都可以操作」）。
-       * 菜单与冰箱**同档**（A 档），而"提建议等用户点"那条路仍然保留——
-       * 两者的分界是**用户有没有明确说要办**，不是模型自己判断哪样更合适。
-       */
-      `菜单、人数、状态、常用组合**也可以直接帮你办**（都是真的写库 + 回执卡，除了状态都能撤）：`
-        + `- 加菜：用户明确说"加进去/点上/来一道"→ ${TOOL_READ_MENU} 看清现状，再 ${TOOL_ADD_MENU_ITEMS}（不知道 id 先 ${TOOL_SEARCH_DISHES}）；`
-        + `只是想要个主意、还没定 → 用 ${TOOL_PROPOSE_MENU_ITEMS} 提建议等他点。`
-        + `- 撤菜：${TOOL_REMOVE_MENU_ITEM}（只能撤他自己点的，且那一餐还得在待确认阶段）；`
-        + `夹"这一餐吃几个"：${TOOL_SET_DINERS}；`
-        + `- 状态（选好了/开始做/做好了/取消）：${TOOL_SET_MEAL_STATUS}，**这一步没有撤销**，`
-        + '所以只能在他明确说出要改到哪个状态时调，不确定就先问他；'
-        + `- 常用组合：${TOOL_READ_COMBOS} 看、${TOOL_CREATE_COMBO} / ${TOOL_UPDATE_COMBO} / ${TOOL_DELETE_COMBO} / ${TOOL_ADD_COMBO_TO_MEAL} 改；`
-        + `- 再点一次（照抄某一餐到另一天）：${TOOL_REPEAT_MEAL}。`,
-      /*
-       * 口味档案（F8-01/02）。**每一轮都带**（用户 2026-10-12 的原话：
-       * 「后续每一轮对话都必须带上这些数据」）——不是"要推荐时才带"：
-       * 用户可能在任何一句话里问"这个我能吃吗"，而模型必须当场就知道
-       * 家里有谁对什么过敏。带的是 `tasteText(context.taste)` 那份人话摘要。
-       */
-      context.taste
-        ? `这家人的口味与忌口（**每句话都要照着它**，推菜时绝不能挑有人过敏的）：\n${context.taste}`
-        : '',
-      context.taste
-        ? `用户说"我不吃辣""我对花生过敏""少放盐"这类话时，用 ${TOOL_UPDATE_TASTE} 写进他自己的档案`
-          + `（${TOOL_READ_TASTE} 可以随时看清现在写了什么）。只写他说的那些，不要替他补充。`
-        : '',
-      `自家菜谱也能直接改：用户口述自家做法就 ${TOOL_CREATE_RECIPE} 存进「我家的菜谱」；`
-        + `改/删之前先 ${TOOL_READ_RECIPES} 看清哪道是**自己上传的**（标了「可改」的）。`
-        + '库里的公共菜谱（极速数据那些）谁都改不了，用户想改就帮他新建一道自己的。'
-        + `收藏用 ${TOOL_TOGGLE_FAVORITE}。`,
-      /*
-       * 采购清单（M7，用户 2026-10-14：「还需要 ai 能够处理采购清单…等现在所有没接入 ai 的功能」）。
-       *
-       * 这一段必须把"清单"与"菜单"的界线说明白：两者都叫"要吃什么/要买什么"，
-       * 但清单是**按菜单配料算出来的**（外加用户自加的东西），所以
-       * "把某道菜要用的食材加进采购单"这件事**不用手写清单**——
-       * 把那道菜加进菜单，清单自己就会算出来。这是模型最容易做错的一处。
-       */
-      `采购清单（要去买什么）也能直接帮你办：`
-        + `看现在缺什么 → ${TOOL_READ_SHOPPING}（它已按货架分好组、标出了家里已有的和已勾掉的）；`
-        + `看**某一餐**要买什么 → ${TOOL_PREVIEW_MEAL_SHOPPING}（**不写库**，还没定的餐也能算）；`
-        + `加想去买的 → ${TOOL_ADD_SHOPPING_ITEMS}（**这个也会真的写库**，有回执可撤）；`
-        + `买到就勾上 → ${TOOL_CHECK_SHOPPING_ITEM}；`
-        + `不想买那条自加的 → ${TOOL_REMOVE_SHOPPING_ITEM}；`
-        + `买回来的收进冰箱 → ${TOOL_RESTOCK_SHOPPING}（**只补已经勾掉的**，没勾的一律不动）。`
-        + '**分清清单与菜单**：菜单是"这一餐吃什么"（读它用 read_menu、加菜用 add_menu_items），'
-        + '清单是"要去买什么"。用户说"把某道菜需要的食材加进采购单"时，'
-        + '正确的做法是**把那道菜加进菜单**（清单会照它的配料自己算出来），'
-        + '而不是把一堆食材名一条条手写进清单——手写的那些在菜单变了之后不会跟着变。'
-        + '只有"清单上没有、也不是哪道菜要的"（垃圾袋、洗洁精）才用 add_shopping_items。'
-        /*
-         * 用户 2026-10-14 报的原文：「我让 ai 加入鱼香肉丝的配料到采购清单，**他不加入**，
-         * 要让我加到订单中就自动出现了」——说明只讲界线还不够：模型答"你得先去点菜"
-         * 就把人打发了，而用户真正要的是"那做这道菜要买什么"。所以下面这一句要求它**当场算给他看**。
-         */
-        + `⚠️ 用户问"做某道菜要买什么/这餐还缺什么"时，**不要只说"你得先去点菜"**——`
-        + `用 ${TOOL_PREVIEW_MEAL_SHOPPING} 当场把它要买的几样列出来（还没定的餐也算得出来），`
-        + '再说清"定了这一餐之后它就会进采购清单"。这样他既拿到了答案，也知道下一步点哪里。',
-      `要让用户明白哪些事你能直接做、哪些要他自己点：冰箱、菜单、自家菜谱、常用组合、收藏、采购清单都可以`
-        + '（有回执可撤；状态流转没有撤销）；家庭管理（改角色、转让、退家庭）你没有工具，'
-        + '用户问起就告诉他去"我的 → 家庭"里做。'
-        + '**绝不要说"已经加好了/记好了"如果你没真的调过工具**——没调就说"要我加进去吗"。',
-      /*
-       * 只读三件（用户 2026-10-14 的"等现在所有没接入 ai 的功能"）。
-       *
-       * 它们的共同点是**答案不在你印象里**：该做哪道菜、家里最爱吃什么、打了多少天卡，
-       * 都得从库与规则里算。所以这一段的要求是"先问再答"，而不是"尽量答得像"。
-       */
-      `还有三件事**你要先去问服务端再开口**，不要凭印象答：`
-        + `① 用户说"不知道吃什么""帮我决定""随便来一道" → ${TOOL_WHAT_TO_COOK}。`
-        + '**它只给一道**（这条出口的全部意思就是不让人挑），而且会附一句为什么是它——'
-        + '把那句理由照搬出来。用户说"换一道"时，把上一次给的那个 id 放进 exclude 再调一次。'
-        + '算不出菜时它会说原因（菜谱库是空的 / 冰箱还没记东西 / 口味档案把人排掉了），'
-        + '照实转达并说下一步去哪，**不要自己编一道顶上去**。'
-        + `② 用户问"我们家常做什么""家里最爱吃哪几道" → ${TOOL_READ_FAMILY_PICKS}；`
-        + `③ 用户问"我连续打卡多少天""最近做了几次""家里人最近下厨了吗" → ${TOOL_READ_CHECKINS}。`
-        + '这三件都**只看不写**，所以不用问用户"要不要办"——直接查、直接答。'
-        + '它们在没有家庭时会回一句"先加入家庭"，那是**有用的信息**，照实说给用户听。',
-      '如果被问到与下厨、食材、营养无关的事，礼貌地把话题带回来。',
-    ].filter(Boolean).join('\n')
+    /*
+     * 主对话的提示词（F16-03 搬进 `ai.prompts.buildChatPrompt`）。**它刻意不可覆盖**：
+     * 里面每一段几乎都对应一个真实故障或一条用户明确要求（状态那一餐不许加菜、
+     * 冰箱可以直接写、清单与菜单别混、只读三件先查再答……），改错一句的表现是
+     * 模型说"已经加好了"而库里什么都没发生。见 `ai.prompts` 文件头最后一段。
+     */
+    const systemPrompt = buildChatPrompt({
+      summary: context.summary,
+      note: context.note,
+      today: todayKey(),
+      taste: context.taste,
+    })
 
     /*
      * 消息 → 上游线格式。**带了图的要先把字节取回来**（前端只给 id，字节在私有桶里）。

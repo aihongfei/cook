@@ -3660,3 +3660,72 @@ pnpm run test:ai-stream-schema        # 8/8，自带 stub、不碰数据库
 ### 与真网关的关系
 
 真网关的拒绝是**偶发**的（约 8 次里 5 次，D-026/D-043），所以真网关那边**不适合**当回归手段；`STUB_REJECT_SCHEMA_ONCE=1` 正是为此伪造出那次拒绝。**这条路径的替代验证只有"拿真额度反复碰运气"**——迁移到 pi-ai 之后第一次真网关验证就撞上过（`/ai/prompts` 502）。
+
+## R-065 提示词模板库（F16-03）：覆盖怎么用、怎么验（✅ 已验证，2026-10-15）
+
+### 一、覆盖一套提示词
+
+```bash
+mkdir -p /tmp/my-prompts
+cat > /tmp/my-prompts/recommend.md << 'MD'
+挑 {{min}}～{{max}} 道，按这个家的习惯来。
+MD
+```
+
+然后给后端 `AI_PROMPTS_DIR`（compose 已透传该变量，容器要有对应的挂载）：
+
+```bash
+AI_PROMPTS_DIR=/app/prompts docker run … -v /tmp/my-prompts:/app/prompts:ro …
+```
+
+**可覆盖的三套**：`fridge-scan.md`（冰箱拍照识别）、`recommend.md`（挑菜建议）、`hints.md`（快问与示例问题）。主对话**不可覆盖**（见 `ai.prompts` 文件头）。
+
+**占位符**（`{{key}}`，两边空格随意）：覆盖文件**必须含声明的全部占位符**，缺一个就回落内置。
+
+| 文件 | 必须含 |
+| --- | --- |
+| `recommend.md` | `{{min}}`、`{{max}}`（条数下限/上限） |
+| `hints.md` | `{{hintMax}}`、`{{exampleMax}}`、`{{hints}}`、`{{examples}}` |
+| `fridge-scan.md` | `{{max}}`（最多认几样） |
+
+**改完不用重启**（每次调用现读）。容器日志里能看到回落原因：
+
+```
+WARN [AiPrompts] 提示词覆盖（recommend）缺少占位符 {{min}}、{{max}}，用内置文案
+```
+
+### 二、验收怎么跑
+
+```bash
+cd services/api
+pnpm test          # 496/496：含 ai.prompts.test.ts（覆盖四态）与 fridge-scan.rules.test.ts（17 条）
+```
+
+单测覆盖四种覆盖情形：正常覆盖 / 没配目录 / 文件空 / **缺占位符**——后三种都断言"回落内置且功能仍可用"。
+
+### 三、真容器实测（跑法照抄，两条命令即可复现）
+
+**别在主容器上试**：主容器指着真网关，覆盖实验要另起一个一次性容器 + 本地 stub，跑完销毁（本轮就是这么做的，全程没碰 `cook-api-1`）：
+
+```bash
+node services/api/scripts/ai-stub-upstream.cjs 18995 &
+docker run -d --name cook-api-override-test --rm --network cook_default \
+  -e DATABASE_URL="mysql://…@mysql:3306/cook" -e JWT_SECRET="…" \
+  -e AI_API_BASE=http://host.docker.internal:18995/v1 -e AI_API_KEY=stub-key -e AI_MODEL=stub-model \
+  -e AI_PROMPTS_DIR=/app/prompts -v /tmp/my-prompts:/app/prompts:ro \
+  -p 3100:3000 cook-api
+```
+
+然后注册账号 → 建家庭 → `POST /ai/suggest`，从 **stub 那一侧**看它收到的 `system`：
+
+```
+schema= picks | system 开头= '【覆盖生效的标记】挑 4～6 道，按这个家的习惯来。\n按 picks 数组回：…\n候选清单：\n- id=…'
+```
+
+**要看的正是这个形状**：前半是覆盖文件的文案，后半是**代码拼的接线**（JSON 契约 + 候选清单）——接线跟着来，说明覆盖的只是文案。
+
+把文件换成不含占位符的版本、**不重启**再调一次：`system` 开头立刻回到内置文案，日志出现上面那条 warn。
+
+### 四、一个坑
+
+`docker run` 用的镜像是**构建时烘进去的源码**：改完 `ai.prompts.ts` 必须先 `docker compose build api`，否则一次性容器跑的还是旧代码（本轮第一次实验就是这么拿到 404 的——路由名写错是另一回事，但"镜像里的代码不等于工作区"这条本项目已踩过多次）。
