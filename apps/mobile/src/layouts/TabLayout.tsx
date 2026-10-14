@@ -8,7 +8,6 @@ import { useAiAssistantSession } from '@/stores/ai-assistant-session'
 import { tabs } from '@/config/tabs'
 import { tabOf } from '@/pages/back-link'
 import { targetOf } from '@/lib/local-notify'
-import { useLocalNotifySync } from '@/lib/local-notify-sync'
 import { usePageTurn } from './use-page-turn'
 import './TabLayout.scss'
 
@@ -48,21 +47,15 @@ export default function TabLayout() {
   useEffect(() => { bodyRef.current?.scrollTo?.({ top: 0 }) }, [pathname])
 
   /*
-   * 手机弹窗提醒的排程与"点开跳到哪"都挂在这一层（M10 交付二）：
-   * 它要**任意页都在**（数据变了就要重排），放在某一页里迟早漏。
-   * 浏览器里这一整套是空转的：插件调用直接返回、一条都不排（见 lib/local-notify）。
+   * 手机弹窗提醒的**排程**不在这里（M10 交付二）：它挂在 `main.tsx` 的根层上，
+   * 因为**退出登录时也要清掉已排的提醒**——挂在布局里的话登录态组件一卸载，
+   * 清理代码就永远不会跑（实测踩过：退出登录后 9 条闹钟还在）。见 lib/local-notify-sync 文件头。
+   *
+   * 这里只留"**点开手机上的那条提醒后跳到哪**"：那个要用 `navigate`，必须在路由里。
    */
-  useLocalNotifySync()
 
   /*
-   * 菜谱列表/详情不在 Tab 里，要借一个 Tab 表示"人在哪一块"：
-   * - **从哪个 Tab 进来的就亮哪个**（读 `state.from`，与返回按钮同一份来源）；
-   * - 来源认不出（地址栏直接敲、或菜谱小书内部自己跳）才退回「厨房」——菜谱库本来就归厨房。
-   * 原先一律亮厨房：从发现页「摇一道」过去后，用户点那个亮着的 Tab 会落到厨房菜单页，
-   * 而他明明是从发现页过来的（实测踩过）。
-   */
-  /*
-   * 用户点了手机上的那条提醒（M10 交付二）：跳到它指的地方。
+   * 用户点了手机上的那条提醒：跳到它指的地方。
    *
    * 这里的去处来自通知自己带的 `extra.to`（排的时候写进去的），不按"现在有什么提醒"重算——
    * 用户点的是**那条具体的提醒**，哪怕那件事已经变了（比如那一餐刚被取消），
@@ -82,6 +75,13 @@ export default function TabLayout() {
     return () => handle?.remove()
   }, [navigate])
 
+  /*
+   * 菜谱列表/详情不在底部 Tab 里，要借一个 Tab 表示"人在哪一块"：
+   * - **从哪个 Tab 进来的就亮哪个**（读 `state.from`，与返回按钮同一份来源）；
+   * - 来源认不出（地址栏直接敲、或菜谱小书内部自己跳）才退回「厨房」——菜谱库本来就归厨房。
+   * 原先一律亮厨房：从发现页「摇一道」过去后，用户点那个亮着的 Tab 会落到厨房菜单页，
+   * 而他明明是从发现页过来的（实测踩过）。
+   */
   const recipeOwner = tabOf((location.state as { from?: unknown } | null)?.from)
   const isRecipePage = pathname === '/recipes' || pathname.startsWith('/recipes/')
   const borrowedTab = isRecipePage ? recipeOwner ?? '/kitchen' : null

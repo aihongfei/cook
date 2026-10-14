@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toast'
 import { installAndroidBack } from '@/lib/android-back'
+import { LocalNotifySync } from '@/lib/local-notify-sync'
 import { router } from '@/router'
 import '@/styles/tailwind.css'
 import '@/styles/index.scss'
@@ -31,6 +32,12 @@ createRoot(document.getElementById('root')!).render(
       <RouterProvider router={router} />
       {/* 全局提示层：放在 Router 外面，换页时不会被卸载 */}
       <Toaster />
+      {/*
+        手机弹窗提醒的排程（M10 交付二）：也放在 Router **外面**。
+        它在登录时排、**退出登录时清**——挂在路由里的布局上时，退出登录会把那个布局卸载，
+        清理代码因此永远不执行（实测：退出后 9 条闹钟留在系统里）。见 lib/local-notify-sync 文件头。
+      */}
+      <LocalNotifySync />
     </QueryClientProvider>
   </StrictMode>,
 )

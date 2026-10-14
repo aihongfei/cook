@@ -4140,3 +4140,18 @@ adb shell dumpsys alarm | grep -c "Alarm{.*com.yushan.cook"   # 9（自己排回
 1. **窗口内的每一天**都要有闹钟（不只是今天）——少了就是提前排没生效；
 2. **删掉一样食材 / 取消一餐之后**，对应的那条闹钟要**消失**（整批替换的证据）；
 3. **退出登录后**一条都不该留（那些句子里带着"这家今天吃什么"）。
+
+第 3 条**必须走界面点一次**，不能只看代码：这一版第一次就是"代码看着对、实测 9 条还在"。
+做法是先在登录态确认条数，再点「我的 → 退出登录」，然后重数：
+
+```bash
+# 登录态（应为 9）
+adb shell dumpsys alarm | awk '/Alarm\{/{if ($0 ~ /com.yushan.cook/) { found=1 } else { found=0 }} found && /origWhen=/{print}' | grep -c origWhen
+# 界面上点「我的」→「退出登录」，然后（应为 0）
+adb shell dumpsys alarm | awk '/Alarm\{/{if ($0 ~ /com.yushan.cook/) { found=1 } else { found=0 }} found && /origWhen=/{print}' | grep -c origWhen
+```
+
+**根因是位置不是代码**：同步器原先挂在 `TabLayout` 上，退出登录会把那个布局卸载，
+"没登录就 `cancelAll()`"的 effect 因此永远不跑。现在挂在 `main.tsx` 根层
+（与 `Toaster` 并列、`<RouterProvider>` 之外）——见 `DECISIONS.md` D-080 八。
+**判据一句话：清理逻辑不能由"它要清理的那个状态"的组件托管。**

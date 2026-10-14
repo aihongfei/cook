@@ -53,9 +53,19 @@ export function flattenFridge(zones: FridgeZoneGroup[]): FridgeItem[] {
 }
 
 /**
- * 挂在外壳上的同步器（`TabLayout` 里调一次）。
+ * 本机通知的同步器（在 `main.tsx` 里挂一次，与 `Toaster` 并列、**在路由之外**）。
  *
- * 三件事：**要权限（没问过就问一次）→ 排程 → 数据变了重排**。
+ * 三件事：**要权限（没问过就问一次）→ 排程 → 数据变了重排**；
+ * 没登录时是第四件事：**把上一次会话排下的提醒撤干净**。
+ *
+ * ## 为什么必须在路由之外（这里踩过一次真问题）
+ *
+ * 原先挂在 `TabLayout` 上，而**退出登录会把 `TabLayout` 整个卸载**——于是
+ * "没登录就 `cancelAll()`"那段代码永远不会执行：登录态的组件都卸载了，谁来清？
+ * 实测抓到的表现是**退出登录后那 9 条闹钟还在系统里**（提醒里带着菜名与人数）。
+ * 挂到根层之后组件跨登录态一直活着，`enabled` 从 true 变 false 的那一刻清理才真的发生。
+ *
+ * 另一条理由：它**不需要路由**（用到的只有查询与登录态），挂在外面比挂在某个布局里更诚实。
  */
 export function useLocalNotifySync(): void {
   const userId = useAuth((state) => state.user?.id ?? null)
@@ -138,6 +148,16 @@ export function useLocalNotifySync(): void {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch 是稳定引用，列进去只会让监听重复挂
   }, [enabled])
+}
+
+/**
+ * 挂载点：`main.tsx` 里放一个（渲染 `null`）。
+ *
+ * 抽成组件是因为 `main.tsx` 里没法直接调 hook；它不是"为了好看的一层包装"。
+ */
+export function LocalNotifySync(): null {
+  useLocalNotifySync()
+  return null
 }
 
 export { rescheduleAll }
