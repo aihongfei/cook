@@ -1,6 +1,7 @@
-import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import { CurrentUserId, JwtAuthGuard } from '../auth/jwt-auth.guard'
+import { PatrolAuthGuard } from './notifications.patrol.guard'
 import { NotificationsService } from './notifications.service'
 
 interface PrefsBody {
@@ -14,6 +15,8 @@ interface PrefsBody {
 interface ReadBody { id?: unknown }
 /** 一键已读：**当前列表里**那些 id（不是"这个账号所有未读"，见 service 的说明） */
 interface ReadAllBody { ids?: unknown }
+/** 领巡查令牌：带这台手机的稳定标识与名字（都只用于排查与分行，不参与鉴权） */
+interface PatrolTokenBody { deviceId?: unknown; device?: unknown }
 
 /**
  * 消息提醒（M10）。口径见 D-078。
@@ -76,5 +79,50 @@ export class NotificationsController {
       if (typeof body?.[key] === 'boolean') patch[key] = body[key]
     }
     return this.notifications.updatePrefs(userId, patch)
+  }
+
+  /**
+   * 领一枚**巡查令牌**给这台手机（M10 交付三，**凭登录态领**）。
+   *
+   * 后台那段代码跑在系统的调度器里、没有登录会话，所以要一枚自己的凭据——
+   * 而它不能借用刷新令牌（一用就轮换，会把用户当场登出，见 service 的说明）。
+   *
+   * `deviceId` 是**必填**的：令牌按"账号 + 设备"记一行，同一台手机重登不会顶掉家里另一台。
+   */
+  @Post('patrol/token')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '这台手机领一枚后台取提醒的令牌（M10 交付三）' })
+  async patrolToken(@CurrentUserId() userId: string, @Body() body: PatrolTokenBody) {
+    return this.notifications.issuePatrol(userId, body?.deviceId, body?.device)
+  }
+
+  /**
+   * 吊销巡查令牌（退出登录时调）。
+   *
+   * 带 `deviceId` 就只吊销那一台（这台手机退出，家里的平板不该跟着哑掉）；
+   * 不带则吊销该账号全部。
+   */
+  @Delete('patrol/token')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '吊销这台手机（或全部）的巡查令牌（退出登录时调）' })
+  async revokePatrolToken(@CurrentUserId() userId: string, @Query('deviceId') deviceId?: string) {
+    return this.notifications.revokePatrol(userId, deviceId)
+  }
+
+  /**
+   * 手机在后台**巡查一次**（凭巡查令牌，不是登录令牌）。
+   *
+   * 这是"应用在后台也能收到家里刚发生的事"那一半的实现入口：系统的调度器
+   * 每隔一段时间唤起一段不依赖 WebView 的 JS，它到这里问一句"有没有新的"，
+   * 有就地弹本机通知。**取的是"上次之后又发生的事"**（`since` 由手机带来），
+   * 所以同一条不会反复弹（口径见 `patrol.rules`）。
+   */
+  @Get('patrol')
+  @UseGuards(PatrolAuthGuard)
+  @ApiOperation({ summary: '取"上次之后又发生的"提醒（手机后台用，凭巡查令牌）（M10 交付三）' })
+  async patrol(@CurrentUserId() userId: string, @Query('since') since?: string) {
+    return this.notifications.patrol(userId, since)
   }
 }

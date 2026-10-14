@@ -24,6 +24,29 @@ const config: CapacitorConfig = {
     androidScheme: 'http',
     cleartext: true,
   },
+  plugins: {
+    /*
+     * 后台巡查（M10 交付三）：让"别人点了菜"这类事在**应用退到后台之后**也能弹出来。
+     *
+     * 为什么非它不可（实测）：应用退到后台约 40 秒，WebView 里的 JS 就完全不执行了
+     * （探针每 20 秒记一次，后台只记到第一次；拉回前台立刻恢复）。所以"页面里写个定时器"
+     * 这条路根本不通，必须把那段逻辑交给**系统的调度器**（WorkManager）——它不看应用的死活。
+     *
+     * `interval: 15` 是 Android `PeriodicWorkRequest` 的**下限**（系统不接受更短），
+     * 实际时机由系统按省电策略挑（息屏久置会更稀疏）。这不是"实时推送"，
+     * 而是"最多晚一刻钟知道"——比"关掉就完全不知道"强得多，口径见 D-081。
+     *
+     * `src: 'runners/patrol.js'` 在 public/ 下，构建时会被原样拷进 APK 的 assets。
+     */
+    BackgroundRunner: {
+      label: 'com.yushan.cook.patrol',
+      src: 'runners/patrol.js',
+      event: 'patrolTick',
+      repeat: true,
+      interval: 15,
+      autoStart: true,
+    },
+  },
 }
 
 export default config

@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { jwtSecret } from '../auth/jwt.config'
 import { PrismaService } from '../recipes/prisma.service'
 import { NotificationsController } from './notifications.controller'
+import { PatrolAuthGuard } from './notifications.patrol.guard'
 import { NotificationsService } from './notifications.service'
 
 /**
@@ -13,6 +14,9 @@ import { NotificationsService } from './notifications.service'
  * 不调用它们的服务——反过来让它们依赖本模块会成环。判据里用到的纯函数（`visibleToMember`、
  * `expiryState`）是**从各自模块直接引的纯规则**，这与"服务之间不互相调"是两件事：
  * 纯规则没有状态，引它不会带来耦合，反而是"同一口径只有一份"的保证。
+ *
+ * 两个守卫并存：`JwtAuthGuard`（界面上的人）与 `PatrolAuthGuard`（后台那段代码，
+ * 凭巡查令牌）。两条路对下游完全一样——都把身份挂到 `request.userId`（见守卫里那段说明）。
  */
 @Module({
   imports: [
@@ -22,7 +26,7 @@ import { NotificationsService } from './notifications.service'
     }),
   ],
   controllers: [NotificationsController],
-  providers: [PrismaService, NotificationsService, JwtAuthGuard],
+  providers: [PrismaService, NotificationsService, JwtAuthGuard, PatrolAuthGuard],
   // 导出给 AiModule 用：AI 若以后要"看我的提醒"，走同一份实现（不另查一遍）
   exports: [NotificationsService],
 })

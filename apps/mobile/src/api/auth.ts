@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth, type AuthUser } from '@/stores/auth'
 import { useAiAssistantSession } from '@/stores/ai-assistant-session'
 import { apiClient, refreshSession } from './client'
+import { releasePatrol } from '@/lib/patrol-sync'
 
 export type { AuthUser }
 
@@ -40,7 +41,14 @@ export async function login(input: { account: string; password: string }): Promi
 
 /** 退出登录：先让后端吊销刷新令牌，再清本地（后端失败也要清本地，否则用户"退不出去"） */
 export async function logout(): Promise<void> {
-  const { refreshToken } = useAuth.getState()
+  const { refreshToken, user } = useAuth.getState()
+  /*
+   * **巡查令牌先交还**（M10 交付三）：它要凭登录态调，所以必须排在清会话之前。
+   * 不交还的话，退出之后那台手机仍然每 15 分钟在后台取到"这家有什么提醒"——
+   * 本地清了、服务端还认，那是没退干净（与下面 AI 对话同一类隐私问题）。
+   * `releasePatrol` 自己吞掉网络错误，不阻塞退出。
+   */
+  if (user?.id) await releasePatrol(user.id)
   try {
     await apiClient.post('/auth/logout', { refreshToken })
   } catch {

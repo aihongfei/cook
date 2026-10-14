@@ -49,6 +49,8 @@ model User {
   notificationPref   NotificationPref?
   /// 这个账号的通知历史（M10 的事件日志）
   notificationEvents NotificationEvent[]
+  /// 这个账号名下手机的巡查令牌（M10 交付三：后台取提醒用，**不是**登录令牌）
+  patrolTokens       NotificationPatrolToken[]
   /// 这个账号收藏的菜（M1 / F1-09）
   favorites          Favorite[]
   /// 这个账号放进冰箱的食材（M6 / F6-01）
@@ -698,4 +700,51 @@ model NotificationEvent {
 
   @@unique([dedupeKey])
   @@index([userId, at])
+}
+
+/// 手机的**巡查令牌**（M10 交付三）：让"应用在后台（或刚被杀掉）时也能收到家里刚发生的事"。
+///
+/// ## 为什么不能复用登录令牌
+///
+/// 后台那段代码跑在系统的调度器里（WorkManager），**没有 WebView、也没有登录会话**：
+/// 它手里必须有一份自己的凭据。而登录会话的 access token 只有 2 小时、refresh token
+/// **一用就轮换**（见 `AuthService.refresh`）——后台拿它去续期，就会把用户手里那对令牌
+/// 换掉，用户下次打开应用直接被登出。**所以巡查令牌是单独一份、且永不轮换**。
+///
+/// ## 它的权限刻意只有一条
+///
+/// 只能读"我自己的提醒列表"（`GET /notifications` 的同一条口径），**不能**点菜、不能改冰箱、
+/// 不能读菜谱以外的东西。丢了最多泄露"这家有什么提醒"，不能改任何数据——所以
+/// 它出现在手机本地存储里的风险是可接受的（与"手机里存着 30 天有效的刷新令牌"同一级别）。
+///
+/// ## 撤销
+///
+/// 退出登录时连同它一起吊销（`revokedAt`）。
+///
+/// ## 为什么按"账号 + 设备"一行（而不是按账号一行）
+///
+/// 第一版是 `userId` 唯一——**那是错的，而且错得很隐蔽**：同一个人在两台手机上
+/// （爸爸的手机 + 平板）打开应用时，第二次登录会把第一台那枚令牌换掉，
+/// **第一台从此静默收不到任何提醒**，而它看起来一切正常。现在按
+/// `[userId, deviceId]` 唯一：每台设备各留各的，互不顶替。
+/// `deviceId` 由手机生成一次、存在本地（换账号才换），所以"同一台手机上换个人登录"
+/// 也会记成两行——那是对的，那是两件不同的授权。
+model NotificationPatrolToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 手机的稳定标识（手机自己生成、存在本地；**不是**硬件信息，卸载重装会换）
+  deviceId  String    @db.VarChar(64)
+  /// 只存摘要（与刷新令牌、重置令牌同一条口径，见 `modules/auth/token.ts`）
+  tokenHash String    @unique @db.VarChar(64)
+  expiresAt DateTime
+  /// 哪台手机在用（手机自己报的名字，只用于排查；用户可以随便改，**不参与鉴权**）
+  device    String?   @db.VarChar(64)
+  /// 上次真的用它取过提醒的时刻（排查"这台手机还在不在问"）
+  lastUsedAt DateTime?
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([userId, deviceId])
 }

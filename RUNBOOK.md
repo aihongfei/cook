@@ -4157,3 +4157,106 @@ adb shell dumpsys alarm | awk '/Alarm\{/{if ($0 ~ /com.yushan.cook/) { found=1 }
 "没登录就 `cancelAll()`"的 effect 因此永远不跑。现在挂在 `main.tsx` 根层
 （与 `Toaster` 并列、`<RouterProvider>` 之外）——见 `DECISIONS.md` D-080 八。
 **判据一句话：清理逻辑不能由"它要清理的那个状态"的组件托管。**
+
+## R-072 后台取提醒（M10 交付三）：怎么跑、怎么验、为什么不能用定时器（✅ 已验证，2026-10-14）
+
+配套：`DECISIONS.md` **D-081**（为什么用系统调度器、为什么单独一枚令牌、为什么按设备分行、为什么判据是时刻）。
+
+### 一、跑测试
+
+```bash
+# 后端：巡查的纯规则（12 条）+ 全量
+pnpm --dir services/api test                # 541 例（其中 2 个既有失败要读 /tmp/all-ingredients.json，与本次无关）
+pnpm --dir services/api run test:http:patrol # 33/33（真请求，自带前置数据）
+
+# 前端：设备标识与水位线（6 条）+ 接线层（4 条）+ 全量
+pnpm --dir apps/mobile test                  # 636/636（60 文件）
+pnpm --dir apps/mobile typecheck             # tsc -b；**这一步别省**
+```
+
+### 二、装到模拟器
+
+与交付二同一套（R-071 §二），但**多一个前提**：这个插件带一个 2.4MB 的原生 JS 引擎（`android-js-engine-release.aar`），要靠它自己的 postinstall 把路径写进 `android/app/build.gradle`。pnpm 默认不跑依赖的安装脚本，所以 `apps/mobile/pnpm-workspace.yaml` 里有一条 `allowBuilds: '@capacitor/background-runner': true`——**缺了它构建会停在"找不到 android-js-engine"**。
+
+装完自查两件事：
+
+```bash
+# ① 引擎是否进了 APK
+unzip -l apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk | grep -i libJSEngine
+# ② 那段后台 JS 是否进了 assets
+ls apps/mobile/android/app/src/main/assets/public/runners/patrol.js
+```
+
+### 三、验收看**系统调度器**，不是看界面
+
+"后台能被唤起"的唯一可信证据是系统里那个周期任务，不是应用里一句"已开启"：
+
+```bash
+# 周期任务是否注册（要联网、最小延迟约 15 分钟）
+adb shell dumpsys jobscheduler | grep -A 14 "RunnerWorker" | grep -E "Minimum latency|Required constraints"
+# 期望：Minimum latency: +14m59s…  /  Required: TIMING_DELAY CONNECTIVITY FLEXIBILITY
+```
+
+实测输出（2026-10-14 21:24，刚切到后台那一刻）：
+
+```
+D WM-SystemJobScheduler: Scheduling work ID d67e64e4-61ce-463a-88e8-4c8739e884a4Job ID 0
+  JOB androidx.work.systemjobscheduler:u0a239/0: 98784f5 #RunnerWorker#@…com.yushan.cook/…
+      Minimum latency: +14m59s359ms
+      Required constraints: TIMING_DELAY CONNECTIVITY FLEXIBILITY [0x90200000]
+```
+
+### 四、验"真的会弹"：分两步（手动触发 + 等系统自己触发）
+
+**第一步（立刻验逻辑，不等 15 分钟）**——在应用里手动派发那个事件：
+
+```bash
+node /tmp/cdp.mjs http://127.0.0.1:9222 --run "window.Capacitor.Plugins.CapacitorBackgroundRunner.dispatchEvent({ label: 'com.yushan.cook.patrol', event: 'patrolTick', details: {} })"
+```
+
+⚠️ **插件在 `window.Capacitor.Plugins` 下的名字是 `CapacitorBackgroundRunner`**（不是 `BackgroundRunner`），与 `import` 时的名字不一样——用错会得到 `Cannot read properties of undefined`。
+
+造一件"别人做的事"再巡查一次，然后看系统通知栏：
+
+```bash
+adb shell dumpsys notification --noredact | grep -E "android.title=String|NotificationRecord.*yushan"
+```
+
+实测输出（决定性的一行）：
+
+```
+NotificationRecord(… pkg=com.yushan.cook … id=1644611955 … flags=AUTO_CANCEL …)
+              android.title=String (10月20日晚餐做好了)
+```
+
+那是**爸爸标了「做好了」**这件事，由巡查路径送达——不是本机算出来的。
+
+**第二步（验系统真的会自己唤起）**：制造一件新事 → 按 HOME → `am kill` → 等 15 分钟左右。进程死后任务仍在：
+
+```bash
+adb shell am kill com.yushan.cook
+adb shell pidof com.yushan.cook || echo "(已无进程)"
+adb shell dumpsys jobscheduler | grep -c "RunnerWorker"    # 应为 4（进程死了也还在）
+```
+
+### 五、那三条**不是 bug** 的现象（照实判断，别急着改代码）
+
+| 现象 | 是不是 bug | 为什么 |
+| --- | --- | --- |
+| 巡查返回 `popped: 0`，但通知中心里明明有新事 | **不是** | 那件事多半是**自己做的**（自己定的菜单/自己标的做好了不提醒自己，与交付一同一条口径）；也可能是 `< since` |
+| 第一次巡查（不带 `since`）一条都不弹 | **不是** | 刻意的：那种"新"是伪新，十几条历史会一次性糊一屏 |
+| 15 分钟到了却没响 | **多半不是** | 周期任务是"最多晚一刻钟"，实际时机由系统按省电策略挑；息屏久置会更稀疏 |
+
+### 六、排查顺序（照这个顺序看，别乱猜）
+
+1. **`adb logcat | grep -i runner`**：`patrol: 配置已更新（账号 …）` 说明主应用把令牌送到了；`patrol: 弹了 N 条` 说明那段代码跑了；
+2. **`adb shell dumpsys jobscheduler | grep -c RunnerWorker`**：为 0 说明周期任务压根没注册（多半是 `capacitor.config.ts` 里 `BackgroundRunner` 那段没写对，或忘了 `cap sync`）；
+3. **令牌失效的表现**：logcat 里那段代码收到 401 后会把令牌清掉、之后不再空问；**重新在应用里登录一次**就会换新（`PatrolSync` 在登录态变化时领新令牌）；
+4. **`CapacitorKV` 读不到键会抛**（`cannot read property 'value' of null`）：这是交付三第一次的真实故障，取值必须**先判空**（见 `public/runners/patrol.js` 里的 `kvGet`）。
+
+### 七、改完这一步必须复查的东西
+
+1. **退出登录**：那台手机的令牌要立刻 401（`DELETE /notifications/patrol/token?deviceId=` 之后），而且**另一台设备不受影响**；
+2. **同一台重登**：旧令牌作废、新令牌可用；
+3. **巡查弹出来的每一条**都能在通知中心里找到**同一个 id、同一句话**（口径同源，脚本里有这条断言）；
+4. **换账号**：下一个人的巡查不能把上一个人的旧事当新的弹（水位线按账号分开，见 `src/api/patrol.ts`）。

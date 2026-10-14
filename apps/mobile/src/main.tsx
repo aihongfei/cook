@@ -5,6 +5,7 @@ import { RouterProvider } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toast'
 import { installAndroidBack } from '@/lib/android-back'
 import { LocalNotifySync } from '@/lib/local-notify-sync'
+import { PatrolSync } from '@/lib/patrol-sync'
 import { router } from '@/router'
 import '@/styles/tailwind.css'
 import '@/styles/index.scss'
@@ -38,6 +39,12 @@ createRoot(document.getElementById('root')!).render(
         清理代码因此永远不执行（实测：退出后 9 条闹钟留在系统里）。见 lib/local-notify-sync 文件头。
       */}
       <LocalNotifySync />
+      {/*
+        后台巡查（M10 交付三）：登录后把这台手机的巡查令牌交给系统的调度器，
+        退出登录时交还。同样放在 Router 外面——它要跨登录态才看得见"从有到无"那一步
+        （交付二在这一点上踩过一次，见 lib/local-notify-sync 文件头）。
+      */}
+      <PatrolSync />
     </QueryClientProvider>
   </StrictMode>,
 )

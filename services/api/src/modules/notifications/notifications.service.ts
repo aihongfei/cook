@@ -3,11 +3,13 @@ import { PrismaService } from '../recipes/prisma.service'
 import { MEAL_LABEL, dateKey, dayWindow, visibleToMember } from '../orders/orders.rules'
 import type { FamilyRole } from '../family/family.roles'
 import { expiryState } from '../fridge/fridge.rules'
+import { digest, randomToken } from '../auth/token'
 import {
   buildNotifications, dateKey as calendarKey, dedupeKeyOf, mergeStored, PREP_WINDOW_DAYS, unreadByArea, unreadCount,
   type DoneFact, type FridgeFact, type NotificationInput, type NotificationItem, type NotificationKind,
   type NotificationPrefs, type PlanFact, type PrepFact, type NotificationRow,
 } from './notifications.rules'
+import { PATROL_MAX_ITEMS, nextSince, notifyIdOf, pickPatrolItems, type PatrolItem } from './patrol.rules'
 
 /** 通知里往上翻多久（天）。见 `list()` 里那段说明 */
 const LOOKBACK_DAYS = 30
@@ -282,6 +284,104 @@ export class NotificationsService {
     })
     return { mealPlan: row.mealPlan, mealDone: row.mealDone, expiry: row.expiry, prep: row.prep }
   }
+
+  /**
+   * 发一枚**巡查令牌**给这台手机（M10 交付三）。
+   *
+   * 后台那段代码没有登录会话，必须有自己的凭据——为什么不能借用刷新令牌，
+   * 见 `schema.prisma` 里 `NotificationPatrolToken` 那段说明（一句话：
+   * 刷新令牌一用就轮换，后台拿它续期会把用户当场登出）。
+   *
+   * **按"账号 + 设备"记一行**：同一台手机重登只换自己那一行，**不会顶掉家里另一台**
+   * （第一版按账号唯一，那会让第二台手机一登录就把第一台静默废掉——见 schema 里的说明）。
+   */
+  async issuePatrol(userId: string, rawDeviceId: unknown, rawDevice: unknown) {
+    const deviceId = typeof rawDeviceId === 'string' && rawDeviceId.trim() ? rawDeviceId.trim().slice(0, 64) : null
+    if (!deviceId) throw new BadRequestException('缺少设备标识')
+    const device = typeof rawDevice === 'string' && rawDevice.trim() ? rawDevice.trim().slice(0, 64) : null
+
+    const token = randomToken()
+    const expiresAt = new Date(Date.now() + PATROL_TTL_DAYS * 24 * 60 * 60 * 1000)
+    await this.prisma.notificationPatrolToken.upsert({
+      where: { userId_deviceId: { userId, deviceId } },
+      create: { userId, deviceId, tokenHash: digest(token), expiresAt, device },
+      // 换新令牌时顺带把吊销状态清掉（重新登录 = 重新授权这台手机）
+      update: { tokenHash: digest(token), expiresAt, device, revokedAt: null },
+    })
+    return { token, expiresAt: expiresAt.toISOString() }
+  }
+
+  /**
+   * 吊销（退出登录时调）。
+   *
+   * 给了 `deviceId` 就只吊销那一台（用户在这台手机上点了退出，家里的平板不该跟着哑掉）；
+   * 没给就吊销这个账号的全部（"退出所有设备"的语义，与 `logout` 里那条一致）。
+   */
+  async revokePatrol(userId: string, rawDeviceId: unknown) {
+    const deviceId = typeof rawDeviceId === 'string' && rawDeviceId.trim() ? rawDeviceId.trim() : null
+    const result = await this.prisma.notificationPatrolToken.updateMany({
+      where: { userId, revokedAt: null, ...(deviceId ? { deviceId } : {}) },
+      data: { revokedAt: new Date() },
+    })
+    return { revoked: result.count }
+  }
+
+  /**
+   * 手机在后台巡查一次：**只要"取过之后又发生的事"**。
+   *
+   * 口径与通知中心**完全同一条**（直接调 `list()`，不另查一遍）：那些句子、那些去处
+   * 都由同一份实现产出，所以手机弹出来的话与用户点进应用看到的**一模一样**。
+   *
+   * 三条刻意的：
+   * - **第一次（没有 `since`）一条都不弹**：那种"新"是伪新（历史会一次性糊到脸上），
+   *   而且此刻用户本来就在看着应用（见 `patrol.rules`）；
+   * - **最多弹 `PATROL_MAX_ITEMS` 条**，取最新的那些；其余仍在应用内的通知中心里，
+   *   不丢、只是不弹——一次刷一屏只会让人把通知全划掉；
+   * - `since` **推进到全部提醒里最新的那个时刻**（不是"弹出去的这几条里最新的"）：
+   *   否则被上限挡下的那些会在下一次巡查时变成"新的"再弹一轮，连着弹四十分钟。
+   */
+  async patrol(userId: string, rawSince: unknown): Promise<{ items: PatrolItem[]; since: string | null; unread: number }> {
+    const since = parseSince(rawSince)
+    const board = await this.list(userId)
+
+    const picked = pickPatrolItems(board.items, since, PATROL_MAX_ITEMS)
+    const next = nextSince(board.items, since)
+
+    await this.prisma.notificationPatrolToken.updateMany({
+      where: { userId },
+      data: { lastUsedAt: new Date() },
+    })
+
+    return {
+      items: picked.map((item) => ({
+        id: item.id,
+        title: item.title,
+        body: item.body,
+        to: item.to,
+        at: item.at,
+        tag: item.tag,
+        // 数字 id 由这一侧算好（那段后台代码 import 不了我们的前端模块，见 patrol.rules）
+        notifyId: notifyIdOf(item.id),
+      })),
+      since: next ? next.toISOString() : null,
+      unread: board.unread,
+    }
+  }
+}
+
+/** 巡查令牌有效期（30 天，与刷新令牌同数） */
+const PATROL_TTL_DAYS = 30
+
+/**
+ * 解析手机带回来的 `since`。
+ *
+ * **坏的、看不懂的一律当"没有"**（返回 null）：那会退回"这次一条都不弹"，
+ * 比"按一个看不懂的时刻去比"安全——后者可能把十几条历史当成新的全弹出来。
+ */
+function parseSince(raw: unknown): Date | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  const parsed = Date.parse(raw)
+  return Number.isFinite(parsed) ? new Date(parsed) : null
 }
 
 /** 按 kind 数未读（各 Tab 的红点各取自己那一项，取不到就是 0） */

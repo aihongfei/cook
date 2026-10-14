@@ -1,12 +1,12 @@
 import { BadRequestException, ConflictException, Injectable, UnauthorizedException } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
-import { createHash, randomBytes } from 'node:crypto'
 import { PrismaService } from '../recipes/prisma.service'
 import { MailService } from '../mail/mail.service'
 import {
   normalizeAccount, normalizeEmail, validateAccount, validateAvatar, validateEmail, validateNickname, validatePassword,
 } from './account.rules'
 import { hashPassword, verifyPassword } from './password.service'
+import { digest, randomToken } from './token'
 
 export interface PublicUser {
   id: string
@@ -42,11 +42,6 @@ function toPublicUser(user: { id: string; account: string; nickname: string; ava
     email: user.email,
     createdAt: user.createdAt.toISOString(),
   }
-}
-
-/** 刷新令牌只存摘要：即使数据库泄漏，也没法拿去换 access token */
-function digest(token: string): string {
-  return createHash('sha256').update(token).digest('hex')
 }
 
 @Injectable()
@@ -116,6 +111,16 @@ export class AuthService {
 
   /** 退出登录：吊销这个刷新令牌（access token 是短时 JWT，到期自然失效） */
   async logout(refreshToken: string | null, userId: string): Promise<{ revoked: number }> {
+    /*
+     * 巡查令牌一并吊销（M10 交付三）：那枚令牌是"这台手机可以在后台替你取提醒"的凭据，
+     * 退出登录就是把它交还回去的时刻。不吊销的话，退出之后那台手机仍然每 15 分钟
+     * 拿到"这家有什么提醒"——本地清了、服务端还认，那是**没退干净**。
+     * 与上面的刷新令牌放在同一个动作里，因为它俩的语义完全相同（都是"我的会话凭据"）。
+     */
+    await this.prisma.notificationPatrolToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    })
     if (refreshToken) {
       const result = await this.prisma.refreshToken.updateMany({
         where: { tokenHash: digest(refreshToken), userId, revokedAt: null },
@@ -179,7 +184,7 @@ export class AuthService {
       return { sent: true }
     }
 
-    const token = randomBytes(32).toString('base64url')
+    const token = randomToken()
     await this.prisma.passwordReset.create({
       data: {
         tokenHash: digest(token),
@@ -234,7 +239,7 @@ export class AuthService {
   private async issueTokens(userId: string): Promise<AuthTokens> {
     const expiresIn = Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 7200)
     const token = await this.jwt.signAsync({ sub: userId }, { expiresIn })
-    const refreshToken = randomBytes(32).toString('base64url')
+    const refreshToken = randomToken()
     await this.prisma.refreshToken.create({
       data: {
         tokenHash: digest(refreshToken),
