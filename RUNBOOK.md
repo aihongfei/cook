@@ -4018,3 +4018,125 @@ check(
 ### 六、类型检查**不是可选项**（这一刀它抓出两处真错）
 
 测试全绿（591/591）而 `tsc -b` 报了两条：`emptyCard` 没补新增的 `doneBy`/`doneAt`、详情页的 `ConfirmMenuSheet` 漏了 `onAdjustDiners`。**两条都是运行时才会炸的**（撤到空卡时字段缺、点「去定人数」时函数是 undefined），vitest 不做类型检查所以一条都没拦住。规矩：**改完接口形状必须跑 `tsc`，不能只看测试绿不绿。**
+
+## R-071 手机上的弹窗提醒：怎么跑、怎么验、边界在哪（M10 交付二，✅ 已验证，2026-10-14）
+
+配套：`DECISIONS.md` **D-080**（为什么默认开着不给开关、为什么一律不精确闹钟、id 怎么算、为什么必须提前排）。
+
+### 一、跑测试
+
+```bash
+# 排程规则（纯函数，28 条）：提前排、窗口、过期不再催、id 稳定与取值范围、排序
+pnpm --dir apps/mobile test -- src/lib/local-notify.rules.test.ts
+
+# 前端全集 + 类型检查（**两步都要**，tsc 才能抓到接口形状的错）
+pnpm --dir apps/mobile test          # 622/622（57 文件）
+pnpm --dir apps/mobile typecheck     # tsc -b
+```
+
+### 二、装到模拟器上跑
+
+```bash
+# ① 指向本机网关构建（**别带 --mode server**：那会指向公网，密码与本地不同，登录会失败）
+pnpm --dir apps/mobile build
+pnpm --dir apps/mobile exec cap sync android
+
+# ② 打包安装（debug 才带 devtools，release 不带 —— 见 R-062 六）
+cd apps/mobile/android && ./gradlew assembleDebug -q
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -n com.yushan.cook/.MainActivity
+
+# ③ 网关要能被模拟器访问到
+adb reverse tcp:3000 tcp:3000
+```
+
+### 三、验收要看**系统那一侧**，不是看界面
+
+"排上了"的唯一可信证据是**系统的闹钟表**，不是界面上一句"已开启"（应用侧说排上了而系统里没有，是这类功能最常见的假通过）：
+
+```bash
+adb shell dumpsys alarm > /tmp/alarm-dump.txt
+# 按注册块过滤（`Alarm{...}` 那一行带包名），别拿全局 grep 数——历史记录区也有同名 tag
+awk '/Alarm\{/{if ($0 ~ /com.yushan.cook/) { found=1 } else { found=0 }} found && /origWhen=/{print}' /tmp/alarm-dump.txt \
+  | grep -oE "origWhen=[0-9-]+ [0-9:]+" | sort | uniq -c
+
+# 通知权限
+adb shell dumpsys package com.yushan.cook | grep -i "POST_NOTIFICATIONS" -A 2
+```
+
+实测输出（2026-10-14 20:15）：
+
+```
+   1 origWhen=2026-10-15 09:00:00     ← 明早的到期提醒（提前排的关键证据）
+   1 origWhen=2026-10-15 17:00:00
+   1 origWhen=2026-10-16 11:00:00
+   1 origWhen=2026-10-17 11:00:00
+   1 origWhen=2026-10-18 17:00:00
+   1 origWhen=2026-10-19 11:00:00
+   1 origWhen=2026-10-19 17:00:00
+   1 origWhen=2026-10-20 11:00:00
+   1 origWhen=2026-10-20 17:00:00
+```
+
+**`10-15 09:00` 那条是这一版的验收重点**：它是"明天到期"的食材排出来的，而第一版规则算不出来（只算今天）。少了它就是"早上 9 点前没打开 App 就不响"。
+
+### 四、验"关掉也响"：杀进程 + 实际弹出（两步都要）
+
+```bash
+# ① 杀进程（等价于从最近任务里划掉）
+adb shell input keyevent KEYCODE_HOME
+adb shell am kill com.yushan.cook
+adb shell pidof com.yushan.cook || echo "（已无进程）"
+adb shell dumpsys alarm | grep -c "Alarm{.*com.yushan.cook"     # 应仍为 9
+
+# ② 实际弹一条：在 WebView 里排一条 3 分钟后触发的，然后杀进程等它响
+#    派发（不要 await：CDP 的 awaitPromise 会先超时，原生那侧其实成功了）
+node /tmp/cdp.mjs http://127.0.0.1:9222 --run "(() => {
+  const { LocalNotifications } = window.Capacitor.Plugins;
+  const at = new Date(Date.now() + 180000);
+  window.__t = { at: at.toISOString() };
+  LocalNotifications.schedule({ notifications: [{ id: 999001, title: '关掉也响 · 自测',
+    body: '验证：App 不在前台 / 被划掉也会弹', schedule: { at, allowWhileIdle: true, isExactNotification: false },
+    extra: { to: '/notifications' }, autoCancel: true }] }).then(() => { window.__t.ok = true; });
+  return JSON.stringify(window.__t);
+})()"
+sleep 200; adb shell dumpsys notification --noredact | grep "关掉也响"
+```
+
+实测输出（关键几行）：
+
+```
+NotificationRecord(... pkg=com.yushan.cook ... id=999001 ... flags=ONLY_ALERT_ONCE|AUTO_CANCEL ...)
+                android.title=String (关掉也响 · 自测)
+```
+
+进程已死、通知照样进了系统通知栏——这是"关闭也要通知"的直接证据。
+
+### 五、两条边界（都会让人以为功能坏了，必须知道）
+
+| 操作 | 已排的提醒 | 说明 |
+| --- | --- | --- |
+| 从最近任务**划掉**应用 / 系统回收进程 | **留着** | 闹钟属于系统（`AlarmManager`），与 App 死活无关 |
+| 设置里**强行停止**（`am force-stop`） | **被清掉** | Android 自己的行为，应用无法规避；**重新打开 App 会自动排回来**（实测 0 条 → 9 条） |
+
+强行停止那条实测：
+
+```bash
+adb shell am force-stop com.yushan.cook
+adb shell dumpsys alarm | grep -c "Alarm{.*com.yushan.cook"   # 0
+adb shell am start -n com.yushan.cook/.MainActivity            # 重新打开
+adb shell dumpsys alarm | grep -c "Alarm{.*com.yushan.cook"   # 9（自己排回来）
+```
+
+### 六、WebView 里调试的那个坑（同 R-062 六，这里再记一次实测形态）
+
+- **`uiautomator dump` 在 WebView 上几乎是空的**，别用坐标点；用 CDP（`adb forward tcp:9222 localabstract:webview_devtools_remote_<PID>`）。
+- **`am kill` 之后 WebView 的 devtools socket 会变**：PID 换了就要重新 `adb forward`（`--remove-all` 再 forward），否则报"没找到可用的 page 目标"。
+- **异步插件调用别用 `awaitPromise: true`**：CDP 20 秒先超时，而原生那侧其实已经成功（第一版就是这么误判成"卡住"的）。改成"同步派发 + 回来轮询结果/查系统闹钟"。
+- 应用切到后台时（`document.visibilityState === 'hidden'`）插件调用会挂住——**先把 App 切回前台**再调。
+
+### 七、改完这一步必须复查的东西
+
+1. **窗口内的每一天**都要有闹钟（不只是今天）——少了就是提前排没生效；
+2. **删掉一样食材 / 取消一餐之后**，对应的那条闹钟要**消失**（整批替换的证据）；
+3. **退出登录后**一条都不该留（那些句子里带着"这家今天吃什么"）。

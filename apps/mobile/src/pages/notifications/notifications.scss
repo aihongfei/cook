@@ -6,9 +6,16 @@
   padding-bottom: 18px;
 }
 
+/*
+ * 一行说明 / 一个小节的标题（「眼下 N 件事」「要提醒我什么」「手机上的弹窗提醒」）。
+ *
+ * **默认自己带页面栏距**：这三处都是独立的一行。只有并排那一处例外——
+ * 「眼下 N 件事」在 `.notifications__head` 里与「全部已读」同行，栏距由那一层给
+ * （见文件末尾那两条规则）。原先这里写死 `margin: 0` 而栏距只补在 head 上，
+ * 于是后加的两个小节标题**贴到了屏幕最左边**（用户 2026-10-14 当场指出来）。
+ */
 .notifications__summary {
-  /* 边距由 `.notifications__head` 给（它与「全部已读」并排），这里只管字 */
-  margin: 0;
+  margin: 18px var(--spacing-page) 0;
   font-size: 12.5px;
   color: var(--color-ink-3);
 }
@@ -141,6 +148,7 @@
   margin: 16px var(--spacing-page) 0;
 }
 
+/* 并排这一处：栏距由上一层的 flex 容器给，行自己不再带（否则右边会短一截） */
 .notifications__head .notifications__summary {
   margin: 0;
 }
@@ -163,4 +171,13 @@
 
 .notifications__read-all:disabled {
   opacity: 0.5;
+}
+
+/* 系统权限被拒时的引导（替代下面那条普通说明）。
+   用正文色而不是提示灰：这是一件"需要你去处理、否则收不到"的事，要读得到 */
+.notifications__hint {
+  margin: 10px var(--spacing-page) 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #6e3a1c;
 }

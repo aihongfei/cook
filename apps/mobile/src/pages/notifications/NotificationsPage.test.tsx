@@ -213,8 +213,47 @@ it('那条边界说明留着：说清"什么会弹、什么不会"', async () =>
 
   await screen.findByText('今天晚餐做好了')
   /*
-   * 这句是**最容易被顺手删掉**的一句：它不解释会显得界面更"干净"。
-   * 但没有推送通道时，"饭已做好"不会有手机弹窗——不说，用户就以为提醒坏了。
+   * 这段话**最容易被顺手删掉**：不解释会显得界面更"干净"。
+   * 但没有推送通道时，"别人点了菜/饭已做好"这类远端事件不会有手机弹窗——
+   * 不说清，用户就以为提醒坏了。
+   *
+   * M10 交付二之后它说得更准了：能本机判定的两类（到点做饭、有东西到期）**会弹**，
+   * 其余仍然只在应用内。而"手机会弹"这件事**默认开着、界面上不再有开关**
+   * （用户 2026-10-14：「这个是默认的，不用设置」「删掉这块配置」），
+   * 所以这里只剩一句说明——它必须留着，否则用户不知道什么会弹。
    */
-  expect(screen.getByText(/只在这个应用里看得到/)).toBeTruthy()
+  expect(screen.getByText(/别人点了菜这类「家里刚发生的事」仍然只在应用内看得到/)).toBeTruthy()
+  expect(screen.getByText(/关掉这个应用也会响/)).toBeTruthy()
+})
+
+it('手机弹窗提醒**默认开着**：界面上没有它的开关（用户要求删掉这块配置）', async () => {
+  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS })
+  renderPage()
+
+  await screen.findByText('今天晚餐做好了')
+  expect(screen.queryByRole('switch', { name: '手机弹窗提醒' })).toBeNull()
+  // 但说明还在：不说清"哪些会弹、哪些只在应用里"用户会以为提醒坏了
+  expect(screen.getByText(/关掉这个应用也会响/)).toBeTruthy()
+})
+
+it('到期提醒说的是"到期那天早上"（提前排给系统闹钟，不是只在当天算）', async () => {
+  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS })
+  renderPage()
+
+  // 口径必须写对：写"当天到期时会弹一下"会让人以为只在当天算，
+  // 而真正让"关掉也响"成立的是**提前排**（见 local-notify.rules 的 expiryReminders）
+  expect(await screen.findByText(/冰箱里有东西到期那天早上/)).toBeTruthy()
+})
+
+it('**不给假按钮**：系统权限被拒时只留一句"去设置里打开"（点了没反应的按钮不许有）', async () => {
+  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS })
+  renderPage()
+
+  await screen.findByText('今天晚餐做好了')
+  /*
+   * 浏览器里 `permissionState()` 是 'unsupported'，所以这条路径只在真机上出现——
+   * 单测里能钉住的是**没有那个开关**、以及说明文案的骨架。
+   * 「被拒 → 只给引导、不给按钮」这条纪律见 D-066 与 R-071。
+   */
+  expect(screen.queryByRole('button', { name: /去打开|开启|打开通知/ })).toBeNull()
 })

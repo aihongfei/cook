@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   NOTIFICATION_KINDS, useMarkAllRead, useMarkRead, useNotifications, useUpdateNotificationPrefs,
@@ -8,6 +9,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import { toast } from '@/components/ui/toast'
+import { permissionState, type NotifyPermission } from '@/lib/local-notify'
 import { readBackLink } from '@/pages/back-link'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
 import '../shared.scss'
@@ -57,6 +59,17 @@ export default function NotificationsPage() {
   const items = board.data?.items ?? []
   const unreadItems = items.filter((item) => item.unread)
   const myPrefs = board.data?.prefs
+
+  /*
+   * 系统通知权限状态：只用来**如实说明**（比如"被系统关掉了、去设置里打开"），
+   * 不是开关——手机弹窗提醒默认开着（用户 2026-10-14 定的）。
+   * 浏览器里是 'unsupported'，那段话自然不出现。
+   */
+  const [notifyState, setNotifyState] = useState<NotifyPermission | null>(null)
+  useEffect(() => {
+    void permissionState().then(setNotifyState)
+  }, [])
+
 
   /**
    * 点开一条：**先标已读，再跳走**。
@@ -166,9 +179,26 @@ export default function NotificationsPage() {
                 </label>
               ))}
             </div>
-            <p className="notifications__note">
-              提醒只在这个应用里看得到——手机上的弹窗提醒（到点该做饭、有东西快过期）要在装到手机上的那版里才有。
-            </p>
+            {/*
+              一条说明（不是开关）：手机弹窗提醒**默认开着**（用户 2026-10-14：
+              「这个是默认的，不用设置」「删掉这块配置」），所以这里不再放任何可配的东西——
+              但必须留一句话说清**哪些会弹、哪些只在应用里看得到**：
+              本机能算的那两类（到点做饭、有东西到期）关掉 App 也会弹；
+              "别人点了菜"这类远端事件没有推送通道就送不到（RISKS R-63），不说用户会以为坏了。
+              被系统拒了的情形换成"去设置里打开"那条路——**不给按钮**（系统不会再弹框，
+              点了没反应就是假入口，D-066）。
+            */}
+            {notifyState === 'denied' ? (
+              <p className="notifications__hint">
+                这台手机把系统通知关掉了，提醒弹不出来。到手机的「设置 → 应用 → 御膳 → 通知」里打开就会响。
+                别人点了菜这类「家里刚发生的事」仍然只在应用内看得到，打开就看到。
+              </p>
+            ) : (
+              <p className="notifications__note">
+                手机上也会提醒：定了菜单的那一餐到饭点前一小时、冰箱里有东西到期那天早上，会弹一下——关掉这个应用也会响。
+                别人点了菜这类「家里刚发生的事」仍然只在应用内看得到，打开就看到。
+              </p>
+            )}
           </>
         )}
       </div>

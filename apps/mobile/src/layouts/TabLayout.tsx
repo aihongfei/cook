@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Link, Outlet, useLocation } from 'react-router-dom'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { LeafSprig } from '@/components/icons/TabIcons'
 import AiAssistantBall from '@/components/ai/AiAssistantBall'
 import AiAssistantSheet from '@/components/ai/AiAssistantSheet'
@@ -7,6 +7,8 @@ import { useNotifications, type NotificationBoard } from '@/api/notifications'
 import { useAiAssistantSession } from '@/stores/ai-assistant-session'
 import { tabs } from '@/config/tabs'
 import { tabOf } from '@/pages/back-link'
+import { targetOf } from '@/lib/local-notify'
+import { useLocalNotifySync } from '@/lib/local-notify-sync'
 import { usePageTurn } from './use-page-turn'
 import './TabLayout.scss'
 
@@ -39,10 +41,18 @@ export function tabBadge(path: string, board: NotificationBoard | undefined): nu
  */
 export default function TabLayout() {
   const location = useLocation()
+  const navigate = useNavigate()
   const { pathname } = location
   const bodyRef = useRef<HTMLElement>(null)
   const assistantOpen = useAiAssistantSession((state) => state.open)
   useEffect(() => { bodyRef.current?.scrollTo?.({ top: 0 }) }, [pathname])
+
+  /*
+   * 手机弹窗提醒的排程与"点开跳到哪"都挂在这一层（M10 交付二）：
+   * 它要**任意页都在**（数据变了就要重排），放在某一页里迟早漏。
+   * 浏览器里这一整套是空转的：插件调用直接返回、一条都不排（见 lib/local-notify）。
+   */
+  useLocalNotifySync()
 
   /*
    * 菜谱列表/详情不在 Tab 里，要借一个 Tab 表示"人在哪一块"：
@@ -51,6 +61,27 @@ export default function TabLayout() {
    * 原先一律亮厨房：从发现页「摇一道」过去后，用户点那个亮着的 Tab 会落到厨房菜单页，
    * 而他明明是从发现页过来的（实测踩过）。
    */
+  /*
+   * 用户点了手机上的那条提醒（M10 交付二）：跳到它指的地方。
+   *
+   * 这里的去处来自通知自己带的 `extra.to`（排的时候写进去的），不按"现在有什么提醒"重算——
+   * 用户点的是**那条具体的提醒**，哪怕那件事已经变了（比如那一餐刚被取消），
+   * 也应该带他去看那一餐现在什么样，而不是"因为已经不存在了就什么都不做"。
+   */
+  useEffect(() => {
+    let handle: { remove: () => void } | null = null
+    void (async () => {
+      const { Capacitor } = await import('@capacitor/core')
+      if (!Capacitor.isNativePlatform()) return
+      const { LocalNotifications } = await import('@capacitor/local-notifications')
+      handle = await LocalNotifications.addListener('localNotificationActionPerformed', (event) => {
+        const to = targetOf(event.notification.extra)
+        if (to) navigate(to, { state: { from: '/notifications' } })
+      })
+    })()
+    return () => handle?.remove()
+  }, [navigate])
+
   const recipeOwner = tabOf((location.state as { from?: unknown } | null)?.from)
   const isRecipePage = pathname === '/recipes' || pathname.startsWith('/recipes/')
   const borrowedTab = isRecipePage ? recipeOwner ?? '/kitchen' : null
