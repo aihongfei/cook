@@ -414,23 +414,25 @@ function useOrderMutation<TInput>(mutationFn: (input: TInput) => Promise<MealCar
   })
 }
 
-/** 把一张卡并回看板：已有就替换，撤回成空卡（dishCount=0）就移除，新的就插到前面 */
+/**
+ * 把一张卡并回看板：已有就替换，撤回成空卡（dishCount=0）就移除，新的就插进它该在的位置。
+ *
+ * 这里的排序必须**与后端一字不差**（`orders.service.list()` 的 `mealDate asc, meal asc`）：
+ * 它是"改完先就地合并、随后再后台校验"那条路上的即时画面，两边不一致时卡片会在那一下跳
+ * （点一次加菜，整张卡忽然跑到列表另一头）。
+ */
 export function mergeCard(board: OrderBoard, card: MealCard): OrderBoard {
   const without = board.cards.filter((existing) => existing.mealKey !== card.mealKey)
   if (card.dishCount === 0) {
     return { ...board, cards: without, counts: recount(without) }
   }
-  const next = [card, ...without].sort((a, b) =>
-    a.date === b.date
-      ? a.meal === b.meal
-        ? 0
-        : a.meal === 'DINNER'
-          ? -1
-          : 1
-      : a.date < b.date
-        ? 1
-        : -1,
-  )
+  const next = [card, ...without].sort((a, b) => {
+    // 今天在前、往后顺排（用户 2026-10-15：「订单页的排序，要先展示今日的」）
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1
+    if (a.meal === b.meal) return 0
+    // 同一天里午饭排在晚饭前面
+    return a.meal === 'LUNCH' ? -1 : 1
+  })
   return { ...board, cards: next, counts: recount(next) }
 }
 
