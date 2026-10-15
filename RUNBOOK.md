@@ -4603,3 +4603,59 @@ APKSIGNER=$(ls "$HOME/Library/Android/sdk/build-tools"/*/apksigner | tail -1)
 1. **"打包了"不等于"能用了"**：APK 是新的、后端是旧的，装上去照样坏——回答"打包了吗"必须**连线上版本一起查**（第一节那三条命令就是干这个的）；
 2. **`services/api/.env` 在服务器上不存在是正常的**（compose 读 `/opt/cook/.env`），别去"补"一个——那会引入一份没人读的配置，下次改错地方；
 3. **三套验收脚本都会写公网库**：跑之前心里有数，跑完别惊讶库里多了几个 `AI 验收家`。
+
+## R-076 抽屉的「开了关、关了再开」怎么验（R-66 配套，✅ 已验证，2026-10-14）
+
+配套：`RISKS.md` **R-66**（为什么"替我关掉"的 helper 不能当 `onClose`；为什么常驻挂载的测试永远验不出这件事）。
+
+### 一、为什么必须有这一条
+
+用户报的是一个**画面上完全正常**的 bug：「冰箱那个拍照点击一次，后面点击就没反应了」（`RISKS.md` R-66）。它的表现是"点了没反应"，而不是报错或白屏——所以排查顺序应该是：
+
+1. **先在控制台里读按钮与遮罩的实况**（下面的脚本），确认"点了没反应"是**按钮没反应**还是**抽屉开了但看不见**；
+2. 再判断是**状态没复位**（父组件 `scanning` 还是 true）还是**层被藏住**（`visibility:hidden` 没清）。
+
+### 二、跑法（模拟器 + CDP；配方见 R-062 §六）
+
+```bash
+cd /Users/aihf/Downloads/work/cook/apps/mobile
+npx vite build --mode development && npx cap sync android      # dev 模式才能连本机后端
+cd android && ./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb reverse tcp:3000 tcp:3000                                  # 不设这条，APK 里所有请求都会失败
+adb shell am force-stop com.yushan.cook && adb shell am start -n com.yushan.cook/.MainActivity
+PID=$(adb shell pidof com.yushan.cook | tr -d '\r'); adb forward tcp:9222 localabstract:webview_devtools_remote_$PID
+```
+
+四个来回（每一步都真点，**别只看"抽屉不见了"**）：
+
+```bash
+# ① 开
+node /tmp/cdp.mjs http://127.0.0.1:9222 "document.querySelector('button.stock__scan').click(); 'ok'"
+node /tmp/cdp.mjs http://127.0.0.1:9222 "({ title: document.querySelector('.sheet__title')?.textContent?.trim() ?? null, picks: [...document.querySelectorAll('.fridge-scan__pick')].map(e => e.textContent.trim()), masks: document.querySelectorAll('.adm-mask').length })"
+
+# ② 遮罩关
+node /tmp/cdp.mjs http://127.0.0.1:9222 "document.querySelector('.adm-mask').click(); 'ok'"
+node /tmp/cdp.mjs http://127.0.0.1:9222 "({ popups: document.querySelectorAll('.adm-popup').length, masks: document.querySelectorAll('.adm-mask').length })"
+
+# ③ **再开**（这一条就是 R-66 那个 bug：修之前它一直返回 title=null）
+node /tmp/cdp.mjs http://127.0.0.1:9222 "document.querySelector('button.stock__scan').click(); 'ok'"
+
+# ④ 拖关（另一条关闭路径，它会给面板留 visibility:hidden）→ 再开，确认面板**真的看得见**
+#    拖关的写法：在 .sheet__shell 上 mousedown，然后往 window 上派 mousemove 若干步（>110px 或快甩），再 mouseup
+node /tmp/cdp.mjs http://127.0.0.1:9222 "({ visibility: getComputedStyle(document.querySelector('.adm-popup-body')).visibility, onScreen: document.querySelector('.adm-popup-body').getBoundingClientRect().top < innerHeight })"
+```
+
+实测输出（2026-10-14，六个来回全过）：
+
+```
+① 开：title=「拍照记进冰箱」 picks=[拍一张, 从相册选] masks=1
+② 关：popups=0 masks=0
+③ 再开：title=「拍照记进冰箱」 picks=[拍一张, 从相册选] masks=1     ← 修之前这里恒为 null
+④ 拖关 → 再开：visibility=visible onScreen=true                     ← 没把隐藏状态漏给下一次
+```
+
+### 三、写这条测试时踩到的两个坑
+
+1. **遮罩不是一开始就在**：Popup 在入场动画跑起来之后才挂遮罩，`document.querySelector('.adm-mask')` 会拿到 `null`，`fireEvent.click(null)` 直接抛 "please provide a DOM element"。**先 waitFor 它出现**再点；
+2. **测试必须按真实挂载方式写**：父组件 `{open && <SomeSheet visible onClose={() => setOpen(false)} />}` + 一个真的"打开"按钮。写成 `<SomeSheet visible onClose={() => {}} />` 常驻挂载的话，这个 bug 永远验不出来（见 R-66）。

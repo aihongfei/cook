@@ -33,6 +33,20 @@ export default function FridgeScanSheet({
   onClose: () => void
 }) {
   const sheet = useRef<BottomSheetHandle>(null)
+  /*
+   * ⚠️ 这个 helper 只给**组件自己**收抽屉用（入库成功后那一步），**不能**当成 `BottomSheet` 的 `onClose`。
+   *
+   * 它原本就是这么被传的（`onClose={closeSheet}`），于是关抽屉这一路变成了**自咬尾巴**：
+   * BottomSheet 的退场结束 → 回调 onClose（= 这个 helper）→ `sheet.current` 还在（组件没卸载）
+   * → 又调 `close()` → 再走一遍退场 → 再回调……每 420ms 绕一圈，**父组件的 onClose 永远收不到**
+   * （`sheet.current` 非空时它压根不会走到 `onClose()` 那一支）。
+   *
+   * 用户看到的是（2026-10-14：「冰箱那个拍照点击一次，后面点击就没反应了」）：
+   * 抽屉退场动画照播、内容照卸，看着是"关掉了"，但 `FridgeStock` 的 `scanning` 还是 `true`——
+   * 再点「📷 拍照」是一次 `setState(true)` 的空操作，于是"点了没反应"。
+   *
+   * 界面上分不出"关掉了"与"看着关掉了"，所以这条只能靠真实挂载方式测（`fridge-scan.test.tsx` 末尾那条）。
+   */
   const closeSheet = () => (sheet.current ? sheet.current.close() : onClose())
   const addItem = useAddFridgeItem()
 
@@ -113,7 +127,8 @@ export default function FridgeScanSheet({
   const busy = stage === 'saving'
 
   return (
-    <BottomSheet ref={sheet} visible={visible} title="拍照记进冰箱" onClose={closeSheet}>
+    // onClose 传**原始的那个**（不是包一层的 closeSheet），理由见上面那段 ⚠️
+    <BottomSheet ref={sheet} visible={visible} title="拍照记进冰箱" onClose={onClose}>
       {stage === 'pick' && (
         <>
           <p className="ai__tip">

@@ -803,3 +803,21 @@ F16-10 让 AI 第一次**真的写库**，于是多出一类全新的假证据�
 - **规矩**：位置**只从滚动事件里记**（用户滚动的当下），并且**只记"当前这一页"**——换页那一趟自动的滚动事件带着的是上一页的键。⭐ 本轮的一个**关键发现**：那个"挡住"不必写成一条判断（第一版写过 `activeKeyRef`，后来删掉了），把两个 effect 都放 `useLayoutEffect` 就自然成立——那趟假事件是**异步**派发的，而布局阶段的清理（卸掉旧监听）跑在它到达之前，"卸旧监听 → 摆新位置 → 挂新监听"整串先做完，假事件到时已经没有监听在听（`TabLayout.tsx` 里写着这一段）。恢复也放 `useLayoutEffect`：布局阶段早于浏览器对 `scrollTop` 的夹取。
 - **一条便宜的守法**：这个 bug 的表现与"根本没做记忆"一模一样（都是回到顶部），**光看现象分不出来**。所以要拿一条"位置明显不为 0"的页面验（本轮用的：厨房页滚到 300、菜谱列表滚到底 378），且**连"切换回来 DOM 记号还在"一起验**——那句话才能同时证明"页面没重挂"与"位置记对了"。
 - **相关**：`DECISIONS.md` D-083 三、`RUNBOOK.md` R-074 第二节、`apps/mobile/src/layouts/TabLayout.tsx` 里的两个 effect、`apps/mobile/src/lib/scroll-memory.ts`。
+
+## R-66 「替我关掉」的 helper 当成「我关掉了」的回调 → 抽屉自咬尾巴，父组件永远收不到通知 🟢 已定规矩（2026-10-14 用户当场发现）
+
+- **现象**（用户原话：「冰箱那个拍照点击一次，后面点击就没反应了」）：冰箱页的「📷 拍照」抽屉**打开一次之后再也打不开**，直到刷新页面。退场动画照播、内容照卸——**看着就是"关掉了"**。
+- **根因**：`FridgeScanSheet` 把 `onClose={closeSheet}` 传给了 `BottomSheet`，而那个 helper 是"**替我关**"的意思：
+  ```
+  const closeSheet = () => (sheet.current ? sheet.current.close() : onClose())
+  ```
+  于是关闭这一路成了自咬尾巴：BottomSheet 退场结束 → 回调 onClose（= 这个 helper）→ `sheet.current` 还在（组件没卸载）→ **又调一次 `close()`** → 再走一遍退场 → 再回调……每 420ms（`EXIT_FALLBACK_MS`）绕一圈。helper 里那一支 `onClose()` 是"抽屉**不在**时"的兜底，而它恰恰永远不在那一支上——**父组件的 `onClose` 一次都没被调到**。
+  父组件的状态于是停在 `scanning: true`，再点「📷 拍照」是一次 `setState(true)` 的空操作 = "点了没反应"。
+- **性质**：这个 bug 从功能第一版就在（`1d0bd8d`），也就是说**冰箱拍照自交付起就只能用一次**。当时"验过"的是打开→拍照→逐项确认→入库那条主线，**从没验过"关掉之后再打开"**。
+- **为什么测试没拦住**：测试里是 `<FridgeScanSheet visible onClose={() => {}} />` **常驻挂载**，而真实用法是"点一下才挂载"（`{scanning && <FridgeScanSheet … />}`）。关不关得掉这件事**只有在真实挂载方式下才存在**——常驻挂载时 `onClose` 收不到也无所谓（抽屉自己已经藏起来了），于是那 10 条断言全绿。
+- **规矩**：
+  1. **传给 `BottomSheet` 的 `onClose` 必须是"我真的关掉了"的通知**（父组件的状态复位函数），**不能**是"替我关一下"的 helper。helper 只给组件自己的收尾用（如入库成功后自动收起）。全仓库扫过：只有这一处是错的（另一处 `AiAssistantSheet` 的 `closeSheet` 是 store 的 `set({open:false})`，那正是"通知"）。
+  2. **抽屉类组件至少要有一条"关掉之后再打开"的测试，且父组件必须按真实用法条件挂载**——这是本轮补的那条（先用旧代码证明它会红，再修）。
+  3. 记住**界面分不出"关掉了"与"看着关掉了"**：这条 bug 从画面上完全正常，只有状态/行为才露馅。
+- **验证**：模拟器实测四个来回——开 → 遮罩关 → **再开** ✅ → 拖关 → **再开且面板 visibility 正常**（拖关那条路会给面板留 `visibility:hidden`，一并确认没漏给下一次）。
+- **相关**：`apps/mobile/src/components/ui/BottomSheet.tsx`（`close` / `finishClose` / `closeCallback`）、`RUNBOOK.md` **R-076**、`apps/mobile/src/pages/fridge/components/fridge-scan.test.tsx` 末尾那条。

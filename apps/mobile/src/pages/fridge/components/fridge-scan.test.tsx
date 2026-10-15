@@ -2,6 +2,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { useState } from 'react'
 import { apiClient } from '@/api/client'
 import type { FridgeScanDraft } from '@/api/ai'
 import * as checkins from '@/api/checkins'
@@ -303,4 +304,58 @@ it('备注清空之后按"没写"发出去（不是把空字符串写进库）',
   const writes = () => post.mock.calls.filter((call) => call[0] === '/fridge')
   await waitFor(() => expect(writes()).toHaveLength(1))
   expect((writes()[0][1] as { note?: string }).note).toBeUndefined()
+})
+
+/*
+ * 关闭之后**能不能再打开**（用户 2026-10-14 报的：「冰箱那个拍照点击一次，后面点击就没反应了」）。
+ *
+ * 为什么原来那几条测试一条都没拦住它：它们把抽屉**常驻挂载**（`<FridgeScanSheet visible onClose={() => {}} />`），
+ * 而真实用法是"点一下才挂载"（`FridgeStock` 里 `{scanning && <FridgeScanSheet visible … />}`）——
+ * 抽屉**关不关得掉**这件事，只有走真实挂载方式才验得到：关不掉的表现在界面上是"抽屉看着收起来了"
+ * （退场动画照播、内容照卸），但它还在树上、父组件的 `scanning` 还是 true，
+ * 于是再点「📷 拍照」是一次 `setState(true)` 的空操作——**看起来就是"点了没反应"**。
+ */
+function renderHost() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  function Host() {
+    const [open, setOpen] = useState(false)
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          📷 拍照
+        </button>
+        {/* 与 FridgeStock 一字不差的用法：条件挂载 + visible 恒真 */}
+        {open && <FridgeScanSheet visible onClose={() => setOpen(false)} />}
+      </>
+    )
+  }
+  return render(
+    <QueryClientProvider client={client}>
+      <Host />
+      <Toaster />
+    </QueryClientProvider>,
+  )
+}
+
+it('关掉之后**再点还能开**（第二次点「📷 拍照」要真的又开一次）', async () => {
+  renderHost()
+
+  // 第一次：点开
+  fireEvent.click(screen.getByText('📷 拍照'))
+  expect(await screen.findByText('拍一张')).toBeTruthy()
+
+  // 关掉（点遮罩，与用户的操作一样）。遮罩是 Popup 在入场动画跑起来之后才挂上的，
+  // 所以先等它出现——不等就会拿到 null 并抛"provide a DOM element"（写这条时踩到）
+  const mask = await waitFor(() => {
+    const node = document.querySelector('.adm-mask')
+    expect(node).not.toBeNull()
+    return node as Element
+  })
+  fireEvent.click(mask)
+  await waitFor(() => expect(screen.queryByText('拍一张')).toBeNull(), { timeout: 3000 })
+
+  // 第二次：必须还能开——关不干净时这里会一路等到超时
+  fireEvent.click(screen.getByText('📷 拍照'))
+  expect(await screen.findByText('拍一张', undefined, { timeout: 3000 })).toBeTruthy()
 })
