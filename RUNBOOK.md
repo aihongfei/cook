@@ -4659,3 +4659,80 @@ node /tmp/cdp.mjs http://127.0.0.1:9222 "({ visibility: getComputedStyle(documen
 
 1. **遮罩不是一开始就在**：Popup 在入场动画跑起来之后才挂遮罩，`document.querySelector('.adm-mask')` 会拿到 `null`，`fireEvent.click(null)` 直接抛 "please provide a DOM element"。**先 waitFor 它出现**再点；
 2. **测试必须按真实挂载方式写**：父组件 `{open && <SomeSheet visible onClose={() => setOpen(false)} />}` + 一个真的"打开"按钮。写成 `<SomeSheet visible onClose={() => {}} />` 常驻挂载的话，这个 bug 永远验不出来（见 R-66）。
+
+## R-077 长按多选 + 批量退菜怎么验（D-084 配套，✅ 已验证，2026-10-15）
+
+配套：`DECISIONS.md` **D-084**（退菜口径：全家都能退任何一份、到「正在做」为止；整桌退按餐）、`RISKS.md` **R-67**（"要吐掉的那次点击"必须能自己过期）。
+
+### 一、为什么必须有这一条
+
+这一轮的三件事**在单元测试里都只能验一半**：
+
+1. **长按是手势**：500ms + 移动阈值 + `contextmenu` + "吃掉紧随的 click"四件事凑在一起才成立，而这四件在 jsdom 里要么没有（`contextmenu` 的系统菜单）要么语义不同（`pointerdown` 的默认行为）——必须在**真 WebView** 里按一遍；
+2. **批量退菜是"逐餐发请求"**：成功几条、失败几条，界面与库里的状态要能对上（"部分成功不能假装全成"）；
+3. **「做好了」封口**：它是**后端**的判定，前端只负责"禁用 + 写明原因"，两边都要看。
+
+### 二、跑法（模拟器 + CDP；配方见 R-062 §六）
+
+```bash
+# ① dev 包（本机后端；`build:apk` 是 --mode server，连不上本机）
+cd /Users/aihf/Downloads/work/cook/apps/mobile
+npx vite build --mode development && npx cap sync android
+cd android && ./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb reverse tcp:3000 tcp:3000 && adb reverse tcp:9000 tcp:9000   # 9000 是图片（MinIO）
+adb shell am force-stop com.yushan.cook && adb shell am start -n com.yushan.cook/.MainActivity
+PID=$(adb shell pidof com.yushan.cook | tr -d '\r'); adb forward tcp:9222 localabstract:webview_devtools_remote_$PID
+```
+
+**造数据要点**：验「批量退菜」需要**同一家**里至少两餐可退 + 一餐「做好了」。用本机测试账号即可（脚本见下方第 ③ 步的做法）；**掌勺人角色才推得动状态**——dev 库里登录的那个账号是 `EATER`，推 `PLANNED` 会 403（这不是 bug，是 D-021 的能力面），所以要么用 OWNER 账号，要么新建一个：注册 → 建家 → 点菜 → 逐级推到 `DONE`（都在同一段页面脚本里做，不用手点）。
+
+### 三、手势要**走完整**（这是这一轮最容易踩空的地方）
+
+长按 = `pointerdown` → 等 >500ms → `pointerup` → **浏览器补的那次 `click`**。少任何一步，验的都不是真机上的那件事：
+
+```bash
+# 长按第一张卡：进选择模式、只选中它、且**没有**跳进详情
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(async () => {
+  const card = document.querySelectorAll('.order-card')[0]
+  const o = { bubbles: true, cancelable: true, clientX: 30, clientY: 300, button: 0, pointerId: 1, pointerType: 'touch', isPrimary: true }
+  card.dispatchEvent(new PointerEvent('pointerdown', o))
+  await new Promise(r => setTimeout(r, 620))
+  card.dispatchEvent(new PointerEvent('pointerup', o))
+  card.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+  await new Promise(r => setTimeout(r, 150))
+  return { bar: Boolean(document.querySelector('.pick-bar')), count: document.querySelector('.pick-bar__count').textContent.trim(), picked: [...document.querySelectorAll('.order-card')].filter(c => c.getAttribute('aria-checked') === 'true').map(c => c.dataset.mealKey), path: location.pathname }
+})()"
+```
+
+实测输出（2026-10-15 11:30，debug 包，`多选验收家`）：`{ bar: true, count: '已选 1 餐', picked: ['2026-10-18-DINNER'], path: '/order' }` —— 正是要的三件事：进了选择模式、只选中按住的那张、**没跳走**。
+
+**反例（用来确认选择性模式真的成立）**：把上面最后那行 `click` 去掉再跑一次，`count` 仍是 1（说明"吐掉紧随点击"在起作用）；而如果**连 `pointerup` 也不发**就去点第二张卡，第二张卡会被吐掉——那不是真机行为（抬手一定会补 click），是模拟漏了一步（`order.test.tsx` 的 `longPress()` helper 里写了这条）。
+
+### 四、把四种状态各看一遍
+
+```bash
+# 全选 → 已选 N 餐；「全选」变成「取消全选」
+node /tmp/cdp.mjs http://127.0.0.1:9222 "document.querySelector('.pick-bar__all').click(); 'ok'"
+
+# 选中「做好了」的那一餐：按钮禁用 + 原因写在**同一条操作条里**（用户 2026-10-15 的间隙反馈）
+node /tmp/cdp.mjs http://127.0.0.1:9222 "({ count: document.querySelector('.pick-bar__count').textContent.trim(), tipInBar: Boolean(document.querySelector('.pick-bar .pick-bar__tip')), tip: document.querySelector('.pick-bar__tip').textContent.trim(), goDisabled: document.querySelector('.pick-bar__go').disabled })"
+
+# 退菜 → 确认框要点名"退掉哪几餐"
+node /tmp/cdp.mjs http://127.0.0.1:9222 "document.querySelector('.pick-bar__go').click(); document.querySelector('.adm-dialog, [role=dialog]').textContent.trim()"
+
+# 「全退掉」之后：库里的餐次真的没了、选择条自动退出
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(async () => {
+  [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '全退掉').click()
+  await new Promise(r => setTimeout(r, 1500))
+  const t = JSON.parse(localStorage.getItem('yushan-auth')).state.token
+  const b = await (await fetch('http://127.0.0.1:3000/api/orders', { headers: { authorization: 'Bearer ' + t } })).json()
+  return { barGone: !document.querySelector('.pick-bar'), dbCards: (b.cards ?? []).map(c => c.mealKey + ':' + c.status) }
+})()"
+```
+
+实测（2026-10-15 11:35）：退掉两餐后 `{ barGone: true, dbCards: ['2026-10-17-LUNCH:DONE'] }` —— 两条被退的餐次**在库里消失**（不是只从界面上消失），`DONE` 那张因为封口被留下了。
+
+### 五、看截图（视觉验收）
+
+`adb exec-out screencap -p > /tmp/x.png`，然后**照着 D-084 §四/§五 逐条对**：操作条是"退出 / 已选 N 餐 / 全选 / 退菜"四件、`已选 N 餐` 居中（靠左会在两边留一大一小两个空档）、被选中的卡左上角有 ✓、卡上不再有 `›`、选中「做好了」时原因在条内虚线之下。

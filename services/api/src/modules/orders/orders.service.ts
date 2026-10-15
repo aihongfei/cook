@@ -7,7 +7,7 @@ import { TasteService } from '../taste/taste.service'
 import { judgeDish, type TasteJudgement } from '../taste/taste.rules'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
-  aggregateItems, canAddItem, canRepeatFrom, confirmStampFor, dateKey, doneStampFor, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
+  aggregateItems, canAddItem, canRemoveItem, canRepeatFrom, confirmStampFor, dateKey, doneStampFor, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
   parseHistoryQuery, historyRange, hasEarlier, weekdayOf,
   parseItemTarget, parseBulkRecipeIds, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, planRepeat, revivedStatus, splitExisting,
   todayKey, todayMealState, visibleToMember,
@@ -323,8 +323,15 @@ export class OrdersService {
   }
 
   /**
-   * 撤回自己点的一份菜：该餐还得在「待确认」、且这条确实是我点的。
-   * （取消整餐要走 updateStatus，需要 menu.manage。）
+   * 退掉一份菜（用户 2026-10-15：「订单里面的卡片要能删除…批量操作…退菜这种的」）。
+   *
+   * **两条口径都是那次定的，都从宽**：
+   * - **谁都能退**（不再限于"只能退自己点的"）。家里谁发现菜单不对都能顺手去掉一道，
+   *   而不是"等点菜的人回来自己退"——那是让全家为一个操作卡住。原来那句话术
+   *   （「只能撤回自己点的菜」）连同那条判断一起去掉了；
+   * - **到「正在做」为止都能退**（`canRemoveItem`：只有 DONE 封口），理由写在那条纯规则上。
+   *
+   * 取消整餐仍然走 `updateStatus`（那是另一件事：整桌不做了，且需要 menu.manage）。
    */
   async removeItem(userId: string, itemId: string): Promise<MealCardView> {
     const item = await this.prisma.orderItem.findUnique({ where: { id: itemId }, include: { mealOrder: true } })
@@ -332,19 +339,45 @@ export class OrdersService {
 
     const { familyId } = await this.requireMember(userId)
     if (item.mealOrder.familyId !== familyId) throw new NotFoundException('这条点单不存在了')
-    if (item.userId !== userId) throw new ForbiddenException('只能撤回自己点的菜')
-    if (item.mealOrder.status !== 'PENDING') {
-      throw new ConflictException(`这餐已经「${STATUS_LABEL[item.mealOrder.status]}」了，不能再撤回`)
+    if (!canRemoveItem(item.mealOrder.status)) {
+      throw new ConflictException(`这一餐已经「${STATUS_LABEL[item.mealOrder.status]}」了，成品不能再改——记录要改请到点单历史里删`)
     }
 
     await this.prisma.orderItem.delete({ where: { id: itemId } })
 
-    // 撤掉最后一份菜后这张卡就空了，顺手删掉——免得列表里留一个"0 道菜"的餐次
+    // 退掉最后一份菜后这张卡就空了，顺手删掉——免得列表里留一个"0 道菜"的餐次
     const remaining = await this.prisma.orderItem.count({ where: { mealOrderId: item.mealOrderId } })
     if (remaining > 0) return this.card(item.mealOrderId, userId)
 
     await this.prisma.mealOrder.delete({ where: { id: item.mealOrderId } })
     return emptyCard(item.mealOrder.mealDate, item.mealOrder.meal)
+  }
+
+  /**
+   * 把**这一餐整桌**退掉（列表里长按多选 → 批量操作；用户 2026-10-15）。
+   *
+   * 为什么按 `mealKey` 而不是"传一串 item id"：点单列表上的卡片是**摘要**，
+   * 它只带得出"我点的那几份"的 id（`mineItemIds`，见 `aggregateItems`）——
+   * 而现在谁都能退任何菜，前端根本拿不到别人的条目 id。
+   * 按餐来退，判据落在服务端一处，也顺带避免"前端自己拼一串 id、拼错一个就少退一道"。
+   *
+   * 退完这一餐就空了，于是**整张卡消失**——这正是用户说的"卡片要能删除"。
+   * 与单条退菜共用同一套守卫（谁能退、退到哪一步），不另写一份。
+   */
+  async clearItems(userId: string, mealKey: string): Promise<MealCardView> {
+    const { familyId } = await this.requireMember(userId)
+
+    const { mealDate, meal } = parseMealKey(mealKey)
+    const mealOrder = await this.prisma.mealOrder.findUnique({ where: { familyId_mealDate_meal: { familyId, mealDate, meal } } })
+    if (!mealOrder) throw new NotFoundException('这一餐还没有人点菜')
+
+    if (!canRemoveItem(mealOrder.status)) {
+      throw new ConflictException(`这一餐已经「${STATUS_LABEL[mealOrder.status]}」了，成品不能再改——记录要改请到点单历史里删`)
+    }
+
+    await this.prisma.orderItem.deleteMany({ where: { mealOrderId: mealOrder.id } })
+    await this.prisma.mealOrder.delete({ where: { id: mealOrder.id } })
+    return emptyCard(mealOrder.mealDate, mealOrder.meal)
   }
 
   /**

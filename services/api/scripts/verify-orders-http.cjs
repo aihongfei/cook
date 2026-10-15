@@ -252,45 +252,42 @@ async function main() {
   const badStatus = await callWithRetry('GET', '/orders?status=FINISHED', { token: mama.token })
   check('未知状态筛选 → 400', badStatus.status === 400, `${badStatus.status} ${badStatus.body?.message ?? ''}`)
 
-  // ---------- 撤回（F3-05） ----------
+  // ---------- 退菜（F3-05；用户 2026-10-15 放开：全家都能退任何菜，到「正在做」为止） ----------
   // 注意：小满点了两道菜（B 一道、A 一道），要按菜名挑出 A 的那条，别用 items[0]
   const sonItems = (repeat.body?.items ?? []).filter(item => item.isMe)
   const sonDishAItem = sonItems.find(item => item.name === dishA.name)
   const sonDishBItem = sonItems.find(item => item.name === dishB.name)
   check(
-    '卡片里标出哪些是我点的（前端据此给撤回入口）',
+    '卡片里标出哪些是我点的（前端据此给退菜入口）',
     sonItems.length === 2 && Boolean(sonDishAItem) && Boolean(sonDishBItem),
     `mineItems=${sonItems.length} dishes=${sonItems.map(i => i.name).join('/')}`,
   )
 
   const steal = await callWithRetry('DELETE', `/orders/items/${sonDishAItem?.id}`, { token: mama.token })
-  check('撤别人的菜 → 403', steal.status === 403, `${steal.status} ${steal.body?.message ?? ''}`)
-
-  const withdraw = await callWithRetry('DELETE', `/orders/items/${sonDishAItem?.id}`, { token: son.token })
-  const dishACountAfterWithdraw = (withdraw.body?.dishes ?? []).find(d => d.name === dishA.name)?.count
+  const dishACountAfterSteal = (steal.body?.dishes ?? []).find(d => d.name === dishA.name)?.count
   check(
-    `撤回自己的一份 200，份数从 2 减到 1（撤回的是「${dishA.name}」）`,
-    withdraw.status === 200 && dishACountAfterWithdraw === 1,
-    `${withdraw.status} count=${dishACountAfterWithdraw}`,
+    '家里谁都能退任何一份（妈妈退小满点的那份 200，份数 2 → 1）——用户 2026-10-15 的口径',
+    steal.status === 200 && dishACountAfterSteal === 1,
+    `${steal.status} count=${dishACountAfterSteal} ${steal.body?.message ?? ''}`,
   )
 
   // 整餐变空的情况单验（客人那一餐只有一盘菜），这里只验"我在这餐不再有份"
   const withdrawLast = await callWithRetry('DELETE', `/orders/items/${sonDishBItem?.id}`, { token: son.token })
   check(
-    '撤掉自己在这一餐的最后一份：「我的份」归零，点菜人减为 1',
+    '退掉自己在这一餐的最后一份：「我的份」归零，点菜人减为 1',
     withdrawLast.status === 200 && withdrawLast.body?.mineCount === 0 && withdrawLast.body?.ordererCount === 1,
     `${withdrawLast.status} mine=${withdrawLast.body?.mineCount} orderers=${withdrawLast.body?.ordererCount}`,
   )
 
   const goneItem = await callWithRetry('DELETE', `/orders/items/${sonDishAItem?.id}`, { token: son.token })
-  check('再撤同一条（已被撤）→ 404', goneItem.status === 404, `${goneItem.status}`)
+  check('再退同一条（已被退）→ 404', goneItem.status === 404, `${goneItem.status}`)
 
-  // 空卡清理：客人那餐只有他自己一盘，撤掉后这一餐整个消失
+  // 空卡清理：客人那餐只有他自己一盘，退掉后这一餐整个消失
   const guestItems = await callWithRetry('GET', '/orders?family=false', { token: guest.token })
   const guestItemId = guestItems.body?.cards?.[0]?.items?.[0]?.id
   const guestWithdraw = await callWithRetry('DELETE', `/orders/items/${guestItemId}`, { token: guest.token })
   check(
-    '撤掉整餐最后一份菜时，这张空卡被清掉（列表里不留 0 道菜的餐次）',
+    '退掉整餐最后一份菜时，这张空卡被清掉（列表里不留 0 道菜的餐次）',
     guestWithdraw.status === 200
       && guestWithdraw.body?.dishCount === 0
       && (await callWithRetry('GET', '/orders', { token: mama.token })).body?.cards?.length === 1,
@@ -358,6 +355,64 @@ async function main() {
 
   const afterDone = await callWithRetry('POST', `/orders/meals/${mealKey}/status`, { token: mama.token, body: { status: 'CANCELED' } })
   check('已做好不能再取消（终态）→ 409', afterDone.status === 409, `${afterDone.status}`)
+
+  // ---------- 退菜的两个边界：终态封口 / 到「正在做」为止（用户 2026-10-15） ----------
+  const doneDetail = await callWithRetry('GET', `/orders/${mealKey}`, { token: mama.token })
+  const doneItemId = (doneDetail.body?.items ?? [])[0]?.id
+  const doneItemRemove = await callWithRetry('DELETE', `/orders/items/${doneItemId}`, { token: son.token })
+  check(
+    '「做好了」之后单份也退不掉 → 409，并指向点单历史（终态不是能随手改的东西）',
+    doneItemRemove.status === 409 && /点单历史/.test(doneItemRemove.body?.message ?? ''),
+    `${doneItemRemove.status} ${doneItemRemove.body?.message ?? ''}`,
+  )
+
+  const doneClear = await callWithRetry('DELETE', `/orders/meals/${mealKey}/items`, { token: mama.token })
+  check(
+    '「做好了」的餐整桌也退不掉 → 409（同一条口径，不分单份还是整桌）',
+    doneClear.status === 409 && /点单历史/.test(doneClear.body?.message ?? ''),
+    `${doneClear.status} ${doneClear.body?.message ?? ''}`,
+  )
+
+  // 整桌退菜走得通的那一半：另起一餐推到「正在做」再退（第 4 天没被别的断言占用）
+  const bulkKey = `${plusDaysKey(4)}-LUNCH`
+  await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(4), meal: 'LUNCH' } })
+  const bulkSecond = await callWithRetry('POST', '/orders/items', { token: son.token, body: { recipeId: dishB.id, mealDate: plusDaysKey(4), meal: 'LUNCH' } })
+  check(
+    '为验证整桌退菜，新建一餐：两个人各点了一道（同一张卡两道菜）',
+    bulkSecond.status === 201 && bulkSecond.body?.mealKey === bulkKey && bulkSecond.body?.dishes?.length === 2,
+    `${bulkSecond.status} ${bulkSecond.body?.mealKey} dishes=${bulkSecond.body?.dishes?.length}`,
+  )
+
+  const clearNobody = await callWithRetry('DELETE', `/orders/meals/${plusDaysKey(5)}-LUNCH/items`, { token: mama.token })
+  check('退一餐根本没人点过的菜 → 404（不是静默成功）', clearNobody.status === 404, `${clearNobody.status} ${clearNobody.body?.message ?? ''}`)
+
+  await callWithRetry('POST', `/orders/meals/${bulkKey}/status`, { token: mama.token, body: { status: 'PLANNED' } })
+  const bulkCooking = await callWithRetry('POST', `/orders/meals/${bulkKey}/status`, { token: mama.token, body: { status: 'COOKING' } })
+  const bulkCleared = await callWithRetry('DELETE', `/orders/meals/${bulkKey}/items`, { token: son.token })
+  check(
+    `整桌退菜：「正在做」也退得掉（退菜比加菜宽，只有做好封口），而且这次是吃货退的——全家都能退`,
+    bulkCooking.body?.status === 'COOKING'
+      && bulkCleared.status === 200
+      && bulkCleared.body?.dishCount === 0
+      /*
+        退光之后这一餐在库里已经不存在了，回来的是"还没有人点菜"那张空卡：
+        status 是**空卡的占位值**（PENDING），不是把「正在做」原样带回来——
+        没有这一餐了，就没有状态可说，前端也只拿它当"这里空了"。
+      */
+      && bulkCleared.body?.ordererCount === 0
+      && bulkCleared.body?.status === 'PENDING',
+    `${bulkCleared.status} dishCount=${bulkCleared.body?.dishCount} 退之前=${bulkCooking.body?.status} 退之后=${bulkCleared.body?.status}`,
+  )
+
+  const afterBulkClear = await callWithRetry('GET', '/orders', { token: mama.token })
+  check(
+    '退空的餐不再出现在列表里（与退掉最后一份菜同一条清理规则）',
+    !(afterBulkClear.body?.cards ?? []).some(card => card.mealKey === bulkKey),
+    `keys=${JSON.stringify((afterBulkClear.body?.cards ?? []).map(c => c.mealKey))}`,
+  )
+
+  const clearAgain = await callWithRetry('DELETE', `/orders/meals/${bulkKey}/items`, { token: mama.token })
+  check('再退一次（这一餐已经没了）→ 404', clearAgain.status === 404, `${clearAgain.status}`)
 
   // 取消整餐：新建一餐来验（已做好那餐动不了）
   const cancelTarget = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishB.id, mealDate: TOMORROW, meal: 'DINNER' } })

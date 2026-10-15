@@ -99,9 +99,22 @@ export class OrdersController {
 
   @Delete('items/:id')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: '撤回自己点的一份菜（仅待确认阶段）（F3-05）' })
+  @ApiOperation({ summary: '退掉一份菜（家里谁都退得掉；到「正在做」为止，DONE 封口）（F3-05）' })
   async removeItem(@CurrentUserId() userId: string, @Param('id') id: string) {
     return this.orders.removeItem(userId, id)
+  }
+
+  /**
+   * 整桌退掉（列表里长按多选 → 批量操作；用户 2026-10-15）。
+   *
+   * 与上面那条是**同一套守卫**（谁能退、退到哪一步），只是范围从"一份"变成"这一餐全部"。
+   * 退完这一餐空了，整张卡随之消失——用户说的"卡片要能删除"就是它。
+   */
+  @Delete('meals/:mealKey/items')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '把这一餐整桌退掉（卡片随之消失；家里谁都退得掉）（用户 2026-10-15）' })
+  async clearItems(@CurrentUserId() userId: string, @Param('mealKey') mealKey: string) {
+    return this.orders.clearItems(userId, mealKey)
   }
 
   @Post('meals/:mealKey/diners')

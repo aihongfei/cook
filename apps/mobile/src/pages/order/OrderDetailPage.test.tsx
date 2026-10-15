@@ -230,17 +230,33 @@ it('详情页不是只读页：动作按钮在，且「取消这餐」走二次�
   expect(await screen.findByText(/取消后这一餐就作废了/)).toBeTruthy()
 })
 
-it('撤回我自己的那份：只在我那份上给按钮，别人的不给', async () => {
+it('每一份都能退（不在"只能退自己点的"了），且**别人的那一份点明是谁的**', async () => {
+  /*
+   * 口径 2026-10-15 放开（用户：「批量操作…退菜这种的」）：
+   * 家里谁都退得掉任何一份（原来只给我自己那份画按钮），到「正在做」为止都能退。
+   * 但"我退的不是自己的菜"必须在弹窗里看到——所以两条断言：按钮都在、别人的那条点名。
+   */
   mockGet()
   renderDetail()
 
   await screen.findAllByRole('link', { name: /番茄炒蛋/ })
-  // 我点了两份（番茄炒蛋 + 外婆的腌笃鲜）→ 两个撤回按钮；小满那份没有
-  const withdraws = screen.getAllByRole('button', { name: '撤回' })
-  expect(withdraws.length).toBe(2)
+  // 我点的两份写「退掉」，小满那份写「退掉这份」
+  expect(screen.getAllByRole('button', { name: '退掉' }).length).toBe(2)
+  const other = screen.getAllByRole('button', { name: '退掉这份' })
+  expect(other.length).toBe(1)
 
-  fireEvent.click(withdraws[0])
-  expect(await screen.findByText(/撤回后要重新加一次/)).toBeTruthy()
+  fireEvent.click(other[0])
+  // 弹窗里点明是谁点的（小满）——退别人的菜是个大动作
+  expect(await screen.findByText(/把小满点的「.*」退掉/)).toBeTruthy()
+})
+
+it('「做好了」的那一餐：每一份都不再给退的入口（成品不再是能改的东西）', async () => {
+  mockGet({ card: cardFixture({ status: 'DONE', statusLabel: '已做好', nextActions: [] }) })
+  renderDetail()
+
+  await screen.findAllByRole('link', { name: /番茄炒蛋/ })
+  expect(screen.queryByRole('button', { name: '退掉' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '退掉这份' })).toBeNull()
 })
 
 it('已做好的一餐给成品照入口，且不再给流转按钮', async () => {

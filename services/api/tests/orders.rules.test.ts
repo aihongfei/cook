@@ -22,6 +22,7 @@ import {
   STATUS_LABEL,
   aggregateItems,
   canAddItem,
+  canRemoveItem,
   confirmStampFor,
   dayOptions,
   dayWindow,
@@ -143,6 +144,19 @@ test('取消过的餐还能重新点菜，并复活成待确认', () => {
 
   assert.equal(revivedStatus('CANCELED'), 'PENDING', '加菜要把整餐拉回待确认')
   assert.equal(revivedStatus('PENDING'), 'PENDING', '正常状态不动')
+})
+
+test('退菜比加菜宽：到「正在做」为止都能退，只有「做好了」封口', () => {
+  /*
+   * 用户 2026-10-15 选的口径。这条与上面那条**故意不一样**，所以单独钉住：
+   * 加菜窄（PLANNED/COOKING 要先取消这餐——它会改掉已经定下来的菜单），
+   * 退菜宽（任何阶段都可能是真需要：家里没那食材了、有人临时不回来吃、掌勺人觉得太多了）。
+   */
+  assert.ok(canRemoveItem('PENDING'), '收集中当然能退')
+  assert.ok(canRemoveItem('PLANNED'), '已安排也能退（菜单定了不等于不能少一道菜）')
+  assert.ok(canRemoveItem('COOKING'), '正在做也能退（临时发现没那食材）')
+  assert.ok(canRemoveItem('CANCELED'), '已取消的餐里退菜是清理，没有副作用')
+  assert.ok(!canRemoveItem('DONE'), '做好了是终态：它不是"接下来要做什么"的输入了，只是记录')
 })
 
 // ---------- 日期与餐次（F3-01） ----------

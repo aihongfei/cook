@@ -758,3 +758,139 @@
   box-shadow: 0 1px 4px rgb(120 60 30 / 22%);
   pointer-events: none;
 }
+
+/*
+ * 长按多选（用户 2026-10-15：「订单里面的卡片要能删除，可以用那个按住显示单选框」）。
+ *
+ * 选择模式的两件东西：**每张卡左上角的勾选方块**，与**顶部的操作条**。
+ */
+
+/* 拉长按的卡不能选中文字，也不能让系统弹自己的"复制/搜索"菜单（contextmenu 在 tsx 里拦） */
+.order-card--link {
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.order-card__pick {
+  position: absolute;
+  top: -8px;
+  left: -6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: transparent;
+  background: var(--color-paper);
+  border: 1.5px solid var(--color-line);
+  border-radius: 7px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  pointer-events: none;
+}
+
+.order-card__pick.is-on {
+  color: var(--color-paper);
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+/* 选中的卡整体退到"待处理"的样子：淡品牌底 + 描边加深（与未读那条竖标不冲突） */
+.order-card.is-picked {
+  border-color: var(--color-brand);
+  background: color-mix(in srgb, var(--color-brand) 6%, var(--color-paper));
+}
+
+/*
+ * 选择模式的顶部操作条。**放上部**（底栏是 Tab、右下角是 AI 悬浮球，多一层会抢位置），
+ * 而且它就压在筛选行原来的位置上——进选择模式时那一行本来也没有意义了。
+ */
+.pick-bar {
+  /* 一排按钮 + （可能要的）一句为什么退不掉。**装进同一个卡片**：
+     提示单摆在外面时，它看着像页面上的另一段话，而不是"这条操作条的附注"（用户 2026-10-15 反馈间隙） */
+  overflow: hidden;
+  margin-bottom: 10px;
+  background: color-mix(in srgb, var(--color-brand) 8%, var(--color-paper));
+  border: 1.5px solid var(--color-brand);
+  border-radius: 14px;
+}
+
+.pick-bar__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.pick-bar__exit,
+.pick-bar__all {
+  flex: none;
+  padding: 5px 12px;
+  font-size: 13px;
+  color: var(--color-ink-soft);
+  background: var(--color-paper);
+  border: 1.5px solid var(--color-line);
+  border-radius: 999px;
+}
+
+/* 「已选 N 餐」占满中间并按**居中**排：靠左会让两边留一大一小两个空档，看着像排版坏了 */
+.pick-bar__count {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--color-ink);
+}
+
+/* 退菜是破坏性的（会退掉家里人点的菜），砖红实底，与「取消整餐」同一个色族 */
+.pick-bar__go {
+  flex: none;
+  padding: 6px 16px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-paper);
+  background: #b4451f;
+  border: none;
+  border-radius: 999px;
+}
+
+.pick-bar__go:disabled {
+  color: var(--color-ink-soft);
+  background: var(--color-line);
+}
+
+/* 附注行：虚线把它和按钮排分开，底色比卡片本身再深一点（是解释，不是又一条操作） */
+.pick-bar__tip {
+  margin: 0;
+  padding: 7px 12px 9px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #b4451f;
+  background: color-mix(in srgb, #b4451f 7%, transparent);
+  border-top: 1px dashed color-mix(in srgb, #b4451f 30%, transparent);
+}
+
+/* 筛选行与「多选」并排：筛选可以横向滚，多选钉在右边不跟着滚 */
+.order-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.order-filter > :first-child {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.order-filter__manage {
+  flex: none;
+  padding: 5px 12px;
+  font-size: 13px;
+  color: var(--color-ink-soft);
+  background: var(--color-paper);
+  border: 1.5px solid var(--color-line);
+  border-radius: 999px;
+}

@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { useFamily, CAPABILITY, can } from '@/api/family'
 import { useNotifications } from '@/api/notifications'
 import { onTabRetap } from '@/lib/tab-retap'
+import { useLongPress } from '@/lib/long-press'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import ConfirmMenuSheet from './components/ConfirmMenuSheet'
 import DinerCountSheet from './components/DinerCountSheet'
@@ -11,6 +12,7 @@ import RepeatMealSheet from './components/RepeatMealSheet'
 import SaveComboSheet from './components/SaveComboSheet'
 import FreeDishSheet from './components/FreeDishSheet'
 import {
+  useClearMealItems,
   useOrders,
   useRemoveOrderItem,
   useUpdateMealStatus,
@@ -51,10 +53,11 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
   CANCELED: '已取消',
 }
 
-/** 待确认的动作：整餐流转 / 撤回自己的一份 */
+/** 待确认的动作：整餐流转 / 退掉一份 / **整桌退掉多张卡**（长按多选，用户 2026-10-15） */
 type PendingAction =
   | { kind: 'status'; card: MealCard; status: OrderStatus; label: string }
   | { kind: 'withdraw'; card: MealCard; dishName: string; itemId: string }
+  | { kind: 'clear'; meals: MealCard[] }
   | null
 
 /** 要传成品照的那一餐（F9-08）：只在「已做好」的卡片上有入口 */
@@ -92,6 +95,16 @@ export default function OrderPage() {
   const [scope, setScope] = useState<'family' | 'mine'>('family')
   const [filter, setFilter] = useState<string>('ALL')
   const [pending, setPending] = useState<PendingAction>(null)
+  /*
+   * 长按多选（用户 2026-10-15：「订单里面的卡片要能删除，可以用那个按住显示单选框，
+   * 然后底部或上部有批量操作的功能，退菜这种的」）。
+   *
+   * 两件事分开记：`selecting` 是"现在在选择模式里"，`picked` 是选了哪几餐。
+   * 选择模式**不跨页存活**（离开这一页就退出）——它是"我现在要动手"的临时状态，
+   * 被 keep-alive 留在缓存里的话，下次进来会看到一堆单选框而不知道为什么。
+   */
+  const [selecting, setSelecting] = useState(false)
+  const [picked, setPicked] = useState<string[]>([])
   const [uploadMealKey, setUploadMealKey] = useState<string | null>(null)
   // 正在定这一餐（M4 / F4-05）：null = 抽屉关着
   const [confirmFor, setConfirmFor] = useState<MealCard | null>(null)
@@ -115,6 +128,7 @@ export default function OrderPage() {
   const orders = useOrders(scope, filter, { enabled: Boolean(family.data) })
   const updateStatus = useUpdateMealStatus()
   const removeItem = useRemoveOrderItem()
+  const clearMealItems = useClearMealItems()
 
   /*
    * 卡片上那个"有事没看过"的标记（用户 2026-10-14 要求）。
@@ -189,6 +203,56 @@ export default function OrderPage() {
     .filter((status) => status.id === 'ALL' || (counts[status.id] ?? 0) > 0 || filter === status.id)
     .map((status) => ({ id: status.id, label: status.label, count: counts[status.id] ?? 0 }))
 
+  /*
+   * ---- 长按多选（用户 2026-10-15）----
+   *
+   * 长按一张卡就进选择模式并选中它；此后**点卡片=勾选/取消**（不再跳详情）。
+   * 长按之外还留了一个显式入口（选择条上的「多选」在……见下面那颗小小的「管理」按钮）：
+   * 长按是**不可发现**的手势，只给长按的话，第一次用的人永远找不到这个功能
+   * （本项目在"点不动的箭头""看不见的角标"上各栽过一次，见 D-066 / D-082）。
+   */
+  const exitSelect = () => {
+    setSelecting(false)
+    setPicked([])
+  }
+
+  const togglePick = (mealKey: string) => {
+    setPicked((current) =>
+      current.includes(mealKey) ? current.filter((key) => key !== mealKey) : [...current, mealKey],
+    )
+  }
+
+  /** 进选择模式。带 `mealKey` 就是"长按这张卡"（顺手选中它）；不带就是点了「多选」 */
+  const enterSelect = (mealKey?: string) => {
+    setSelecting(true)
+    if (!mealKey) return
+    setPicked((current) => (current.includes(mealKey) ? current : [...current, mealKey]))
+  }
+
+  /** 选中的那几餐（按列表顺序） */
+  const pickedMeals = (orders.data?.cards ?? []).filter((card) => picked.includes(card.mealKey))
+  /*
+   * 「做好了」的餐退不掉（后端 `canRemoveItem` 同样会拦）。这里**不禁用整个按钮**，
+   * 而是把原因写在按钮下面——禁用+不说原因正是 D-066 定的"点不动的箭头"那一类。
+   */
+  const blockedMeals = pickedMeals.filter((card) => card.status === 'DONE')
+
+  const askClear = () => {
+    if (pickedMeals.length === 0 || blockedMeals.length > 0) return
+    setPending({ kind: 'clear', meals: pickedMeals })
+  }
+
+  /*
+   * **一个长按实例服务整个列表**，而不是每张卡各一个：同时只可能有一张卡被按住，
+   * 而 hook 不能写在 `cards.map()` 里面（那是 hooks 的规则，不是风格问题）。
+   * 按下的那一刻先记下"是哪一餐"，计时到了再拿它进选择模式。
+   */
+  const pressedKey = useRef<string | null>(null)
+  const longPress = useLongPress(() => {
+    if (pressedKey.current) enterSelect(pressedKey.current)
+    pressedKey.current = null
+  })
+
   const closeDialog = () => setPending(null)
 
   const confirmAction = () => {
@@ -207,8 +271,38 @@ export default function OrderPage() {
       return
     }
 
+    if (action.kind === 'clear') {
+      /*
+       * **逐餐退，不是一次请求**：后端只有"退掉这一餐整桌"这一个接口（按 mealKey），
+       * 多选就是多个请求。**部分成功要说清是哪几餐没成**：一次网络抖动不该让整批白做，
+       * 也不该假装全成了（与冰箱拍照逐条入库同一条规矩）。
+       */
+      const meals = action.meals
+      void Promise.all(
+        meals.map(async (meal) => {
+          try {
+            await clearMealItems.mutateAsync(meal.mealKey)
+            return { meal, ok: true as const }
+          } catch (error) {
+            return { meal, ok: false as const, message: apiErrorMessage(error) }
+          }
+        }),
+      ).then((results) => {
+        const done = results.filter((row) => row.ok)
+        const failedRows = results.filter((row) => !row.ok)
+        if (done.length > 0) toast.success(`退掉了 ${done.length} 餐的菜`)
+        for (const row of failedRows) {
+          toast.error(`${row.meal.date} ${row.meal.mealLabel}：${row.message}`)
+        }
+        // 全成 → 退出选择模式；有没成的 → 只把它们留在选中状态里，让用户接着处理
+        if (failedRows.length === 0) exitSelect()
+        else setPicked(failedRows.map((row) => row.meal.mealKey))
+      })
+      return
+    }
+
     removeItem.mutate(action.itemId, {
-      onSuccess: () => toast.success('已撤回你点的那份'),
+      onSuccess: () => toast.success('已退掉这道菜'),
       onError: (error) => toast.error(apiErrorMessage(error)),
     })
   }
@@ -262,12 +356,26 @@ export default function OrderPage() {
             confirmText: pending.label,
             tone: pending.status === 'CANCELED' ? ('danger' as const) : ('normal' as const),
           }
-        : {
-            title: '撤回这份',
-            message: `把「${pending.dishName}」从这餐里撤回？撤回后要重新加一次。`,
-            confirmText: '撤回',
-            tone: 'normal' as const,
-          }
+        : pending.kind === 'withdraw'
+          ? {
+              title: '退掉这道菜',
+              message: `把「${pending.dishName}」从这餐里退掉？退掉后要重新加一次。`,
+              confirmText: '退掉',
+              tone: 'normal' as const,
+            }
+          : {
+              title: `退掉这 ${pending.meals.length} 餐的菜`,
+              /*
+               * 把"要退掉什么"说具体：整桌退是**一次去掉别人点的菜**（现在家里谁都退得掉，
+               * 见 D-084），所以这句必须点明餐次、并说清卡片会跟着消失——那是不可逆的。
+               */
+              message:
+                `会把 ${pending.meals.map((meal) => `${meal.date} ${meal.mealLabel}`).join('、')}` +
+                ' 里的菜**全部**退掉（包括家里人点的那几份），清空的卡片会从列表里消失。' +
+                '\n要重新吃就得重新点。只是少一道菜的话，进那一餐的详情退一道就好。',
+              confirmText: '全退掉',
+              tone: 'danger' as const,
+            }
 
   return (
     <Page>
@@ -295,7 +403,70 @@ export default function OrderPage() {
           </button>
         </div>
 
-        {family.data && orders.data && <Chips items={chips} value={filter} onChange={setFilter} />}
+        {/*
+          选择模式的操作条（用户 2026-10-15：「底部或上部有批量操作的功能」）。
+          放**上部**：底栏是 Tab、右下角还有 AI 悬浮球，再多一层会跟它们抢位置
+          （本项目在"提示被弹层盖住"上踩过一次，见 R-059）——而选择模式一进来，
+          眼睛本来就在顶部那条。
+        */}
+        {selecting ? (
+          <div className="pick-bar">
+            <div className="pick-bar__row">
+              <button type="button" className="pick-bar__exit" onClick={exitSelect}>
+                退出
+              </button>
+              <span className="pick-bar__count">已选 {picked.length} 餐</span>
+              <button
+                type="button"
+                className="pick-bar__all"
+                onClick={() => {
+                  const all = (orders.data?.cards ?? []).map((card) => card.mealKey)
+                  setPicked(picked.length === all.length ? [] : all)
+                }}
+              >
+                {picked.length === (orders.data?.cards?.length ?? 0) ? '取消全选' : '全选'}
+              </button>
+              <button
+                type="button"
+                className="pick-bar__go"
+                disabled={picked.length === 0 || blockedMeals.length > 0 || clearMealItems.isPending}
+                onClick={askClear}
+              >
+                {clearMealItems.isPending ? '正在退…' : '退菜'}
+              </button>
+            </div>
+            {/*
+              有「做好了」的餐被选中时，为什么退不动要写在这条操作条**自己身上**
+              （D-066：点不动又不解释最糟）。放在同一个卡片里、虚线之上：
+              它是这一条操作的附注，不是页面上另外一段话（用户 2026-10-15 的间隙反馈）。
+            */}
+            {blockedMeals.length > 0 && (
+              <p className="pick-bar__tip">
+                {blockedMeals.map((meal) => `${meal.date} ${meal.mealLabel}`).join('、')}
+                已经「做好了」，成品不再是能改的东西——要改记录去点单历史。
+              </p>
+            )}
+          </div>
+        ) : (
+          family.data && orders.data && (
+            <div className="order-filter">
+              <Chips items={chips} value={filter} onChange={setFilter} />
+              {/*
+                显式入口：长按是**手势**，第一次用的人找不到（见 enterSelect 那段说明）。
+                只在列表里真有卡时给，没菜的时候给这个按钮是空的。
+              */}
+              {(orders.data.cards.length > 0) && (
+                <button
+                  type="button"
+                  className="order-filter__manage"
+                  onClick={() => enterSelect()}
+                >
+                  多选
+                </button>
+              )}
+            </div>
+          )
+        )}
 
         {/* 两个整行入口并排一行：都是"进另一个地方"的动作，各占半行。
             说明文字随之改短——半行宽度放不下原来那句长说明。 */}
@@ -403,8 +574,39 @@ export default function OrderPage() {
             key={card.mealKey}
             // 再点一次「订单」Tab 时靠它找这张卡（见上面那段 jumpTo 的说明）
             data-meal-key={card.mealKey}
+            onPointerDown={(event) => {
+              pressedKey.current = card.mealKey
+              longPress.handlers.onPointerDown(event)
+            }}
+            onPointerMove={longPress.handlers.onPointerMove}
+            onPointerUp={() => {
+              pressedKey.current = null
+              longPress.handlers.onPointerUp()
+            }}
+            onPointerCancel={longPress.handlers.onPointerCancel}
+            onPointerLeave={() => {
+              pressedKey.current = null
+              longPress.handlers.onPointerLeave()
+            }}
+            onContextMenu={longPress.handlers.onContextMenu}
+            /*
+              选择模式下这张卡是一个**复选框**：`role` + `aria-checked` 让读屏也念得出
+              "已选/未选"（只画一个 ✓ 的方块对读屏等于没有）。
+            */
+            role={selecting ? 'checkbox' : undefined}
+            aria-checked={selecting ? picked.includes(card.mealKey) : undefined}
             onClick={(event) => {
-              if ((event.target as HTMLElement).closest('button, a, input, select, textarea')) return
+              const target = event.target as HTMLElement
+              /*
+                **长按抬起时浏览器会补一次 click**：不吐掉的话，"长按选中"会被紧接着的
+                这次点击立刻取消（表现为"按半天选不上"）。这一句必须在最前面。
+              */
+              if (longPress.consumeClick()) return
+              if (target.closest('button, a, input, select, textarea')) return
+              if (selecting) {
+                togglePick(card.mealKey)
+                return
+              }
               navigate(`/order/${card.mealKey}`, { state: { from: location.pathname } })
             }}
           >
@@ -424,7 +626,34 @@ export default function OrderPage() {
             {cardBadges.length > 0 && (
               <span className="order-card__corner">{cardBadges.join(' · ')}</span>
             )}
+            {/*
+              选择模式下的勾选方块（用户 2026-10-15：「按住显示单选框」）。挂在**左上角**：
+              右上角是未读角标的位置（D-082），两个挤在一起会互相盖住。
+              `aria-hidden`：状态已经由卡片的 role/aria-checked 说了，这里只是给眼睛看的。
+            */}
+            {selecting && (
+              <span
+                className={['order-card__pick', picked.includes(card.mealKey) && 'is-on']
+                  .filter(Boolean)
+                  .join(' ')}
+                aria-hidden="true"
+              >
+                {picked.includes(card.mealKey) ? '✓' : ''}
+              </span>
+            )}
             <div className="order-card__head">
+              {/*
+                选择模式下标题区**不能是链接**：这时候点整张卡的意思是"勾选它"，
+                留着一个会跳走的链接等于在最需要多选的时候把人带走。
+              */}
+              {selecting ? (
+                <span className="order-card__headlink">
+                  <span className="order-card__date">
+                    {card.date} · {card.mealLabel}
+                  </span>
+                  <span className="order-card__who">{card.orderers.join(' · ')} 点的</span>
+                </span>
+              ) : (
               <Link
                 className="order-card__headlink"
                 to={`/order/${card.mealKey}`}
@@ -435,12 +664,19 @@ export default function OrderPage() {
                 </span>
                 <span className="order-card__who">{card.orderers.join(' · ')} 点的</span>
               </Link>
+              )}
               <span className={['stamp', STATUS_TONE[card.status]].filter(Boolean).join(' ')}>
                 {card.statusLabel}
               </span>
-              <span className="order-card__arrow" aria-hidden="true">
-                ›
-              </span>
+              {/*
+                选择模式下**不画那个 ›**：它说的是"点进去"，而这时候点卡是勾选。
+                一个指错方向的箭头比没有箭头糟（D-066 那条"点不动的东西一个不留"的同一族）。
+              */}
+              {!selecting && (
+                <span className="order-card__arrow" aria-hidden="true">
+                  ›
+                </span>
+              )}
             </div>
 
             <div className="order-card__dishes">
@@ -456,8 +692,16 @@ export default function OrderPage() {
                       {note.nickname}：{note.text}
                     </div>
                   ))}
-                  {/* 撤回只在我点过、且这餐还在「待确认」时给（后端同样会校验一次） */}
-                  {line.mineItemIds.length > 0 && card.status === 'PENDING' && (
+                  {/*
+                    退掉一道菜。口径 2026-10-15 放开（用户：「批量操作…退菜这种的」）：
+                    **到「正在做」为止都能退**（原来只在「待确认」给，后端 `canRemoveItem` 同样校验）。
+
+                    列表上仍然只画**我点过的那几道**（`mineItemIds`）：这张卡上的菜是**合并过的**
+                    （`番茄炒蛋 ×2` 可能两个人都点了），而列表里没有"每份是谁的"这层信息——
+                    退别人的那一份要看清是谁的，那是详情页的活（那里按人分组，弹窗也会点名）。
+                    只是少一道菜而不是退整桌时，也走详情页。
+                  */}
+                  {line.mineItemIds.length > 0 && card.status !== 'DONE' && !selecting && (
                     <button
                       type="button"
                       className="order-card__withdraw"
@@ -470,7 +714,7 @@ export default function OrderPage() {
                         })
                       }
                     >
-                      撤回我这份
+                      退掉我这份
                     </button>
                   )}
                 </div>
@@ -513,6 +757,13 @@ export default function OrderPage() {
               任何"用 A 现象当 B 能力代理"的判据都会在权限调整时这样裂开，所以这里
               回到**它自己那一项能力**：前端据此显示/隐藏，判定仍然只由后端下。
             */}
+            {/*
+              选择模式下**收起三行动作**（改人数/存组合/再点一次）与成品照、流转按钮：
+              这时候整张卡只表达一件事——"选我"。留着它们既误导（点下去会跳出多选），
+              也会在窄屏上把勾选状态挤得看不见。
+            */}
+            {!selecting && (
+            <>
             <div className="order-card__tools">
               <button
                 type="button"
@@ -577,6 +828,8 @@ export default function OrderPage() {
                   </button>
                 ))}
               </div>
+            )}
+            </>
             )}
           </article>
           )

@@ -252,6 +252,19 @@ export async function removeOrderItem(itemId: string): Promise<MealCard> {
   return data
 }
 
+/**
+ * 把这一餐整桌退掉（列表里长按多选 → 批量操作；用户 2026-10-15：「订单里面的卡片要能删除…
+ * 批量操作…退菜这种的」）。
+ *
+ * **为什么按 mealKey 而不是传一串 item id**：列表卡片是摘要，只带得出"我点的那几份"的 id
+ * （`mineItemIds`），而现在家里谁都退得掉任何菜——前端拿不到别人的条目 id。
+ * 按餐退，判据落在服务端一处（见 `orders.service.ts` 的 `clearItems`）。
+ */
+export async function clearMealItems(mealKey: string): Promise<MealCard> {
+  const { data } = await apiClient.delete<MealCard>(`/orders/meals/${encodeURIComponent(mealKey)}/items`)
+  return data
+}
+
 export async function updateMealStatus(mealKey: string, status: OrderStatus): Promise<MealCard> {
   const { data } = await apiClient.post<MealCard>(
     `/orders/meals/${encodeURIComponent(mealKey)}/status`,
@@ -463,6 +476,7 @@ export function useSetDinerCount() {
 
 export const useAddOrderItem = () => useOrderMutation(addOrderItem)
 export const useRemoveOrderItem = () => useOrderMutation(removeOrderItem)
+export const useClearMealItems = () => useOrderMutation(clearMealItems)
 export const useUpdateMealStatus = () =>
   useOrderMutation((input: { mealKey: string; status: OrderStatus }) =>
     updateMealStatus(input.mealKey, input.status),

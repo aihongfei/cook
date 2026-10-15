@@ -40,7 +40,7 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
 
 type PendingAction =
   | { kind: 'status'; card: MealCard; status: OrderStatus; label: string }
-  | { kind: 'withdraw'; card: MealCard; dishName: string; itemId: string }
+  | { kind: 'withdraw'; card: MealCard; dishName: string; itemId: string; byWhom: string | null }
   | null
 
 /** 到分钟就够；"谁几点定的"不需要秒 */
@@ -145,7 +145,7 @@ export default function OrderDetailPage() {
 
     removeItem.mutate(action.itemId, {
       onSuccess: () => {
-        toast.success('已撤回你点的那份')
+        toast.success('已退掉这道菜')
         // 撤最后一份会让这一餐变成空卡（后端回 dishCount=0）：那一餐就不存在了，
         // 留在详情页会看到一张空壳——退回列表，那里也没有它了
         void meal.refetch()
@@ -170,9 +170,15 @@ export default function OrderDetailPage() {
             tone: pending.status === 'CANCELED' ? ('danger' as const) : ('normal' as const),
           }
         : {
-            title: '撤回这份',
-            message: `把「${pending.dishName}」从这餐里撤回？撤回后要重新加一次。`,
-            confirmText: '撤回',
+            title: '退掉这道菜',
+            /*
+             * 退**别人的**那一份时把名字写出来：现在家里谁都退得掉任何一份
+             * （2026-10-15 定的口径），而"我退的不是自己的菜"这件事必须在按下去之前看到。
+             */
+            message: pending.byWhom
+              ? `把${pending.byWhom}点的「${pending.dishName}」退掉？退掉后要重新加一次。`
+              : `把「${pending.dishName}」从这餐里退掉？退掉后要重新加一次。`,
+            confirmText: '退掉',
             tone: 'normal' as const,
           }
 
@@ -309,16 +315,30 @@ export default function OrderDetailPage() {
                         {line.note && <div className="od-line__note">备注：{line.note}</div>}
                         <div className="od-line__at">{formatClock(line.createdAt)}</div>
                       </div>
-                      {/* 撤回只在我自己那份、且这一餐还在「待确认」时给（后端同样会校验） */}
-                      {line.isMe && card.status === 'PENDING' && (
+                      {/*
+                        退掉一份（用户 2026-10-15：「…批量操作…退菜这种的」）。
+                        两条口径都在那次放开了（后端 `canRemoveItem` 同样会校验）：
+                        **家里谁都退得掉任何一份**（不再限于自己点的），
+                        **到「正在做」为止都能退**（只有「做好了」封口）。
+
+                        别人的那一份也标出"是谁的"：这一列本来就是按人分组的（上面写着昵称），
+                        但确认弹窗里必须再说一次——退别人的菜是个大动作，弹窗要把话说全。
+                      */}
+                      {card.status !== 'DONE' && (
                         <button
                           type="button"
                           className="order-card__withdraw"
                           onClick={() =>
-                            setPending({ kind: 'withdraw', card, dishName: line.name, itemId: line.id })
+                            setPending({
+                              kind: 'withdraw',
+                              card,
+                              dishName: line.name,
+                              itemId: line.id,
+                              byWhom: person.isMe ? null : person.nickname,
+                            })
                           }
                         >
-                          撤回
+                          {line.isMe ? '退掉' : '退掉这份'}
                         </button>
                       )}
                     </div>

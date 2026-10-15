@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { AxiosRequestConfig } from 'axios'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -273,7 +273,7 @@ it('吃货的点单：后端没给 nextActions 就一个流转按钮都不显示
   expect(screen.queryByRole('button', { name: '选好了' })).toBeNull()
   expect(screen.queryByRole('button', { name: '取消这餐' })).toBeNull()
   // 但自己点的菜仍能撤回（这是 order.create 的附带动作，不是管理动作）
-  expect(screen.getByRole('button', { name: '撤回我这份' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '退掉我这份' })).toBeTruthy()
 })
 
 /*
@@ -427,21 +427,21 @@ it('取消整餐要二次确认：取消不请求，确认才发（且文案说�
   )
 })
 
-it('撤回自己点的菜也要确认：不点确认不会发请求', async () => {
+it('退掉一道菜也要确认：不点确认不会发请求', async () => {
   mockGet({ boards: { family: boardFixture() } })
   const del = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: cardFixture() } as never)
   renderOrder()
 
-  fireEvent.click(await screen.findByRole('button', { name: '撤回我这份' }))
+  fireEvent.click(await screen.findByRole('button', { name: '退掉我这份' }))
   const dialog = await screen.findByRole('dialog')
-  expect(within(dialog).getByText(/把「番茄炒蛋」从这餐里撤回/)).toBeTruthy()
+  expect(within(dialog).getByText(/把「番茄炒蛋」从这餐里退掉/)).toBeTruthy()
 
   fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   expect(del).not.toHaveBeenCalled()
 
-  fireEvent.click(screen.getByRole('button', { name: '撤回我这份' }))
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '撤回' }))
+  fireEvent.click(screen.getByRole('button', { name: '退掉我这份' }))
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '退掉' }))
   await waitFor(() => expect(del).toHaveBeenCalledWith('/orders/items/i1'))
 })
 
@@ -461,10 +461,15 @@ it('别人点的菜不显示撤回入口（只有我点过的才有）', async (
   renderOrder()
 
   expect(await screen.findByText('红烧排骨')).toBeTruthy()
-  expect(screen.queryByRole('button', { name: '撤回我这份' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '退掉我这份' })).toBeNull()
 })
 
-it('已安排之后不再显示撤回入口（状态不允许了）', async () => {
+it('「已安排」也还留着退的入口（口径 2026-10-15：到「正在做」为止都能退）', async () => {
+  /*
+   * 原来这条断言的是"已安排就不再显示撤回"——那条规矩已经改了：
+   * 菜单定了不等于不能少一道菜（家里没那食材、有人临时不回来吃），
+   * 所以现在只有「做好了」才封口（后端 `canRemoveItem`）。
+   */
   mockGet({
     boards: {
       family: boardFixture([
@@ -479,7 +484,21 @@ it('已安排之后不再显示撤回入口（状态不允许了）', async () =
   renderOrder()
 
   expect(await screen.findByRole('button', { name: '开始做' })).toBeTruthy()
-  expect(screen.queryByRole('button', { name: '撤回我这份' })).toBeNull()
+  expect(screen.getByRole('button', { name: '退掉我这份' })).toBeTruthy()
+})
+
+it('「做好了」才收回退的入口（成品不再是能改的东西）', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ status: 'DONE', statusLabel: '已做好', nextActions: [] }),
+      ]),
+    },
+  })
+  renderOrder()
+
+  expect(await screen.findByText('2026-10-13 · 晚餐')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '退掉我这份' })).toBeNull()
 })
 
 it('切换「只看我的」按 scope 重新取数（两个视角各自一片缓存）', async () => {
@@ -814,7 +833,7 @@ it('整桌都已经有了：只说"都有了"，不编一个"加了 0 道"', asy
  *
  * 这里验的是**入口能不能用**，以及那条最容易踩坏的边界：整卡 onClick 挂在外层，
  * 而卡片里有一堆真按钮——点内层按钮**不能**顺带把人带去详情页
- * （点「撤回我这份」结果跳走了，是最典型的那种"点错了还不知道为什么"）。
+ * （点「退掉我这份」结果跳走了，是最典型的那种"点错了还不知道为什么"）。
  */
 it('点卡片空白处进这一餐的详情', async () => {
   mockGet({ boards: { family: boardFixture() } })
@@ -825,14 +844,14 @@ it('点卡片空白处进这一餐的详情', async () => {
   expect(await screen.findByText('这一餐详情')).toBeTruthy()
 })
 
-it('点卡片里的按钮（撤回我这份）**不会**误进详情页', async () => {
+it('点卡片里的按钮（退掉我这份）**不会**误进详情页', async () => {
   mockGet({ boards: { family: boardFixture() } })
   renderOrder()
 
-  const withdraw = await screen.findByRole('button', { name: '撤回我这份' })
+  const withdraw = await screen.findByRole('button', { name: '退掉我这份' })
   fireEvent.click(withdraw)
-  // 走的是撤回的二次确认，不是跳详情
-  expect(await screen.findByText(/撤回后要重新加一次/)).toBeTruthy()
+  // 走的是退菜的二次确认，不是跳详情
+  expect(await screen.findByText(/退掉后要重新加一次/)).toBeTruthy()
   expect(screen.queryByText('这一餐详情')).toBeNull()
 })
 
@@ -1105,4 +1124,155 @@ it('只有「该备菜」未读时：列表顶上说一句，去处是备菜页�
   expect(document.querySelector('.order-notice')?.getAttribute('href')).toBe('/prep')
   // 卡片上仍然一个角标都没有（这一条本来就没有卡）
   expect(document.querySelectorAll('.order-card__corner').length).toBe(0)
+})
+
+/*
+ * 长按多选 + 批量退菜（用户 2026-10-15：「订单里面的卡片要能删除，可以用那个按住显示单选框，
+ * 然后底部或上部有批量操作的功能，退菜这种的」）。
+ *
+ * 这一组盯四件事：
+ * ① 长按**进选择模式并选中这一张**，短按仍然进详情（两个手势不能互相吃掉）；
+ * ② 选择模式下点卡片=勾选/取消，**不跳详情**（这时候跳走等于把多选打断）；
+ * ③ 批量退菜**逐餐发请求**，全成→退出选择模式、有失败→只留失败那些（部分成功要说清）；
+ * ④ 「做好了」的餐退不掉：按钮禁用 + **写明原因**（D-066：点不动又不解释最糟）。
+ */
+
+/**
+ * 长按一张卡。**用真计时器等 600ms**，不用 `vi.useFakeTimers()`：
+ * 这一页的数据来自 react-query，而 `findBy*`/`waitFor` 都靠真计时器——
+ * 换成假计时器之后整条测试会一路等到超时（写这组时踩到的第一个坑）。
+ *
+ * 手势要**走完整**（按下 → 等 → 抬起 → 浏览器补的那次 click）：只按下不抬起的话，
+ * 页面的"吐掉长按后那次点击"标记没人消费，会把它**后面**那次点击也吞掉，
+ * 测试看到的就是"点第二张卡没反应"——真机抬手必定补那次 click，是模拟漏了一步。
+ */
+async function longPress(element: HTMLElement) {
+  fireEvent.pointerDown(element, { button: 0, clientX: 10, clientY: 10 })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 600))
+  })
+  fireEvent.pointerUp(element)
+  fireEvent.click(element)
+}
+
+/** 造两张卡（不同餐次），用于多选 */
+const twoCards = () =>
+  boardFixture([
+    cardFixture(),
+    cardFixture({
+      mealKey: '2026-10-14-LUNCH',
+      date: '2026-10-14',
+      meal: 'LUNCH',
+      mealLabel: '午餐',
+    }),
+  ])
+
+it('长按卡片进选择模式并选中它；短按仍然进详情', async () => {
+  mockGet({ boards: { family: twoCards() } })
+  renderOrder()
+
+  const card = await screen.findByText('2026-10-13 · 晚餐')
+  const article = card.closest('article') as HTMLElement
+
+  // 先来一次短按（不到 500ms）：不该进选择模式
+  fireEvent.pointerDown(article, { button: 0, clientX: 10, clientY: 10 })
+  fireEvent.pointerUp(article)
+  expect(screen.queryByText(/已选 /)).toBeNull()
+
+  // 长按：进选择模式、并选中这一张
+  await longPress(article)
+
+  expect(await screen.findByText('已选 1 餐')).toBeTruthy()
+  expect(article.getAttribute('aria-checked')).toBe('true')
+})
+
+it('选择模式下点卡片是勾选/取消，不再跳详情；「全选」一次选中全部', async () => {
+  mockGet({ boards: { family: twoCards() } })
+  renderOrder()
+
+  const article = (await screen.findByText('2026-10-13 · 晚餐')).closest('article') as HTMLElement
+  await longPress(article)
+  expect(await screen.findByText('已选 1 餐')).toBeTruthy()
+
+  // 点另一张卡 → 变成两张
+  const other = (await screen.findByText('2026-10-14 · 午餐')).closest('article') as HTMLElement
+  fireEvent.click(other)
+  expect(await screen.findByText('已选 2 餐')).toBeTruthy()
+  expect(screen.queryByText('这一餐详情')).toBeNull()
+
+  // 再点一次 → 取消（不是又选中）
+  fireEvent.click(other)
+  expect(await screen.findByText('已选 1 餐')).toBeTruthy()
+
+  // 全选
+  fireEvent.click(screen.getByRole('button', { name: '全选' }))
+  expect(await screen.findByText('已选 2 餐')).toBeTruthy()
+})
+
+it('批量退菜：逐餐发请求，全成之后退出选择模式', async () => {
+  mockGet({ boards: { family: twoCards() } })
+  const del = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: cardFixture() } as never)
+  renderOrder()
+
+  const article = (await screen.findByText('2026-10-13 · 晚餐')).closest('article') as HTMLElement
+  await longPress(article)
+
+  fireEvent.click(await screen.findByRole('button', { name: '全选' }))
+  fireEvent.click(screen.getByRole('button', { name: '退菜' }))
+
+  // 二次确认里要把"退掉哪些餐"说清（这是不可逆的）
+  const dialog = await screen.findByRole('dialog')
+  expect(within(dialog).getByText(/全部.*退掉|把 .*里的菜/)).toBeTruthy()
+  fireEvent.click(within(dialog).getByRole('button', { name: '全退掉' }))
+
+  await waitFor(() => expect(del).toHaveBeenCalledTimes(2))
+  expect(del.mock.calls.map((call) => call[0]).sort()).toEqual([
+    '/orders/meals/2026-10-13-DINNER/items',
+    '/orders/meals/2026-10-14-LUNCH/items',
+  ])
+  // 全成 → 退出选择模式（选择条消失）
+  await waitFor(() => expect(screen.queryByText(/已选 /)).toBeNull())
+})
+
+it('批量退菜部分失败：只把失败的那一餐留在选中状态（不假装全成了）', async () => {
+  mockGet({ boards: { family: twoCards() } })
+  const del = vi.spyOn(apiClient, 'delete').mockImplementation((url: string) => {
+    if (url === '/orders/meals/2026-10-14-LUNCH/items') {
+      return Promise.reject(new Error('这一餐已经「做好了」了'))
+    }
+    return Promise.resolve({ data: cardFixture() } as never)
+  })
+  renderOrder()
+
+  const article = (await screen.findByText('2026-10-13 · 晚餐')).closest('article') as HTMLElement
+  await longPress(article)
+
+  fireEvent.click(await screen.findByRole('button', { name: '全选' }))
+  fireEvent.click(screen.getByRole('button', { name: '退菜' }))
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '全退掉' }))
+
+  // 还留在选择模式里，且只剩没退成的那一餐
+  await waitFor(() => expect(del).toHaveBeenCalledTimes(2))
+  expect(await screen.findByText('已选 1 餐')).toBeTruthy()
+  expect(
+    (await screen.findByText('2026-10-14 · 午餐')).closest('article')?.getAttribute('aria-checked'),
+  ).toBe('true')
+})
+
+it('「做好了」的餐退不掉：按钮禁用并写明原因（不是静默不理人）', async () => {
+  mockGet({
+    boards: {
+      family: boardFixture([
+        cardFixture({ status: 'DONE', statusLabel: '已做好', nextActions: [] }),
+      ]),
+    },
+  })
+  renderOrder()
+
+  const article = (await screen.findByText('2026-10-13 · 晚餐')).closest('article') as HTMLElement
+  await longPress(article)
+
+  const go = await screen.findByRole('button', { name: '退菜' })
+  expect((go as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.getByText(/已经「做好了」.*去点单历史/)).toBeTruthy()
 })
