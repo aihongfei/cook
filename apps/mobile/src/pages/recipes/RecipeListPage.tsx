@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useFavoriteStatus, useToggleFavorite } from '@/api/favorites'
 import { recipeErrorMessage, useRecipeFilters as useFilterOptions, useRecipes } from '@/api/recipes'
 import FilterTabs from '@/components/ui/FilterTabs'
-import SwipeArea from '@/components/ui/SwipeArea'
+import SwipePager from '@/components/ui/SwipePager'
 import CornerArt from '@/components/ui/CornerArt'
 import Page from '@/components/ui/Page'
 import { useRecipeFilters } from '@/stores/recipe-filters'
@@ -20,17 +20,6 @@ export default function RecipeListPage() {
   const [input, setInput] = useState(q)
   const [composing, setComposing] = useState(false)
   const filters = useFilterOptions()
-  const recipes = useRecipes({ q, category, cuisine })
-  const sentinel = useRef<HTMLDivElement>(null)
-  const items = recipes.data?.pages.flatMap((page) => page.items) || []
-  const total = recipes.data?.pages[0]?.total || 0
-
-  /*
-   * 收藏（F1-09）：**一屏一次问清**（不是每张卡各查各的——12 张卡就是 12 个请求）。
-   * 没登录时这个 hook 自己不发请求（后端会 401），也就不传 `onToggleFavorite`，卡片不画心。
-   */
-  const favoriteStatus = useFavoriteStatus(items.map((dish) => dish.id))
-  const toggleFavorite = useToggleFavorite()
 
   // URL 入口优先；只持久化品类与菜系，搜索词不会进入本地存储。
   useEffect(() => {
@@ -59,16 +48,6 @@ export default function RecipeListPage() {
     }, 350)
     return () => window.clearTimeout(timer)
   }, [input, composing, q, params, setParams])
-
-  useEffect(() => {
-    const target = sentinel.current
-    if (!target || !recipes.hasNextPage || recipes.isFetching || recipes.isFetchNextPageError || !window.IntersectionObserver) return
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) void recipes.fetchNextPage()
-    }, { root: target.closest('.tab-layout__body'), rootMargin: '160px' })
-    observer.observe(target)
-    return () => observer.disconnect()
-  }, [recipes.hasNextPage, recipes.isFetching, recipes.isFetchNextPageError, recipes.fetchNextPage, items.length])
 
   const reset = () => {
     preferences.reset()
@@ -131,38 +110,78 @@ export default function RecipeListPage() {
             />
           </>}
         </section>
-        <div className="recipes-count" aria-live="polite">
-          {recipes.data ? `共 ${total} 道（已显示 ${items.length}）` : '正在翻开菜谱…'}
-          {recipes.isFetching && !recipes.isPending && !recipes.isFetchingNextPage && <span> 更新中…</span>}
-        </div>
-        {recipes.isPending && <RecipeStatus title="正在取回菜谱…" loading>给小厨房一点时间</RecipeStatus>}
-        {recipes.isError && !recipes.data && <RecipeStatus title="菜谱加载失败" onRetry={() => { void recipes.refetch() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
-        {recipes.isRefetchError && !recipes.isFetchNextPageError && recipes.data && <RecipeStatus title="菜谱更新失败，暂时保留上次结果" onRetry={() => { void recipes.refetch() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
-        {recipes.isSuccess && items.length === 0 && <RecipeStatus title="还没有找到这道味道">试试别的菜名、食材，或清除筛选再看看。</RecipeStatus>}
-        {/* 栅格是"品类"那一组的滑动面（见上面那段注释）：左右划动＝换一个品类 */}
-        <SwipeArea
+        {/* 栅格是"品类"那一组的翻页面（见上面那段注释）：左右划动＝换一个品类 */}
+        <SwipePager
           keys={categoryTabs.map((tab) => tab.key)}
           activeKey={category}
           onChange={(key) => { preferences.setCategory(key); updateSearch({ category: key }) }}
-        >
-        <div className="recipes-grid">
-          {items.map((dish) => (
-            <DishCard
-              key={dish.id}
-              dish={dish}
-              favorited={Boolean(favoriteStatus.data?.[dish.id])}
-              onToggleFavorite={favoriteStatus.signedIn ? () => toggleFavorite.mutate(dish.id) : undefined}
-            />
-          ))}
-        </div>
-        </SwipeArea>
-        <div ref={sentinel} className="recipes-sentinel" aria-hidden="true" />
-        {recipes.isFetchNextPageError && <RecipeStatus title="后面的菜谱加载失败" onRetry={() => { void recipes.fetchNextPage() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
-        {recipes.hasNextPage && <button className="recipe-button recipes-more" type="button" disabled={recipes.isFetching} onClick={() => { void recipes.fetchNextPage() }}>
-          {recipes.isFetchingNextPage ? '更多菜谱加载中…' : '再翻一页'}
-        </button>}
-        {items.length > 0 && !recipes.hasNextPage && <p className="recipes-end">这一页的味道，都在这里了</p>}
+          renderPanel={(key) => <CategoryPanel q={q} cuisine={cuisine} category={key} />}
+        />
       </div>
     </Page>
+  )
+}
+
+/**
+ * 一个品类一页（用户 2026-10-15：「要跟随手指拖动，滑到中间时，两个页是都能看见的」）。
+ *
+ * 为什么每页各自取数、而不是"页面上取一次、切页时换筛选值"：跟手拖动到一半时，
+ * 邻页的卡片必须**当场**画得出来。共用一次请求的话，那半页只能是一段"正在取回菜谱…"，
+ * 翻起来像坏了。各自取数还有一个好处：react-query 按品类缓存，来回翻第二趟就是现成的。
+ *
+ * 无限滚动那套（哨兵 + `root: 最近的滚动容器`）**原样**跟着卡片走：
+ * 页被挪进 `.swipe-pager__panel` 之后，`closest('.tab-layout__body')` 还是同一个容器
+ * （邻居页被 `overflow-x: clip` 剪在屏外，视口判定里不算"相交"，所以它在屏外时不会误触发）。
+ */
+function CategoryPanel({ q, cuisine, category }: { q: string; cuisine: string; category: string }) {
+  const recipes = useRecipes({ q, category, cuisine })
+  const sentinel = useRef<HTMLDivElement>(null)
+  const items = recipes.data?.pages.flatMap((page) => page.items) || []
+  const total = recipes.data?.pages[0]?.total || 0
+
+  /*
+   * 收藏（F1-09）：**一屏一次问清**（不是每张卡各查各的——12 张卡就是 12 个请求）。
+   * 没登录时这个 hook 自己不发请求（后端会 401），也就不传 `onToggleFavorite`，卡片不画心。
+   */
+  const favoriteStatus = useFavoriteStatus(items.map((dish) => dish.id))
+  const toggleFavorite = useToggleFavorite()
+
+  useEffect(() => {
+    const target = sentinel.current
+    if (!target || !recipes.hasNextPage || recipes.isFetching || recipes.isFetchNextPageError || !window.IntersectionObserver) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) void recipes.fetchNextPage()
+    }, { root: target.closest('.tab-layout__body'), rootMargin: '160px' })
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [recipes.hasNextPage, recipes.isFetching, recipes.isFetchNextPageError, recipes.fetchNextPage, items.length])
+
+  return (
+    <>
+      <div className="recipes-count" aria-live="polite">
+        {recipes.data ? `共 ${total} 道（已显示 ${items.length}）` : '正在翻开菜谱…'}
+        {recipes.isFetching && !recipes.isPending && !recipes.isFetchingNextPage && <span> 更新中…</span>}
+      </div>
+      {recipes.isPending && <RecipeStatus title="正在取回菜谱…" loading>给小厨房一点时间</RecipeStatus>}
+      {recipes.isError && !recipes.data && <RecipeStatus title="菜谱加载失败" onRetry={() => { void recipes.refetch() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
+      {recipes.isRefetchError && !recipes.isFetchNextPageError && recipes.data && <RecipeStatus title="菜谱更新失败，暂时保留上次结果" onRetry={() => { void recipes.refetch() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
+      {recipes.isSuccess && items.length === 0 && <RecipeStatus title="还没有找到这道味道">试试别的菜名、食材，或清除筛选再看看。</RecipeStatus>}
+      <div className="recipes-grid">
+        {items.map((dish) => (
+          <DishCard
+            key={dish.id}
+            dish={dish}
+            favorited={Boolean(favoriteStatus.data?.[dish.id])}
+            onToggleFavorite={favoriteStatus.signedIn ? () => toggleFavorite.mutate(dish.id) : undefined}
+          />
+        ))}
+      </div>
+      <div ref={sentinel} className="recipes-sentinel" aria-hidden="true" />
+      {recipes.isFetchNextPageError && <RecipeStatus title="后面的菜谱加载失败" onRetry={() => { void recipes.fetchNextPage() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
+      {recipes.hasNextPage && <button className="recipe-button recipes-more" type="button" disabled={recipes.isFetching} onClick={() => { void recipes.fetchNextPage() }}>
+        {recipes.isFetchingNextPage ? '更多菜谱加载中…' : '再翻一页'}
+      </button>}
+      {items.length > 0 && !recipes.hasNextPage && <p className="recipes-end">这一页的味道，都在这里了</p>}
+    </>
   )
 }

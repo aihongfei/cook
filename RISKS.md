@@ -851,14 +851,16 @@ F16-10 让 AI 第一次**真的写库**，于是多出一类全新的假证据�
 - **怎么测**：单测要**让组件实例活过一次路由变化**再打开它——做法是"在同一个路由元素上换查询串"（`navigate('?tab=two')`）：组件不卸载、`location.key` 变，正是真机上"进详情再返回"的等价物。`ConfirmDialog.test.tsx` 里两条：① 打开之后换页要关掉（原有意图）；② **挂载之后先换过页、再打开要留着**（这条**先证明会红**才改代码）。
 - **相关**：`apps/mobile/src/components/ui/ConfirmDialog.tsx`、`apps/mobile/src/components/ui/ImageViewer.tsx`、`apps/mobile/src/layouts/KeepAlivePages.tsx`、`DECISIONS.md` **D-086 五**、`RUNBOOK.md` **R-079**、`RISKS.md` R-66 / R-67（同一族）。
 
-## R-69 页内手势会跟**系统手势**和**纵向滚动**抢事件：三处兜底缺一不可 🟢 已定规矩（2026-10-15 做 tab 左右滑动时定下）
+## R-69 页内手势会跟**系统手势**、**纵向滚动**和**长按**抢事件：四处兜底 + 两条取消规矩，缺一不可 🟢 已定规矩（2026-10-15 做 tab 跟手翻页时定下；同日晚补上 long-press 那条）
 
-- **一类问题**：在页面里加"横着划一下＝换一页"的手势，天生要跟三件事抢：① 用户在**滚页面**（列表里几乎人人斜着划）；② 系统的**返回手势**（安卓/WebView 从屏幕边缘起划）；③ 浏览器把横向划动当成**历史前进/后退**。判宽了就会出现"我想滚页面它却换了 tab""我想返回它换了个 tab"——比不能滑更烦人。
-- **规矩（四处，缺一不可）**：
-  1. **方向门槛**：横向位移 ≥ 56px **且** ≥ 纵向的 1.6 倍（`SWIPE_MIN_DX` / `SWIPE_DIRECTION_RATIO`）——只判"横向位移大于多少"是不够的，斜着滚页面时横向分量很容易过 56；
+- **一类问题**：在页面里加"横着划一下＝翻一页"的手势，天生要跟四件事抢：① 用户在**滚页面**（列表里几乎人人斜着划）；② 系统的**返回手势**（安卓/WebView 从屏幕边缘起划）；③ 浏览器把横向划动当成**历史前进/后退**；④ **卡片自己的长按**（订单页"按住进多选"）。判宽了就会出现"我想滚页面它却换了页""我想返回它换了个页""我想翻页却进了多选"——比不能滑更烦人。
+- **规矩（四处 + 两条，缺一不可）**：
+  1. **方向门槛**：横向位移 ≥ 8px 才算**接过来**，且横向 ≥ 纵向的 1.6 倍（`SWIPE_LOCK_DX` / `SWIPE_DIRECTION_RATIO`）——只判"横向位移大于多少"是不够的，斜着滚页面时横向分量很容易过线；
   2. **边缘带不接**：起点在屏幕左右 24px 内一律放行给系统（`SWIPE_EDGE_GUARD`）；
-  3. **CSS 兜底**：手势面 `touch-action: pan-y`（横向归 JS、纵向归浏览器），滚动容器 `overscroll-behavior-x: none`（别触发历史手势）；
-  4. **共享组件里标 `data-no-swipe`**：`Chips`、`FilterTabs` 的 tab 条这类**自己会横滚**的元素——在它们上面划动的意思是"看后面的选项"，不是"换一页"。标记打在使用方页面上迟早会漏，打在共享组件里就不会。
-- **还有两条设计口径**：**只在抬手时决定**（中途不断换页，用户来不及反悔）；**到头不循环**（这是翻页，不是转盘）。
-- **怎么测**：判定写成纯函数单测（`lib/tab-swipe.rules.test.ts` 10 条，把上面四条各钉一遍）；接线上用 `FilterTabs.test.tsx` 验"滑动换 key / tab 条上划不换 / 纵向划不换"；真机上用 **CDP 的真触摸事件**划（`Input.dispatchTouchEvent`，见 `RUNBOOK.md` R-081）——它走浏览器输入流水线，`touch-action` 与会话仲裁都参与，比在 JS 里造 PointerEvent 更接近手指。
+  3. **CSS 兜底**：手势面 `touch-action: pan-y`（横向归 JS、纵向归浏览器），滚动容器 `overscroll-behavior-x: none`（别触发历史手势），手势面 `overflow-x: clip` 但 **`overflow-y: visible`**（剪掉屏外那一页算出来的横向溢出，又不吃更高的内容）；
+  4. **共享组件里标 `data-no-swipe`**：`Chips`、`FilterTabs` 的 tab 条这类**自己会横滚**的元素——在它们上面划动的意思是"看后面的选项"，不是"翻一页"。标记打在使用方页面上迟早会漏，打在共享组件里就不会；
+  5. **接过来之后必须拦住默认行为**：触摸那条路要**原生非 passive 的 `touchmove`**（React 的 `touchmove` 是 passive，`preventDefault()` 无效）。不拦的话浏览器仍按手势开始时定下的 `touch-action` 把它当纵向滚动，页面跟着手指上下晃，还会用 `pointercancel` 把这趟收走；
+  6. **长按的"取消"不能只挂在被按的元素上**：手指滑出去之后移动事件的 target 就换了元素，长按计时器没人清 → 500ms 后照常触发。取消要挂 **window**（capture），`touchmove` 也要听一份（安卓 WebView 里 pointer 移动可能一个都不派发）。**这条是真栽过的**：慢速横划订单卡片会莫名进多选（见 D-088 三）。
+- **还有两条设计口径**：**到头不循环**（这是翻页，不是转盘）；**落位收尾不能靠 `transitionend`**（动效可能压根不跑：系统关了动效、WebView 节流）——要认定时器，且终态（谁在屏上、画在哪）不能依赖动画跑没跑。
+- **怎么测**：判定写成纯函数单测（`lib/tab-swipe.rules.test.ts` **17 条**，把上面每一条各钉一遍）；接线用 `SwipePager.test.tsx`（**跟手时轨道像素位移 / 拖动中两页同时在地 / 够远翻页 / 不够弹回 / 到头不循环 / 纵向不动 / 拖动后那次 click 被吞**）与 `FilterTabs.test.tsx`；长按的取消用 `long-press.test.tsx`（滑出卡片后继续移动要取消、只有 touch 事件时也要取消）；真机上用 **CDP 的真触摸事件**划（`Input.dispatchTouchEvent`，见 `RUNBOOK.md` R-081）——它走浏览器输入流水线，`touch-action` 与会话仲裁都参与，比在 JS 里造 PointerEvent 更接近手指。
 - **相关**：`apps/mobile/src/lib/tab-swipe.rules.ts`、`apps/mobile/src/components/ui/SwipeArea.tsx`、`Chips.tsx`、`FilterTabs.tsx`、`DECISIONS.md` **D-088**、`RUNBOOK.md` **R-081**、`RISKS.md` R-67（同一族：手势/事件"什么时候不该算"）。

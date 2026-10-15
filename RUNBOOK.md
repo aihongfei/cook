@@ -4909,12 +4909,12 @@ adb shell dumpsys notification --noredact | grep -i "com.yushan.cook" | head -20
   `DONE` / `CANCELED` 跳过（`cookReminders`）；
 - **有东西到期**：当天早上 9 点，并且**窗口内每一天各自排各天的**（哪天早上没打开过 App 也要响）。
 
-## R-081 在模拟器上验"左右滑动切换 tab"（真触摸事件），以及两个坐标坑（配套统一 R-069 / D-088，✅ 已验证 2026-10-15）
+## R-081 在模拟器上验"跟手翻页"（真触摸事件），以及四个坑（配套统一 R-069 / D-088，✅ 已验证 2026-10-15）
 
 ### 一、用 CDP 的**真触摸**划，而不是在 JS 里造事件
 
 ```bash
-# 从 (340,300) 划到 (140,305)：往左 200px（＝看下一个 tab）
+# 从 (340,300) 划到 (140,305)：往左 200px（＝看下一页）
 node /tmp/swipe.mjs http://127.0.0.1:9222 340 300 140 305
 ```
 
@@ -4923,24 +4923,50 @@ node /tmp/swipe.mjs http://127.0.0.1:9222 340 300 140 305
 于是 `touch-action`、`overscroll-behavior`、以及浏览器的会话仲裁**都参与**——那几条正是这次要实现的东西
 （见 `RISKS.md` R-69），自己造事件会把它们全绕过去。
 
-### 二、两个坐标坑（都踩到了）
+### 二、四个坑（都踩到了）
 
-1. **keep-alive 下 `.swipe-area` 有多个**：缓存页不卸载，`document.querySelector('.swipe-area')`
-   很可能拿到**隐藏那一页**的（实测 `w=0 h=0`）。先按可见性过滤再取 rect：
+1. **keep-alive 下同名元素有多个**：缓存页不卸载，`document.querySelector('.swipe-pager')`
+   很可能拿到**隐藏那一页**的（实测读到的是别的页的位移，看着像"划了没反应"）。先按可见性过滤再取 rect：
    ```js
    const vis = (el) => el.getClientRects().length > 0 && !el.closest('[hidden]')
    ```
    （同一条坑见 R-079 一。）
-2. **划动的两个点都要落在手势面**的矩形里：那次可见的 `.swipe-area` 是 `y=177–485`，
-   而第一版我把点选在 `y=500`（差 15px）——事件落在页面上而不是手势面里，表现是"划了没反应"，
+2. **划动的两个点都要落在手势面**的矩形里：那次可见的翻页层是 `y=376–1342`，
+   而第一版我把点选在 `y=500`（差得不多）——事件落在页面上而不是手势面里，表现是"划了没反应"，
    看着像功能坏了。先读 rect 再决定坐标。
+3. **`location.reload()` / 跳转之后要等 DOM 画出来再派触摸**：刚 reload 完那一瞬间元素高度是 0，
+   坐标算出来是 `NaN`，`Input.dispatchTouchEvent` 会**静默什么都不做**（不报错），
+   这是"划了没反应"的第二种来源。先轮询到目标元素有高度（本仓库的探针脚本里都有 `waitReady()`）。
+4. **本机 CDP 每次派发触摸要 ~600ms**（模拟器实测：一条 `touchStart` 命令本身就要 600ms，紧随的 `touchMove` 再 600ms）。
+   于是"先按住不动、再慢慢划"这种造法，测出来的**其实是 harness 的延迟**——真手指按下的头 30ms 里就走完了
+   8px 的接手势阈值。**验"慢速划动"必须让起手那几步连着发**：
+   ```js
+   ws.send(JSON.stringify({ id: 1, method: 'Input.dispatchTouchEvent', params: { type: 'touchStart', touchPoints: [p(startX)] } }))
+   ws.send(JSON.stringify({ id: 2, method: 'Input.dispatchTouchEvent', params: { type: 'touchMove', touchPoints: [p(startX - 30)] } }))
+   ws.send(JSON.stringify({ id: 3, method: 'Input.dispatchTouchEvent', params: { type: 'touchMove', touchPoints: [p(startX - 60)] } }))
+   ```
+   两点要注意：**不等应答**（每条命令的往返就是那 600ms），但**每帧只能放一条命令**——
+   把多条 JSON 拼成一个字符串发过去时，浏览器只处理第一条、其余静默丢弃（那一次我等到的是"怎么划都不动"）。
+   副作用值得单独记：**harness 的延迟自己造出了一场长按**（按住 600ms 才动 >10px），
+   正是它把订单页那个真实的长按 bug 暴露出来的（见第四节）。
 
-### 三、这一轮验到的（模拟器上）
+### 三、这一轮验到的（模拟器上，dev 包 + CDP 真触摸）
 
 | 验什么 | 结果 |
 | --- | --- |
-| 订单页列表往左划 | 筛选从「全部 4」→「待确认 4」 |
-| 我的菜谱往左划 / 往右划 | `?tab=favorites` → `?tab=mine` → 再划回 favorites；可见 tab 的下划线跟着走、内容真的换 |
-| 纵向划动（在列表里往下拽） | **只滚页面**（`scrollTop: 0 → 192`），筛选不动 |
-| 在筛选胶囊那一行上划 | 不换筛选（那一行自己会横滚，标了 `data-no-swipe`） |
+| 订单页**按住拖到一半** | `translate3d(calc(0% - 150px))`、`transition: none`（跟手不给过渡）；`ALL` 页只剩 **64%** 在屏上、`PENDING` 露出 **36%** → **两页同时可见** |
+| 抬手之后 | 落位 `calc(-100%)` + `260ms` 过渡 → 只剩 `PENDING`，筛选变「待确认 4」 |
+| 慢速划（90ms/步）与快甩 | 都正常翻页，且**不再误进多选** |
+| 我的菜谱 | `cooked → favorites → mine` 一路划过去，活动下划线与内容都跟着走 |
+| 菜谱小书 | `全部品类 → 主食`，计数「共 600 道」→「共 235 道」 |
+| 纵向划动（在列表里往上拽） | **只滚页面**（`scrollTop: 163 → 330`），页不动、筛选不动 |
+| 点「待确认」胶囊 | 照常换筛选（页也跟过去：`transform` 变 `calc(-100%)`） |
+| **真按住 800ms** | 仍然进选择模式（「已选 1 餐」）——修那个长按 bug 没把它弄坏 |
 | 隐藏的缓存页 | 查询要按可见性过滤，否则读到的是别的页（见上面第 1 条） |
+
+### 四、顺带用这套方法抓出的真 bug（记进 R-069 第 6 条 / D-088 三）
+
+慢速横划订单卡片会**莫名进多选**：长按的取消监听挂在卡片自己身上，手指滑出去之后移动事件的 target
+就换了元素，卡片一次 `pointermove` 都收不到 → 500ms 后长按照常触发。修法是起手之后在 **window** 上补一份
+capture 监听（`pointermove` / `touchmove` / `pointerup` / `pointercancel`），结束就摘。
+**这也说明"慢速划动"这个测法本身有价值**：正常速度的自动化测试根本撞不到它（跑到 500ms 之前早就抬手了）。

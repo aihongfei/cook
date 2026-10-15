@@ -24,7 +24,7 @@
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   /*
-   * 横向的 overscroll 关掉：手机上横着划一下（见 `SwipeArea`）本来是"切换页内 tab"，
+   * 横向的 overscroll 关掉：手机上横着划一下（见 `SwipePager`）本来是"切换页内 tab"，
    * 不关的话浏览器/WebView 可能把它当成"返回上一页"那条历史手势，
    * 用户想换 tab 却被退出了这一页。
    */

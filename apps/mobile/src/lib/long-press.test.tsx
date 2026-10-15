@@ -79,6 +79,50 @@ it('手指动了就取消（那是滚动列表，不是长按）', () => {
   expect(fired).not.toHaveBeenCalled()
 })
 
+/*
+ * 2026-10-15 抓到的真 bug（做跟手翻页时撞出来的）：手指**慢慢**横着划过一张卡，
+ * 那个 500ms 计时器先到 → 想翻页却变成了"进多选"。三条一起钉住：
+ * 移动只要发生就该取消，**不管它落在谁头上**；触摸那条路（没有 pointer 事件）也一样；
+ * 一趟结束要把 window 上的监听摘干净。
+ */
+it('手指滑出这一张之后继续移动，也要取消（不能只认落在自己身上的那些移动）', () => {
+  const fired = vi.fn()
+  render(<Probe onLongPress={fired} />)
+
+  fireEvent.pointerDown(target(), { button: 0, clientX: 10, clientY: 10 })
+  // 事件 target 不是这张卡（真机上手指滑出去之后就是这样）
+  fireEvent.pointerMove(document.body, { clientX: 120, clientY: 10 })
+  act(() => {
+    vi.advanceTimersByTime(LONG_PRESS_MS + 100)
+  })
+  expect(fired).not.toHaveBeenCalled()
+})
+
+it('只有 touch 事件（安卓 WebView 里 pointer 可能一个都不派发）时，移动照样取消', () => {
+  const fired = vi.fn()
+  render(<Probe onLongPress={fired} />)
+
+  fireEvent.pointerDown(target(), { button: 0, clientX: 10, clientY: 10 })
+  fireEvent.touchMove(document.body, { touches: [{ clientX: 140, clientY: 10 }] })
+  act(() => {
+    vi.advanceTimersByTime(LONG_PRESS_MS + 100)
+  })
+  expect(fired).not.toHaveBeenCalled()
+})
+
+it('一趟结束就把 window 上的监听摘干净（第二趟没动，到点照样触发）', () => {
+  const fired = vi.fn()
+  render(<Probe onLongPress={fired} />)
+
+  fireEvent.pointerDown(target(), { button: 0, clientX: 10, clientY: 10 })
+  fireEvent.pointerUp(target())
+  fireEvent.pointerDown(target(), { button: 0, clientX: 10, clientY: 10 })
+  act(() => {
+    vi.advanceTimersByTime(LONG_PRESS_MS)
+  })
+  expect(fired).toHaveBeenCalledTimes(1)
+})
+
 it('长按之后浏览器补的那一次 click 被吐掉（否则刚选上又被取消）', () => {
   const fired = vi.fn()
   render(<Probe onLongPress={fired} />)

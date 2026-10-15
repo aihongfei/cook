@@ -17,7 +17,7 @@ interface ChipsProps {
  * 横向滚动的筛选胶囊组。
  *
  * `data-no-swipe`：这一行自己会横着滚（"看后面还有什么选项"），所以在它上面左右划动
- * **不该**被外层的手势面当成"切换 tab"（见 `SwipeArea` / `lib/tab-swipe.rules.ts`）。
+ * **不该**被外层的翻页面当成"换一页"（见 `SwipePager` / `lib/tab-swipe.rules.ts`）。
  * 标记打在这个共享组件里，用它的页面不用记着加。
  */
 export default function Chips({ items, value, onChange }: ChipsProps) {

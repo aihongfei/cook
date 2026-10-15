@@ -220,6 +220,11 @@ function mockGet({
 
 beforeEach(() => {
   localStorage.clear()
+  /*
+   * jsdom 没有布局引擎：`clientWidth` 恒为 0，而"这一下划得够不够翻页"是按页宽（22%）算的
+   * → 不给个真宽度，滑动那两条用例会永远停在"不够"。真实浏览器里宽度是真的（见 SwipePager）。
+   */
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 400 })
   // toast 是模块级 store，不清会带到下一条用例
   useToasts.setState({ items: [] })
   useAuth.getState().setSession({
@@ -1335,15 +1340,20 @@ it('「多选」是筛选行最右的图标按钮（不跟着 chips 横滚、与
  * 滑动换了筛选值、**在筛选胶囊那一行上划动不换**（那一截自己会横滚）。
  */
 function swipe(el: Element, fromX: number, toX: number, dy = 6) {
-  fireEvent.pointerDown(el, { button: 0, clientX: fromX, clientY: 400 })
-  fireEvent.pointerUp(el, { button: 0, clientX: toX, clientY: 400 + dy })
+  const pager = document.querySelector('.swipe-pager') as HTMLElement
+  fireEvent.touchStart(el, { touches: [{ clientX: fromX, clientY: 400 }] })
+  for (let step = 1; step <= 4; step += 1) {
+    const x = fromX + ((toX - fromX) * step) / 4
+    fireEvent.touchMove(pager, { touches: [{ clientX: x, clientY: 400 + (dy * step) / 4 }] })
+  }
+  fireEvent.touchEnd(pager, { changedTouches: [{ clientX: toX, clientY: 400 + dy }] })
 }
 
 it('列表上往左划 → 切到下一个状态筛选（「全部」→「待确认」）', async () => {
   mockGet({ boards: { family: twoCards() } })
   renderOrder()
 
-  const area = document.querySelector('.swipe-area') as HTMLElement
+  const area = document.querySelector('.swipe-pager') as HTMLElement
   expect(area).toBeTruthy()
   await screen.findByText('2026-10-13 · 晚餐')
 
@@ -1354,6 +1364,21 @@ it('列表上往左划 → 切到下一个状态筛选（「全部」→「待�
     const active = document.querySelector('.chip.is-active')
     expect(active?.textContent?.trim().startsWith('待确认')).toBe(true)
   })
+})
+
+it('拖动中间两页都在（邻页是当场画出来的：筛选在前端做，不用等接口）', async () => {
+  mockGet({ boards: { family: twoCards() } })
+  renderOrder()
+
+  await screen.findByText('2026-10-13 · 晚餐')
+  const pager = document.querySelector('.swipe-pager') as HTMLElement
+  fireEvent.touchStart(pager, { touches: [{ clientX: 340, clientY: 400 }] })
+  fireEvent.touchMove(pager, { touches: [{ clientX: 280, clientY: 400 }] })
+
+  const keys = [...document.querySelectorAll('.swipe-pager__panel')].map(
+    (panel) => (panel as HTMLElement).dataset.panelKey,
+  )
+  expect(keys).toEqual(['ALL', 'PENDING'])
 })
 
 it('在筛选胶囊那一行上划动**不换筛选**（那一行自己横着滚，划动是"看后面的选项"）', async () => {

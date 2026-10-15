@@ -5,7 +5,7 @@ import { useFamily, CAPABILITY, can } from '@/api/family'
 import { useNotifications } from '@/api/notifications'
 import { onTabRetap } from '@/lib/tab-retap'
 import { SelectIcon } from '@/components/icons/TabIcons'
-import SwipeArea from '@/components/ui/SwipeArea'
+import SwipePager from '@/components/ui/SwipePager'
 import { useLongPress } from '@/lib/long-press'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import ConfirmMenuSheet from './components/ConfirmMenuSheet'
@@ -126,8 +126,15 @@ export default function OrderPage() {
     setFreeDishOpen(true)
   }
 
-  // 没加入家庭就别请求点单接口（后端会 404）：等 family 查询回来再决定
-  const orders = useOrders(scope, filter, { enabled: Boolean(family.data) })
+  /*
+   * 没加入家庭就别请求点单接口（后端会 404）：等 family 查询回来再决定。
+   *
+   * **状态筛选改成在前端筛**（用户 2026-10-15 要求"左右滑动切换筛选，滑到中间两页都能看见"）：
+   * 跟手拖到一半时，邻页那一组卡也得当场画得出来——按状态分别请求的话，那半页会是一段
+   * "正在取…"，翻起来像卡住。后端本来就一次性把每个状态的数量算在 `counts` 里
+   * （它也是**全量**取回来再算的），所以这里不再带 `status`，切换筛选是零请求、瞬时的。
+   */
+  const orders = useOrders(scope, 'ALL', { enabled: Boolean(family.data) })
   const updateStatus = useUpdateMealStatus()
   const removeItem = useRemoveOrderItem()
   const clearMealItems = useClearMealItems()
@@ -563,17 +570,21 @@ export default function OrderPage() {
         )}
 
         {/*
-          卡片列表这一块**能左右滑动切换状态筛选**（用户 2026-10-15：「类似这种 tab 页
-          （全部、已安排、已做好）……需要能左右滑动切换」）。
-          包在 `SwipeArea` 里的只有列表本身：筛选胶囊那一行自己会横滚，它带着 `data-no-swipe`
-          标记、在 `SwipeArea` 里一律放行（在它上面划动是"看后面的选项"，不是换筛选）。
+          卡片列表这一块**能左右跟手翻页**（用户 2026-10-15：「类似这种 tab 页（全部、已安排、
+          已做好）……需要能左右滑动切换」，随后又要求「要跟随手指拖动，滑到中间时，两个页是都能看见的」）。
+          筛选胶囊那一行自己会横滚、带着 `data-no-swipe`，在它上面划动一律不接
+          （那是"看后面的选项"，不是换筛选）。
+          一页就是"某个状态下的那几张卡"：数据是同一份（`counts`/卡片一次性取回），
+          所以邻页当场就画得出来，不会有"翻到一半是空的"。
         */}
-        <SwipeArea
+        <SwipePager
           keys={chips.map((chip) => chip.id)}
           activeKey={filter}
           onChange={setFilter}
-        >
-        {orders.data?.cards.map((card) => {
+          renderPanel={(status) => {
+            const all = orders.data?.cards ?? []
+            const cards = status === 'ALL' ? all : all.filter((card) => card.status === status)
+            return cards.map((card) => {
           const cardBadges = badgesOfMeal(badges, card.mealKey)
           return (
           /*
@@ -854,8 +865,9 @@ export default function OrderPage() {
             )}
           </article>
           )
-        })}
-        </SwipeArea>
+            })
+          }}
+        />
       </div>
 
       {uploadMealKey && (

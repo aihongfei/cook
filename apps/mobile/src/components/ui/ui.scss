@@ -611,12 +611,61 @@
 }
 
 /*
- * 能左右滑动切换的那一层（`SwipeArea`）。
+ * 跟手翻页（`SwipePager`）。
  *
- * `touch-action: pan-y`：告诉浏览器"横向的划动我们自己处理"——不写它的话，
- * 手机上斜着划很容易被判成浏览器的横向手势（WebView 里就是"返回上一页"），
- * 于是用户想换 tab，页面却退回去了；纵向照常滚（那是这几页最常做的事）。
+ * 三层各管一件事：
+ * - `.swipe-pager`：**接手势**。`touch-action: pan-y` 告诉浏览器"横向的划动我们自己处理"
+ *   ——不写它的话，手机上斜着划很容易被判成浏览器的横向手势（WebView 里就是"返回上一页"），
+ *   用户想换 tab 页面却退回去了；纵向照常滚（那是这几页最常做的事）。
+ *   `overflow-x: clip` 是关键的一条：邻居页就停在左右屏外，不剪的话它们会算进**页面级**的
+ *   横向溢出（`.tab-layout__body` 是滚动容器），浏览器可能因此能横着滚整页。
+ *   **纵向不许剪**（`visible`）：拖动中邻居可能比当前页高，剪掉就把内容吃了。
+ *   `visible` 配 `clip` 是 CSS Overflow 3 明确允许的一对，不会被强制成 `auto`。
+ * - `.swipe-pager__track`：**动的那一层**。transform 由 `SwipePager.paint()` 手写
+ *   （组件里任何地方都不写 `style.transform`，否则两份会打架）。
+ * - `.swipe-pager__panel`：每一页。按**序号**定位（`left: i*100%`，组件里给），所以换页时
+ *   只有轨道在动、页自己不动，React 重渲染不会跟过渡打架。
+ *   **只有 `is-active` 那一页在流里**（`position: relative`）：它是唯一能给轨道撑出高度的元素，
+ *   于是"每页高度不同"这件事不需要任何 JS 量高——这是本项目最想要的性质（见 D-088 二）。
  */
-.swipe-area {
+.swipe-pager {
   touch-action: pan-y;
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+.swipe-pager__track {
+  position: relative;
+  /* 跟手期间在合成层上动，别让每一帧都去碰主线程（长列表页面尤其重要） */
+  will-change: transform;
+}
+
+.swipe-pager__panel {
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+.swipe-pager__panel.is-active {
+  position: relative;
+}
+
+/*
+ * 屏外那一页（邻居）不接交互：它只是"滑到中间能看见"的那一半。
+ * 拖动期间它带着 `aria-hidden`，鼠标也别点它——不然会点到看不见的按钮。
+ */
+.swipe-pager__panel:not(.is-active) {
+  pointer-events: none;
+}
+
+/*
+ * 系统关了动效时，落位这一步必须是"立刻到位"而不是"永远在路上"。
+ *
+ * 用 `!important` 是因为过渡是**内联**写在轨道上的（`paint()` 里那行），普通规则压不过它。
+ * 终态本来就不依赖动画（收尾走的是定时器），这里只是让它一帧到位。
+ */
+@media (prefers-reduced-motion: reduce) {
+  .swipe-pager__track {
+    transition: none !important;
+  }
 }
