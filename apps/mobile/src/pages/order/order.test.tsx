@@ -1328,3 +1328,45 @@ it('「多选」是筛选行最右的图标按钮（不跟着 chips 横滚、与
   expect(await screen.findByText('已选 1 餐')).toBeTruthy()
   expect(screen.queryByRole('button', { name: '多选' })).toBeNull()
 })
+
+/*
+ * 列表上左右滑动＝切换状态筛选（用户 2026-10-15：「类似这种 tab 页（全部、已安排、已做好）……
+ * 需要能左右滑动切换」）。判定在 `lib/tab-swipe.rules.test.ts` 里钉住，这里验接线：
+ * 滑动换了筛选值、**在筛选胶囊那一行上划动不换**（那一截自己会横滚）。
+ */
+function swipe(el: Element, fromX: number, toX: number, dy = 6) {
+  fireEvent.pointerDown(el, { button: 0, clientX: fromX, clientY: 400 })
+  fireEvent.pointerUp(el, { button: 0, clientX: toX, clientY: 400 + dy })
+}
+
+it('列表上往左划 → 切到下一个状态筛选（「全部」→「待确认」）', async () => {
+  mockGet({ boards: { family: twoCards() } })
+  renderOrder()
+
+  const area = document.querySelector('.swipe-area') as HTMLElement
+  expect(area).toBeTruthy()
+  await screen.findByText('2026-10-13 · 晚餐')
+
+  swipe(area, 340, 140)
+
+  // 筛选真的换了：那一枚胶囊变成选中态（卡片列表这一块挂在它下面）
+  await waitFor(() => {
+    const active = document.querySelector('.chip.is-active')
+    expect(active?.textContent?.trim().startsWith('待确认')).toBe(true)
+  })
+})
+
+it('在筛选胶囊那一行上划动**不换筛选**（那一行自己横着滚，划动是"看后面的选项"）', async () => {
+  mockGet({ boards: { family: twoCards() } })
+  renderOrder()
+
+  // 先等数据到位（筛选行与卡片是同一批数据渲染出来的），再拿那一行
+  await screen.findByText('2026-10-13 · 晚餐')
+  const row = document.querySelector('.chips') as HTMLElement
+  expect(row).toBeTruthy()
+
+  swipe(row, 340, 140)
+
+  const active = document.querySelector('.chip.is-active')
+  expect(active?.textContent?.trim().startsWith('全部')).toBe(true)
+})

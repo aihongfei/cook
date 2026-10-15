@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useFavoriteStatus, useToggleFavorite } from '@/api/favorites'
 import { recipeErrorMessage, useRecipeFilters as useFilterOptions, useRecipes } from '@/api/recipes'
 import FilterTabs from '@/components/ui/FilterTabs'
+import SwipeArea from '@/components/ui/SwipeArea'
 import CornerArt from '@/components/ui/CornerArt'
 import Page from '@/components/ui/Page'
 import { useRecipeFilters } from '@/stores/recipe-filters'
@@ -75,6 +76,17 @@ export default function RecipeListPage() {
     setParams(new URLSearchParams())
   }
 
+  /*
+   * 品类的 tab 列表（"全部品类" + 接口给的分类）：**既是 tab 条的数据，也是滑动切换的 keys**。
+   * 提出来算一次是因为两处都要用它——分别算两遍迟早会分叉（一处记得"当前分类不在列表里就补一个"、
+   * 另一处忘了，滑动就会切到一个列表里没有的 key）。
+   */
+  const categoryTabs = [
+    { key: '', title: '全部品类' },
+    ...(filters.data
+      ? Array.from(new Set([...filters.data.categories, ...(category ? [category] : [])])).map((key) => ({ key, title: key }))
+      : []),
+  ]
   return (
     <Page>
       <div className="recipes-page">
@@ -107,7 +119,7 @@ export default function RecipeListPage() {
           {filters.data && <>
             <span className="recipes-filters__label">品类</span>
             <FilterTabs
-              items={[{ key: '', title: '全部品类' }, ...Array.from(new Set([...filters.data.categories, ...(category ? [category] : [])])).map((key) => ({ key, title: key }))]}
+              items={categoryTabs}
               activeKey={category}
               onChange={(key) => { preferences.setCategory(key); updateSearch({ category: key }) }}
             />
@@ -127,6 +139,12 @@ export default function RecipeListPage() {
         {recipes.isError && !recipes.data && <RecipeStatus title="菜谱加载失败" onRetry={() => { void recipes.refetch() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
         {recipes.isRefetchError && !recipes.isFetchNextPageError && recipes.data && <RecipeStatus title="菜谱更新失败，暂时保留上次结果" onRetry={() => { void recipes.refetch() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
         {recipes.isSuccess && items.length === 0 && <RecipeStatus title="还没有找到这道味道">试试别的菜名、食材，或清除筛选再看看。</RecipeStatus>}
+        {/* 栅格是"品类"那一组的滑动面（见上面那段注释）：左右划动＝换一个品类 */}
+        <SwipeArea
+          keys={categoryTabs.map((tab) => tab.key)}
+          activeKey={category}
+          onChange={(key) => { preferences.setCategory(key); updateSearch({ category: key }) }}
+        >
         <div className="recipes-grid">
           {items.map((dish) => (
             <DishCard
@@ -137,6 +155,7 @@ export default function RecipeListPage() {
             />
           ))}
         </div>
+        </SwipeArea>
         <div ref={sentinel} className="recipes-sentinel" aria-hidden="true" />
         {recipes.isFetchNextPageError && <RecipeStatus title="后面的菜谱加载失败" onRetry={() => { void recipes.fetchNextPage() }}>{recipeErrorMessage(recipes.error)}</RecipeStatus>}
         {recipes.hasNextPage && <button className="recipe-button recipes-more" type="button" disabled={recipes.isFetching} onClick={() => { void recipes.fetchNextPage() }}>

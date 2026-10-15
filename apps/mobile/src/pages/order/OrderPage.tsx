@@ -5,6 +5,7 @@ import { useFamily, CAPABILITY, can } from '@/api/family'
 import { useNotifications } from '@/api/notifications'
 import { onTabRetap } from '@/lib/tab-retap'
 import { SelectIcon } from '@/components/icons/TabIcons'
+import SwipeArea from '@/components/ui/SwipeArea'
 import { useLongPress } from '@/lib/long-press'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import ConfirmMenuSheet from './components/ConfirmMenuSheet'
@@ -561,6 +562,17 @@ export default function OrderPage() {
           </Link>
         )}
 
+        {/*
+          卡片列表这一块**能左右滑动切换状态筛选**（用户 2026-10-15：「类似这种 tab 页
+          （全部、已安排、已做好）……需要能左右滑动切换」）。
+          包在 `SwipeArea` 里的只有列表本身：筛选胶囊那一行自己会横滚，它带着 `data-no-swipe`
+          标记、在 `SwipeArea` 里一律放行（在它上面划动是"看后面的选项"，不是换筛选）。
+        */}
+        <SwipeArea
+          keys={chips.map((chip) => chip.id)}
+          activeKey={filter}
+          onChange={setFilter}
+        >
         {orders.data?.cards.map((card) => {
           const cardBadges = badgesOfMeal(badges, card.mealKey)
           return (
@@ -843,6 +855,7 @@ export default function OrderPage() {
           </article>
           )
         })}
+        </SwipeArea>
       </div>
 
       {uploadMealKey && (

@@ -72,15 +72,20 @@ export default function MyRecipesPage() {
           tab 状态进 URL（见文件头）。用 `replace` 而不是 push：在三个 tab 之间来回点
           不该在浏览器历史里堆一串记录（用户按返回时想回的是"上一页"，不是"上一个 tab"）。
         */}
+        {/*
+          三个 tab 的**内容**交给 `FilterTabs` 当 children：它自己就带上了左右滑动切换
+          （用户 2026-10-15：「我的菜谱中收藏、我的菜谱这种 tab 页需要能左右滑动切换」）。
+          滑动与点 tab 走同一个 onChange（只改查询串、`replace: true` 不堆历史）。
+        */}
         <FilterTabs
           items={TABS.map((item) => ({ key: item.key, title: item.title }))}
           activeKey={tab}
           onChange={(key) => setParams(key === 'cooked' ? {} : { tab: key }, { replace: true })}
-        />
-
-        {tab === 'cooked' && <CookedList from={`${location.pathname}${location.search}`} />}
-        {tab === 'favorites' && <FavoritesList from={`${location.pathname}${location.search}`} />}
-        {tab === 'mine' && <OwnRecipesList />}
+        >
+          {tab === 'cooked' && <CookedList from={`${location.pathname}${location.search}`} />}
+          {tab === 'favorites' && <FavoritesList from={`${location.pathname}${location.search}`} />}
+          {tab === 'mine' && <OwnRecipesList />}
+        </FilterTabs>
       </div>
     </Page>
   )

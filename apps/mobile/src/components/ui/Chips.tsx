@@ -13,10 +13,16 @@ interface ChipsProps {
   onChange: (id: string) => void
 }
 
-/** 横向滚动的筛选胶囊组 */
+/**
+ * 横向滚动的筛选胶囊组。
+ *
+ * `data-no-swipe`：这一行自己会横着滚（"看后面还有什么选项"），所以在它上面左右划动
+ * **不该**被外层的手势面当成"切换 tab"（见 `SwipeArea` / `lib/tab-swipe.rules.ts`）。
+ * 标记打在这个共享组件里，用它的页面不用记着加。
+ */
 export default function Chips({ items, value, onChange }: ChipsProps) {
   return (
-    <div className="chips">
+    <div className="chips" data-no-swipe>
       {items.map((item) => (
         <button
           key={item.id}

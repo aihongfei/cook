@@ -609,3 +609,14 @@
     animation: none;
   }
 }
+
+/*
+ * 能左右滑动切换的那一层（`SwipeArea`）。
+ *
+ * `touch-action: pan-y`：告诉浏览器"横向的划动我们自己处理"——不写它的话，
+ * 手机上斜着划很容易被判成浏览器的横向手势（WebView 里就是"返回上一页"），
+ * 于是用户想换 tab，页面却退回去了；纵向照常滚（那是这几页最常做的事）。
+ */
+.swipe-area {
+  touch-action: pan-y;
+}
