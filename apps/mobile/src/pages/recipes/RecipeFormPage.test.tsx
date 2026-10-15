@@ -377,6 +377,53 @@ it('配图：只换图、别的字段一个字不改，也是一次有效改动�
   await waitFor(() => expect(patch).toHaveBeenCalledWith('/recipes/own-1', { image: 'data:image/jpeg;base64,NEW' }))
 })
 
+it('配图：选完把 input.value 清掉——浏览器只在"值变了"时才发 change，不清就"再选同一张没反应"（用户 2026-10-15 报的"上传不生效"）', async () => {
+  vi.spyOn(checkins, 'shrinkImage').mockResolvedValue('data:image/jpeg;base64,SHUNK')
+  mount('/recipes/new')
+
+  const input = screen.getByLabelText('配图（可以拍一张，也可以先空着）') as HTMLInputElement
+  /*
+   * 为什么盯"有没有人去清"而不是直接读 `input.value`：testing-library 是把 files **直接挂在元素上**的，
+   * jsdom 那个 `C:\fakepath\…` 的取值器看不到它们，于是 value 永远是空串——
+   * 直接断言 `input.value === ''` 的话，**去掉修复也照样通过**（写这版时就是这么被骗过一次）。
+   * 所以这里接住那次赋值：真有人在选完之后清 value，才说明同一个文件能再选一次。
+   */
+  const assigned: string[] = []
+  Object.defineProperty(input, 'value', {
+    configurable: true,
+    get: () => '',
+    set: (next: string) => {
+      assigned.push(next)
+    },
+  })
+
+  fireEvent.change(input, { target: { files: [new File(['x'], 'dish.png', { type: 'image/png' })] } })
+  await waitFor(() => expect(screen.getByText('不用这张')).toBeTruthy())
+  expect(assigned).toEqual([''])
+})
+
+it('配图：连选两张时后选的那张作数（先选的那张缩得慢，晚回来也不许盖掉）', async () => {
+  // 先选的那张**慢**（缩图要 30ms），后选的那张立刻回来——现实里两张图大小不同就会这样
+  vi.spyOn(checkins, 'shrinkImage').mockImplementation((file: File) =>
+    file.name === 'first.png'
+      ? new Promise((resolve) => setTimeout(() => resolve('data:image/jpeg;base64,FIRST'), 30))
+      : Promise.resolve('data:image/jpeg;base64,SECOND'),
+  )
+  mount('/recipes/new')
+
+  const input = screen.getByLabelText('配图（可以拍一张，也可以先空着）')
+  fireEvent.change(input, { target: { files: [new File(['x'], 'first.png', { type: 'image/png' })] } })
+  fireEvent.change(input, { target: { files: [new File(['y'], 'second.png', { type: 'image/png' })] } })
+
+  // 等慢的那张也回来（30ms 之后）：预览里留的必须是后选的 SECOND
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  await waitFor(() =>
+    expect(document.querySelector('.recipe-form__photo-frame img')?.getAttribute('src')).toBe(
+      'data:image/jpeg;base64,SECOND',
+    ),
+  )
+})
+
 it('配图：处理不了的文件如实说一声，且不把图留在预览里（别让人存完才发现）', async () => {
   vi.spyOn(checkins, 'shrinkImage').mockRejectedValue(new Error('这不是一张能显示的图片'))
   mount('/recipes/new')

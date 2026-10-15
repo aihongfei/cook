@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
@@ -255,18 +255,26 @@ function RecipeForm({ id, recipe, carry }: { id: string; recipe?: RecipeDetail; 
    * 手机原图 3–10MB，缩完通常 < 500KB，这样"存一道菜"不会变成等半分钟的上传。
    * 缩图失败就**不进表单**并如实说一声——把一张后端收不下的图留在预览里，
    * 用户要等点「存好」才知道不行。
+   *
+   * `pickImage` 是异步的（要缩图），而用户可能等不及又选了一张：**只认最后选的那张**。
+   * 没有这个序号的话，两张图谁先缩完不确定，先选的那张晚回来就会把后选的盖掉——
+   * 用户明明按 B 存的，结果存进去的是 A（同一类"看着做了、其实没生效"，见 RISKS R-67）。
    */
+  const pickSeq = useRef(0)
   const pickImage = async (file: File | undefined) => {
     if (!file) return
+    const seq = (pickSeq.current += 1)
     setPreparingImage(true)
     try {
       const shrunk = await shrinkImage(file)
+      if (seq !== pickSeq.current) return
       setForm((current) => ({ ...current, image: shrunk }))
       if (error) setError('')
     } catch (failure) {
+      if (seq !== pickSeq.current) return
       toast.error(failure instanceof Error ? failure.message : '这张图片处理不了')
     } finally {
-      setPreparingImage(false)
+      if (seq === pickSeq.current) setPreparingImage(false)
     }
   }
 
@@ -472,7 +480,16 @@ function RecipeForm({ id, recipe, carry }: { id: string; recipe?: RecipeDetail; 
                 className="recipe-form__photo-input"
                 type="file"
                 accept="image/*"
-                onChange={(event) => { void pickImage(event.target.files?.[0]) }}
+                onChange={(event) => {
+                  void pickImage(event.target.files?.[0])
+                  /*
+                   * 清掉 value：浏览器只在"值变了"时才发 change，**再选同一张图不会触发**，
+                   * 用户看到的就是"点选图没反应"（用户 2026-10-15：「上传图片有时候上传不生效」——
+                   * "有时候"就是选的是不是上一次那张）。打卡与冰箱那两个上传口都清过，
+                   * 只有这里漏了（见 PhotoSource / CheckInUploadSheet 的同款注释）。
+                   */
+                  event.target.value = ''
+                }}
               />
               {(form.image ?? '') !== '' && (
                 // 只撤"这次选的"：已存的那张图要换掉只能再选一张（删图是另一个动作，这一刀不做）

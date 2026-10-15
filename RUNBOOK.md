@@ -4736,3 +4736,65 @@ node /tmp/cdp.mjs http://127.0.0.1:9222 "(async () => {
 ### 五、看截图（视觉验收）
 
 `adb exec-out screencap -p > /tmp/x.png`，然后**照着 D-084 §四/§五 逐条对**：操作条是"退出 / 已选 N 餐 / 全选 / 退菜"四件、`已选 N 餐` 居中（靠左会在两边留一大一小两个空档）、被选中的卡左上角有 ✓、卡上不再有 `›`、选中「做好了」时原因在条内虚线之下。
+
+## R-078 菜谱配图"有时候上传不生效"怎么验（RISKS R-67 配套，✅ 已验证，2026-10-15）
+
+配套：`RISKS.md` **R-67**（"等下一次事件来收尾"的状态要能自己清零）。
+
+### 一、先认清"有时候"是什么
+
+浏览器只在 `change` 的值**真的变了**时才发事件，而选中文件后 `input.value` 会变成 `C:\fakepath\那张图.jpg`。**不清掉它，用户再选同一张图时事件根本不来**——所以"上传不生效"是**看第二次选的是不是上次那张**，不是随机故障。修法：`onChange` 处理完立刻 `event.target.value = ''`。
+
+### 二、在真机 WebView 里造一个真文件（不用碰系统文件选择器）
+
+`DataTransfer` 可以在页面里拼一个真 `File`，再赋给 `input.files` —— 走的是**真实的 change 路径**（`shrinkImage` 会真的读它、真的缩图）：
+
+```bash
+# ① 建一道自建菜谱（拿它的 id）→ ② 进编辑页
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => { history.pushState({}, '', '/recipes/<id>/edit'); window.dispatchEvent(new PopStateEvent('popstate')); return location.pathname })()"
+
+# ③ 造一张真 JPEG 塞进 input，并读回 value（这一条就是本次修复的可观测证据）
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(async () => {
+  const input = document.querySelector('#recipe-field-image')
+  const c = document.createElement('canvas'); c.width = 120; c.height = 90
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#c0392b'; ctx.fillRect(0, 0, 120, 90)
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9))
+  const file = new File([blob], 'verify.jpg', { type: 'image/jpeg' })
+  const dt = new DataTransfer(); dt.items.add(file)
+  input.files = dt.files
+  const browserWrote = input.value                       // 浏览器自己写进去的值
+  input.dispatchEvent(new Event('change', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 900))
+  return {
+    浏览器写进_value_的值: browserWrote,                 // 期望 C:\fakepath\verify.jpg
+    处理完之后_value: input.value,                       // 期望 ''（修复的正是这一处）
+    预览已出图: Boolean(document.querySelector('.recipe-form__photo-frame img')),
+    出现「不用这张」: Boolean(document.querySelector('.recipe-form__photo-drop'))
+  }
+})()"
+```
+
+实测（2026-10-15 11:36，debug 包）：`浏览器写进 value 的值 = "C:\fakepath\verify.jpg"`、`处理完之后 value = ""`、预览已出图 ✅ —— **`value` 被清空就是"再选同一张也会生效"的充要条件**（下次选同一张，浏览器看到值从 `''` 变回 `C:\fakepath\verify.jpg`，于是照常发 `change`）。
+
+### 三、把整条链走完（上传是否真的"生效"）
+
+```bash
+# 点「存好」→ 查库里的地址 → 直接取那张图 → 看详情页真的把它显示出来了
+node /tmp/cdp.mjs http://127.0.0.1:9222 "(async () => {
+  [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '存好').click()
+  await new Promise(r => setTimeout(r, 2500))
+  const t = JSON.parse(localStorage.getItem('yushan-auth')).state.token
+  const one = await (await fetch('http://127.0.0.1:3000/api/recipes/<id>', { headers: { authorization: 'Bearer ' + t } })).json()
+  const head = one.image ? await fetch(one.image).then(x => ({ status: x.status, type: x.headers.get('content-type') })) : null
+  const img = document.querySelector('.page img')
+  return { 图片地址: one.image && one.image.replace(/^http:\/\/127\.0\.0\.1:9000/, '<minio>'), 直接取图: head, 页面上加载成功: img ? (img.complete && img.naturalWidth > 0) : null }
+})()"
+```
+
+实测：`图片地址 = <minio>/cook-media/recipes/4fde81ef….jpg`、`直接取图 = { status: 200, type: 'image/jpeg' }`、`页面上加载成功 = true`；「我的菜谱 → 原创的」那张卡也显示出了新配图（并带「自己上传」徽标）。
+
+### 四、验不了的与别被骗的两处
+
+- **"点两次同一张图"在真机上点不出来**：系统文件选择器是原生 UI（CDP 点不到），而 `DOM.setFileInputFiles` **每次都会触发 `change`**（绕过了"值没变就不发"的抑制）——所以只能用上面"读 `value`"的间接证据 + 单测那条赋值断言。
+- **jsdom 里 `expect(input.value).toBe('')` 是假证**：testing-library 直接把 `files` 挂在元素上，那个 `C:\fakepath\…` 取值器看不到它，value 永远是空串（去掉修复也绿）。要**接住那次赋值**（`Object.defineProperty(input, 'value', { set })`）才算验到。
+- **图片显示依赖 `adb reverse tcp:9000`**（MinIO 在 9000）：这条映射在 adb 重启/设备重连后会掉，掉了的表现是"图存进去了但看不到"——排查时先 `adb reverse --list` 看一眼。
