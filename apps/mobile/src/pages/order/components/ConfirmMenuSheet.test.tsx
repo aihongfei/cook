@@ -44,6 +44,7 @@ function cardFixture(overrides: Partial<MealCard> = {}): MealCard {
     doneBy: null,
     doneAt: null,
     canRepeat: false,
+    canAdd: true,
     nextActions: [],
     submittedAt: new Date().toISOString(),
     ...overrides,

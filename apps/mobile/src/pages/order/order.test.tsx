@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { AxiosRequestConfig } from 'axios'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import { emitTabRetap } from '@/lib/tab-retap'
@@ -141,6 +143,8 @@ function cardFixture(overrides: Partial<MealCard> = {}): MealCard {
     doneAt: null,
     // 能不能「再点一次」（F3-06）：由后端按状态与日期算好，前端只负责显示按钮
     canRepeat: false,
+    // 与后端同一条判据（到「正在做」为止都能加，只有「做好了」封口）；下面按状态覆盖的那几处会各自改它
+    canAdd: true,
     // 后端按角色算好的下一步（前端只负责渲染，不自己推状态机）
     nextActions: [
       { status: 'PLANNED', label: '选好了', needsConfirm: false },
@@ -1275,4 +1279,33 @@ it('「做好了」的餐退不掉：按钮禁用并写明原因（不是静默�
   const go = await screen.findByRole('button', { name: '退菜' })
   expect((go as HTMLButtonElement).disabled).toBe(true)
   expect(screen.getByText(/已经「做好了」.*去点单历史/)).toBeTruthy()
+})
+
+it('「多选」在页头右上角，不在状态筛选那一行里（用户 2026-10-15：「多选按钮位置不对」）', async () => {
+  mockGet({ boards: { family: twoCards() } })
+  renderOrder()
+
+  const multi = await screen.findByRole('button', { name: '多选' })
+
+  /*
+   * ① 结构：它是页面容器（`.pscreen`，插画与页头都锚在它上面）的**直接子节点**，
+   *    而且**不在** `.order-filter` 里——那一行是状态筛选，多选不是某个筛选值
+   *    （挤在里面看着像第 4 个 chip，而且那一行能横滚，它跟着滚就没有"钉住"的意思了）。
+   */
+  expect(multi.parentElement?.className).toContain('pscreen')
+  expect(multi.closest('.order-filter')).toBeNull()
+  expect(document.querySelector('.order-filter__manage')).toBeNull()
+
+  /* ② 样式：靠绝对定位钉在右上角。**不能只断言类名存在**——落回文档流也一样有类名 */
+  const css = readFileSync(join(__dirname, './order.scss'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const rule = css.match(/\.order-multi\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+  expect(rule, '没读到 .order-multi 规则').toBeTruthy()
+  expect(rule).toMatch(/position:\s*absolute/)
+  expect(rule).toMatch(/top:\s*\d+px/)
+  expect(rule).toMatch(/right:\s*\d+px/)
+
+  // ③ 进了选择模式它自己退场（那时候整条操作条已经有一排按钮了）
+  await longPress((await screen.findByText('2026-10-13 · 晚餐')).closest('article') as HTMLElement)
+  expect(await screen.findByText('已选 1 餐')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '多选' })).toBeNull()
 })

@@ -155,3 +155,8 @@
   flex: 0 0 auto;
   color: #c7a97e;
 }
+
+/* 只读的现状行（如「手机提醒」）：没有箭头，不该看着像能点 */
+.row--status .row__sub--warn {
+  color: #b4451f;
+}

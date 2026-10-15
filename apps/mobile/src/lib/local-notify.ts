@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core'
 import { LocalNotifications } from '@capacitor/local-notifications'
-import type { LocalReminder } from './local-notify.rules'
+import { pendingSummary } from './local-notify.rules'
+import type { LocalReminder, NotifyStatus } from './local-notify.rules'
 
 /**
  * 本机通知的原生调用层（M10 交付二）。**排什么**的判定全在 `local-notify.rules.ts`。
@@ -133,4 +134,31 @@ export async function cancelAll(): Promise<void> {
 export function targetOf(extra: unknown): string | null {
   const to = (extra as { to?: unknown } | null)?.to
   return typeof to === 'string' && to.startsWith('/') ? to : null
+}
+
+/**
+ * 读一次本机提醒的现状：**权限 + 已排几条 + 最近一条**。
+ *
+ * 为什么值得有：用户 2026-10-15 报「真机也没收到通知」——而"没收到"这件事
+ * 在界面上**完全看不出来**（是没排上？权限没给？还是本来就没有要提醒的事？），
+ * 与 `RISKS.md` R-66 那一族（分不出"做成了"与"看着做成了"）是同一类问题。
+ * 这个函数把三件事一次性读出来，界面照着说人话（文案见 `notifyStatusText`）。
+ *
+ * 任何一步失败都**当成"读不出来"**（pending 0 / next null），不抛：
+ * 它只是"我的"页上的一行说明，读不到不该把整页弄崩。
+ */
+export async function readNotifyStatus(): Promise<NotifyStatus> {
+  const permission = await permissionState()
+  if (permission !== 'granted') return { permission, pending: 0, next: null }
+  try {
+    const list = await LocalNotifications.getPending()
+    /*
+     * "条数 + 最近一条"这点判断放在纯规则里（`pendingSummary`）：原生桥回来的
+     * `schedule.at` 是**字符串**不是 `Date`（实测见那边的说明），这种平台细节要能单测，
+     * 埋在接线层里就只能靠真机去撞。
+     */
+    return { permission, ...pendingSummary(list.notifications) }
+  } catch {
+    return { permission, pending: 0, next: null }
+  }
 }

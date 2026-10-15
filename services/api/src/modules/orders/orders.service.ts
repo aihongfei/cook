@@ -70,6 +70,8 @@ export interface MealCardView {
   doneAt: string | null
   /** 这一餐的成品照张数（F9-08）。按视图范围算：看不到的照片不计入（见 cardFromRow 说明） */
   photoCount: number
+  /** 这一餐还收不收新菜（到「正在做」为止都能加，只有「做好了」封口）——详情页「再加一道」按它决定出不出现 */
+  canAdd: boolean
   /**
    * 能不能拿这一餐去「再点一次」（F3-06）：做好了 / 已取消 / 日子已经过去。
    *
@@ -152,7 +154,7 @@ export class OrdersService {
 
   /**
    * 点菜（`order.create`，人人可点）：点菜谱里的，或者自己写一道（F3-10）。
-   * 同一餐已有就复用；**已安排之后不能再加菜**（要加先取消这餐，D-022）。
+   * 同一餐已有就复用；**能不能加只看 `canAddItem`**（到「正在做」为止都能加，只有「做好了」封口）。
    */
   async addItem(
     userId: string,
@@ -172,7 +174,7 @@ export class OrdersService {
       throw new ConflictException(
         mealOrder.status === 'DONE'
           ? '这餐已经做好了，换个餐次再点吧'
-          : `这餐已经「${STATUS_LABEL[mealOrder.status]}」了，想加菜先取消这餐`,
+          : `这餐已经「${STATUS_LABEL[mealOrder.status]}」了，加不进去了——要改这一餐的记录请到点单历史里删`,
       )
     }
 
@@ -313,7 +315,7 @@ export class OrdersService {
     throw new ConflictException(
       row.status === 'DONE'
         ? '这餐已经做好了，换个餐次再点吧'
-        : `这餐已经「${STATUS_LABEL[row.status]}」了，想加菜先取消这餐`,
+        : `这餐已经「${STATUS_LABEL[row.status]}」了，加不进去了——要改这一餐的记录请到点单历史里删`,
     )
   }
 
@@ -924,6 +926,12 @@ export class OrdersService {
       doneAt: row.doneAt?.toISOString() ?? null,
       // 能不能拿这一餐去「再点一次」（F3-06）：口径只有 canRepeatFrom 一份，前端不复刻
       canRepeat: canRepeatFrom(row.status, dateKey(row.mealDate), todayKey()),
+      /*
+        这一餐还收不收新菜（详情页的「再加一道」按它决定出不出现）。
+        与备菜计划那一行的 `canAdd` 是**同一个判据的同一个值**（`canAddItem`）——
+        详情页原来没有它，前端就只好自己看状态推，而这种"推出来的第二份规则"迟早与后端分叉。
+      */
+      canAdd: canAddItem(row.status),
       nextActions: nextActionsFor(role, row.status),
       submittedAt: row.createdAt.toISOString(),
     }
@@ -989,6 +997,8 @@ function emptyCard(mealDate: Date, meal: MealSlot): MealCardView {
     photoCount: 0,
     // 空卡没内容可照抄，不给这个入口
     canRepeat: false,
+    // 空卡就是"还没人点"（PENDING），当然收新菜
+    canAdd: true,
     nextActions: [],
     submittedAt: new Date().toISOString(),
   }

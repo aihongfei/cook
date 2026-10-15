@@ -113,14 +113,17 @@ function upcomingDays(now: Date, days: number): string[] {
 }
 
 /**
- * 做饭提醒：这一餐定了菜单、还没做好，就在饭点前一小时说一句。
+ * 做饭提醒：这一餐点了菜、还没做好，就在饭点前一小时说一句（`COOK_HOUR`：午餐 11 点、晚餐 17 点）。
  *
  * **要说话的三类情况分开拼**（与通知中心那套"后端拼句子"同一条规矩，前端不各写一份）：
  * - 没定人数（`dinerCount === null`）→ 提醒里明说，顺手把"定人数"这件事带出来；
  * - 有菜没定人数、有菜有定人数 → 报菜数与人数。
  *
- * `status` 只认 `PLANNED` / `COOKING`：`PENDING` 是"还没定下来"（点了菜但没确认，
- * 可能还会改），`DONE` / `CANCELED` 是过去的事。
+ * `status` 只排除**两件过去的事**：`DONE`（做好了）与 `CANCELED`（这餐不做了）。
+ * `PENDING` **也算**——原来这里只认 `PLANNED`/`COOKING`，理由是"菜单还没定下来"，
+ * 但用户 2026-10-15 报「真机也没收到通知」：一家人点了菜、没人去点"选好了"，
+ * 到点该做饭时一句提醒都没有（而"选好了"还是只有掌勺人推得动的一步）。
+ * **有菜就该提醒做饭**：点没点"选好了"是掌勺人的进度条，不是"今晚要不要做饭"的开关。
  */
 export function cookReminders(
   rows: { day: string; meals: MealProgressRow[] }[],
@@ -133,7 +136,8 @@ export function cookReminders(
   for (const day of rows) {
     if (!days.has(day.day)) continue
     for (const meal of day.meals) {
-      if (meal.status !== 'PLANNED' && meal.status !== 'COOKING') continue
+      // 只跳过两件过去的事（见上面那段说明：PENDING 也要提醒）
+      if (meal.status === 'DONE' || meal.status === 'CANCELED') continue
       // 没有菜就没有"要做饭"这回事（空餐次由通知中心的"该备菜"负责，那是应用内的事）
       if (meal.dishCount <= 0) continue
 
@@ -238,4 +242,92 @@ export function planLocalReminders(
   return [...cookReminders(input.plan, now), ...expiryReminders(input.fridge, now)].sort(
     (a, b) => a.at.getTime() - b.at.getTime() || a.id - b.id,
   )
+}
+
+/**
+ * 界面要看的"本机提醒现状"（`readNotifyStatus()` 读回来，见 `local-notify.ts`）。
+ *
+ * 放在纯规则文件里是因为**类型与文案都要能单测**，而读它的那段代码要碰原生插件。
+ */
+export interface NotifyStatus {
+  permission: 'granted' | 'denied' | 'prompt' | 'unsupported'
+  /** 系统里已经排上的条数 */
+  pending: number
+  /** 最近要响的那一条（没有就是 null） */
+  next: { title: string; at: Date } | null
+}
+
+/**
+ * 原生插件回来的一条（我们只关心这两件事）。
+ *
+ * `at` 的类型**故意写 unknown**：类型声明里它是 `Date`，但**原生桥回来的其实是字符串**
+ * ——Android 侧是 `Date.toString()` 的形状，实测一条长这样：
+ * `Sun Oct 18 17:00:00 GMT+08:00 2026`。
+ *
+ * 这个坑的代价很具体：只认 `instanceof Date` 的话，"最近的是哪天"**永远显示不出来**，
+ * 而且不报错——界面上只是安静地少半句话（与 R-66 那一族同一个毛病：
+ * 分不出"真没有"与"我们没读出来"）。
+ */
+export interface PendingEntry {
+  title?: string | null
+  schedule?: { at?: unknown } | null
+}
+
+/** 两种形状都认：真机上拿到的 `Date` 实例，以及桥回来的字符串；解析不出来的给 null */
+function instantOf(value: unknown): Date | null {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  if (typeof value === 'string') {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+  return null
+}
+
+/**
+ * 把插件回的那一批收成界面上要的两件事：**排了几条**与**最近的一条**。
+ *
+ * - 条数按**回来的条数**算（排上了就是排上了，哪怕时间读不出来）；
+ * - "最近的一条"只从**时间读得出来**的那些里挑，按时刻排序取最早的；
+ * - 一条时间都读不出来时 `next: null`，界面只说条数（不编一个时间出来）。
+ */
+export function pendingSummary(notifications: PendingEntry[]): { pending: number; next: { title: string; at: Date } | null } {
+  const dated = notifications
+    .map((item) => ({ title: item.title ?? '', at: instantOf(item.schedule?.at) }))
+    .filter((row): row is { title: string; at: Date } => row.at !== null)
+    .sort((left, right) => left.at.getTime() - right.at.getTime())
+  return { pending: notifications.length, next: dated[0] ?? null }
+}
+
+/**
+ * 把现状翻成人话（用户 2026-10-15 报「真机也没收到通知」之后加的：
+ * 那件事在界面上**完全看不出来**，与 R-66 那一族同类）。
+ *
+ * 四种情况都要说对，尤其**权限被拒**那一种——说错了他就永远收不到还不明原因：
+ * - `unsupported`：网页里如实说"装到手机上才会响"（不假装排上了）；
+ * - `denied`：说清"发不出来"并指路系统设置；
+ * - `prompt`：说清"还没问过"（别写成"已开启"）；
+ * - `granted`：报条数与最近一条。**没排上时说"没有要提醒的事"，不写"0 条"**
+ *   （"0 条"看着像"你没有消息"，与「我的菜」那一行同一条规矩）。
+ */
+export function notifyStatusText(status: NotifyStatus): { text: string; tone: 'ok' | 'warn' } {
+  if (status.permission === 'unsupported') {
+    return { text: '装到手机上才会响（网页里关掉页面就没有东西会提醒了）', tone: 'ok' }
+  }
+  if (status.permission === 'denied') {
+    return { text: '系统里没允许通知：到点做饭、东西快过期都发不出来——去手机设置里打开', tone: 'warn' }
+  }
+  if (status.permission === 'prompt') {
+    return { text: '系统还没问过通知权限，下次打开 App 会问一次', tone: 'warn' }
+  }
+  if (status.pending === 0) {
+    return { text: '权限已开，现在没有要提醒的事（到点做饭、东西快过期会自己排上）', tone: 'ok' }
+  }
+  const next = status.next
+  const clock = next
+    ? `${next.at.getMonth() + 1} 月 ${next.at.getDate()} 日 ${String(next.at.getHours()).padStart(2, '0')}:00「${next.title}」`
+    : null
+  return {
+    text: `已排 ${status.pending} 条${clock ? ` · 最近的是 ${clock}` : ''}`,
+    tone: 'ok',
+  }
 }

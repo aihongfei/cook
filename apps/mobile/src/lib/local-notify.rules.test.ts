@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { FridgeItem } from '@/api/fridge'
 import type { MealProgressRow } from '@/api/orders'
 import {
-  COOK_HOUR, EXPIRY_HOUR, SCHEDULE_WINDOW_DAYS, cookReminders, expiryReminders, planLocalReminders,
-  reminderIdOf, type LocalReminder,
+  COOK_HOUR, EXPIRY_HOUR, SCHEDULE_WINDOW_DAYS, cookReminders, expiryReminders, notifyStatusText,
+  planLocalReminders, reminderIdOf, pendingSummary, type LocalReminder,
 } from './local-notify.rules'
 
 /*
@@ -111,12 +111,20 @@ describe('到点该做饭', () => {
     expect(reminder.body).toBe('3 道菜 · 4 个人吃')
   })
 
+  /*
+   * 只跳过**两件过去的事**。`PENDING` 要提醒（2026-10-15 改的）：一家人点了菜、
+   * 没人去点"选好了"，到点该做饭时原来一句都不响——而"选好了"只有掌勺人推得动。
+   */
   it.each([
-    ['还是待确认（可能还会改）', { status: 'PENDING' as const }],
     ['已经做好了（过去的事）', { status: 'DONE' as const }],
     ['已取消', { status: 'CANCELED' as const }],
   ])('%s → 不排提醒', (_label, override) => {
     expect(cookReminders(planOf([mealRow(override)]), NOW)).toEqual([])
+  })
+
+  it('**还是待确认**（点了菜、还没人选好了）照样提醒——"该做饭了"不该等那个进度条', () => {
+    const [reminder] = cookReminders(planOf([mealRow({ status: 'PENDING' })]), NOW)
+    expect(reminder.title).toBe('晚餐该做饭了')
   })
 
   it('开始做（COOKING）仍然提醒：那一餐还没上桌', () => {
@@ -274,4 +282,94 @@ describe('整批：排序与形状', () => {
   it('什么都没有时不排（不是排一堆空提醒）', () => {
     expect(planLocalReminders({ plan: [], fridge: [] }, NOW)).toEqual([])
   })
+})
+
+/*
+ * 「手机提醒」那一行说什么（用户 2026-10-15：「真机也没收到通知」之后加的）。
+ *
+ * 四种情况都要说人话，尤其**权限被拒**那一种（用户能自己去系统设置里打开）——
+ * 说错了他就永远收不到还不明原因。
+ */
+describe('从插件回来的那一批里收出"排了几条 / 最近一条"', () => {
+  // 真机上 `schedule.at` 是**字符串**（Android 的 Date.toString() 形状），不是 Date —— 实测于模拟器
+  const ANDROID_SHAPE = 'Sun Oct 18 17:00:00 GMT+08:00 2026'
+
+  it('原样认识原生桥回来的字符串时间（只认 Date 的话"最近的是哪天"永远显示不出来）', () => {
+    const out = pendingSummary([
+      { title: '晚餐该做饭了', schedule: { at: 'Sat Oct 17 11:00:00 GMT+08:00 2026' } },
+      { title: '东西快到期', schedule: { at: ANDROID_SHAPE } },
+    ])
+    expect(out.pending).toBe(2)
+    expect(out.next?.title).toBe('晚餐该做饭了')
+  })
+
+  it('Date 实例照旧认（web 实现与测试里就是这种）', () => {
+    const early = new Date(2026, 9, 16, 11, 0)
+    const late = new Date(2026, 9, 18, 17, 0)
+    const out = pendingSummary([{ title: '后', schedule: { at: late } }, { title: '前', schedule: { at: early } }])
+    expect(out.next?.title).toBe('前')
+  })
+
+  it('时间读不出来的那条**照样算进条数**，只是进不了"最近的一条"（不假装没有它）', () => {
+    const out = pendingSummary([
+      { title: '坏的', schedule: { at: '不是时间' } },
+      { title: '好的', schedule: { at: ANDROID_SHAPE } },
+      { title: '没写时间', schedule: {} },
+    ])
+    expect(out.pending).toBe(3)
+    expect(out.next?.title).toBe('好的')
+  })
+
+  it('一条时间都读不出来时不编时间：条数照报，next 给 null', () => {
+    const out = pendingSummary([{ title: '坏的', schedule: { at: 42 } }])
+    expect(out).toEqual({ pending: 1, next: null })
+  })
+
+  it('没有排任何东西时是 0 / null（界面照着说"没有要提醒的事"）', () => {
+    expect(pendingSummary([])).toEqual({ pending: 0, next: null })
+  })
+})
+
+describe('本机提醒的现状文案', () => {
+
+/**
+ * 「手机提醒」那一行说什么（用户 2026-10-15：「真机也没收到通知」之后加的）。
+ *
+ * 这一组盯的是**四种情况都要说人话、且不能把"没排上"说成"提醒开着"**：
+ * 权限被拒是最要紧的那一种（用户能自己去系统设置里打开），说错了他就永远收不到还不明原因。
+ */
+
+    it('权限被拒：说清"发不出来"并指路系统设置（最要紧的一种）', () => {
+  const view = notifyStatusText({ permission: 'denied', pending: 0, next: null })
+  expect(view.tone).toBe('warn')
+  expect(view.text).toContain('系统里没允许通知')
+  expect(view.text).toContain('手机设置')
+})
+
+    it('还没问过：别写成"已开启"', () => {
+  const view = notifyStatusText({ permission: 'prompt', pending: 0, next: null })
+  expect(view.tone).toBe('warn')
+  expect(view.text).toContain('还没问过')
+})
+
+    it('权限给了但没排上：说清"现在没有要提醒的事"，而不是"0 条"', () => {
+  const view = notifyStatusText({ permission: 'granted', pending: 0, next: null })
+  expect(view.tone).toBe('ok')
+  expect(view.text).toContain('没有要提醒的事')
+  expect(view.text).not.toContain('0 条')
+})
+
+    it('排上了：报条数 + 最近一条是几号几点、说什么', () => {
+  const view = notifyStatusText({
+    permission: 'granted',
+    pending: 3,
+    next: { title: '晚餐该做饭了', at: new Date(2026, 9, 15, 17, 0, 0) },
+  })
+  expect(view.text).toBe('已排 3 条 · 最近的是 10 月 15 日 17:00「晚餐该做饭了」')
+})
+
+    it('网页里如实说"装到手机上才会响"（不假装排上了）', () => {
+  const view = notifyStatusText({ permission: 'unsupported', pending: 0, next: null })
+  expect(view.text).toContain('装到手机上')
+})
 })

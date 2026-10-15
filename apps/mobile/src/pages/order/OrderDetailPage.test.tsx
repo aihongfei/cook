@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { AxiosRequestConfig } from 'axios'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import type { Family } from '@/api/family'
@@ -118,6 +118,7 @@ function cardFixture(overrides: Partial<MealCard> = {}): MealCard {
     doneAt: null,
     photoCount: 0,
     canRepeat: false,
+    canAdd: true,
     nextActions: [
       { status: 'PLANNED', label: '选好了', needsConfirm: false },
       { status: 'CANCELED', label: '取消这餐', needsConfirm: true },
@@ -300,4 +301,58 @@ it('返回按钮指向来源：从通知中心进来就退回通知中心', asyn
 
   const back = await screen.findByRole('link', { name: /返回家里的消息/ })
   expect(back.getAttribute('href')).toBe('/notifications')
+})
+
+/*
+ * 「＋ 再加一道」（用户 2026-10-15：「今天点了餐就不能修改了，也不能继续点，都要优化」）。
+ *
+ * 判据是**后端算好的 `canAdd`**（到「正在做」为止都能加，只有"做好了"封口），
+ * 前端不自己推状态；点了跳到菜谱小书并把这一餐当目标——与备菜计划那一行的「加菜」同一条路，
+ * 不在这页另做一套点菜抽屉（一件事一个入口，D-066）。
+ */
+function renderAdd() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  /** 落点探针：把带过来的路由 state 读出来（"这一餐"必须真的传下去了） */
+  function RecipesLanding() {
+    const location = useLocation()
+    return <div data-testid="recipes-page" data-state={JSON.stringify(location.state)} />
+  }
+  return render(
+    <QueryClientProvider client={client}>
+      <Toaster />
+      <MemoryRouter initialEntries={['/order/2026-10-13-DINNER']}>
+        <Routes>
+          <Route path="/order/:mealKey" element={<OrderDetailPage />} />
+          <Route path="/recipes" element={<RecipesLanding />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
+
+it('「＋ 再加一道」跳到菜谱小书，并把这一餐（日期/餐次/说明）当目标带下去', async () => {
+  mockGet()
+  renderAdd()
+
+  const add = await screen.findByRole('link', { name: '＋ 再加一道' })
+  expect(add.getAttribute('href')).toBe('/recipes')
+
+  fireEvent.click(add)
+  const landing = await screen.findByTestId('recipes-page')
+  const state = JSON.parse(landing.dataset.state || '{}')
+  // 挑完菜点「点这道」要落回**这一餐**：日期、餐次、给用户看的那句说明一个都不能少
+  expect(state.plan?.date).toBe('2026-10-13')
+  expect(state.plan?.meal).toBe('DINNER')
+  expect(state.plan?.label).toBe('这一餐（10-13 晚餐）')
+  // 返回目标也跟着下来（从这一餐去的菜谱小书，返回该回这一餐）
+  expect(state.from).toBe('/order/2026-10-13-DINNER')
+})
+
+it('已做好的那一餐不给「再加一道」（成品封口，要改就是删记录）', async () => {
+  mockGet({ card: cardFixture({ status: 'DONE', statusLabel: '已做好', canAdd: false, nextActions: [] }) })
+  renderDetail()
+
+  await screen.findAllByRole('link', { name: /番茄炒蛋/ })
+  expect(screen.queryByRole('link', { name: '＋ 再加一道' })).toBeNull()
 })

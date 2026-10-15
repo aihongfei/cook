@@ -94,12 +94,33 @@ export default function ConfirmDialog({
   /*
    * **换页就关掉**：这一层画在 `document.body` 上，不属于任何页面——页面被缓存下来时
    * （见 `layouts/KeepAlivePages`）它不会跟着藏，会盖在**下一张页面**上面，
-   * 还会继续抢系统返回键。与 ImageViewer 里那条同一个理由、同一个写法。
+   * 还会继续抢系统返回键。与 ImageViewer 里那条同一个理由。
+   *
+   * ⚠️ 记的必须是**打开那一刻**的地址，不是**挂载那一刻**的（用户 2026-10-15 报
+   * 「做好了点击不了」就是这里错位造成的）。
+   *
+   * 这个组件在调用方那儿是**常驻挂载**的（`<ConfirmDialog open={Boolean(pending)} …/>`），
+   * 而页面又会被 keep-alive 缓存下来、实例活得很久——`useRef(routeKey)` 只在**挂载**时
+   * 取一次值，于是"用户在页面里走过几步（进详情再返回、换筛选）"之后路由 key 早就变了：
+   * 点「做好了」→ 打开 → effect 一比，key 与挂载时那个不一样 → **当场自己取消**。
+   * 界面上就是"弹窗一闪就没了"、也就是"点了没反应"，而按钮本身一点问题都没有。
+   *
+   * ImageViewer 没这个毛病纯属运气：它是 `{viewing && <ImageViewer …/>}`（开的时候才挂载），
+   * 所以那个 `useRef` 恰好取在了打开那一刻。这里靠的是**只管"打开之后有没有换过页"**。
    */
   const routeKey = useRouteKey()
-  const openedAt = useRef(routeKey)
+  const openedAt = useRef<string | null>(null)
   useEffect(() => {
-    if (open && routeKey !== null && routeKey !== openedAt.current) onCancel()
+    if (!open) {
+      // 关掉之后清空：下一次打开重新记（同一个实例可能被反复打开）
+      openedAt.current = null
+      return
+    }
+    if (openedAt.current === null) {
+      openedAt.current = routeKey
+      return
+    }
+    if (routeKey !== null && routeKey !== openedAt.current) onCancel()
   }, [open, routeKey, onCancel])
 
   if (!open) return null

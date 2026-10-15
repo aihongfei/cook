@@ -85,6 +85,8 @@ export interface MealCard {
    * 由后端算好（判据只有一份），前端不复刻状态与日期的判定——复刻就会分叉。
    */
   canRepeat: boolean
+  /** 这一餐还收不收新菜（详情页「再加一道」按它决定出不出现）。由后端按状态机算，前端不复刻 */
+  canAdd: boolean
   nextActions: NextAction[]
   submittedAt: string
   /**

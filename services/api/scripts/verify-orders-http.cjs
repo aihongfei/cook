@@ -5,7 +5,7 @@
  * 可用 BASE_URL 覆盖地址，默认 http://127.0.0.1:3000/api
  *
  * 覆盖：点菜 → 合并成卡 → 撤回 → 状态机（含跳级/回退被拒）→ 权限（吃货推不动状态）
- *       → 共享开关收窄吃货可见范围 → 已安排后不能再加菜。
+ *       → 共享开关收窄吃货可见范围 → 已安排后**仍能**加菜（2026-10-15 放开）。
  */
 const base = process.env.BASE_URL ?? 'http://127.0.0.1:3000/api'
 
@@ -300,18 +300,37 @@ async function main() {
   const eaterPlan = await callWithRetry('POST', `/orders/meals/${mealKey}/status`, { token: son.token, body: { status: 'PLANNED' } })
   check('吃货推状态 → 403（点菜可以、安排不行，权限在后端强制）', eaterPlan.status === 403, `${eaterPlan.status} ${eaterPlan.body?.message ?? ''}`)
 
-  const skip = await callWithRetry('POST', `/orders/meals/${mealKey}/status`, { token: mama.token, body: { status: 'DONE' } })
-  check('跳级（待确认 → 已做好）→ 409', skip.status === 409, `${skip.status} ${skip.body?.message ?? ''}`)
+  /*
+   * 「做好了」不再必须走"选好了 → 开始做"（用户 2026-10-15：「现在做好了点击不了」）。
+   * 旧口径里这是"跳级 409"，现在它是正路——而且**吃货就点得动**：
+   * 家里那个只有 order.create + menu.confirm 的账号，从「待确认」也能一步标好，
+   * "全家谁都能点做好"（D-075）这才真的够得着。
+   * 用第 4 天另起一餐来验，不动今天晚餐这条主线。
+   */
+  const jumpKey = `${plusDaysKey(4)}-LUNCH`
+  await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(4), meal: 'LUNCH' } })
+  const jumpDone = await callWithRetry('POST', `/orders/meals/${jumpKey}/status`, { token: son.token, body: { status: 'DONE' } })
+  check(
+    '「待确认」也能直接标成「做好了」，而且**吃货点得动**（新口径：做好不该被"选好了/开始做"锁住）',
+    jumpDone.status === 200 && jumpDone.body?.status === 'DONE',
+    `${jumpDone.status} ${jumpDone.body?.status} ${jumpDone.body?.message ?? ''}`,
+  )
+  check(
+    '直接标好的那一餐同样封口：明细加不进也退不掉（终态就是终态）',
+    jumpDone.body?.nextActions?.length === 0
+      && (await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishB.id, mealDate: plusDaysKey(4), meal: 'LUNCH' } })).status === 409,
+    `next=${jumpDone.body?.nextActions?.length}`,
+  )
 
   const badNext = await callWithRetry('POST', `/orders/meals/${mealKey}/status`, { token: mama.token, body: { status: 'FINISHED' } })
   check('非法状态值 → 400', badNext.status === 400, `${badNext.status}`)
 
   const planned = await callWithRetry('POST', `/orders/meals/${mealKey}/status`, { token: mama.token, body: { status: 'PLANNED' } })
   check(
-    '掌勺人推「选好了」→ 已安排 200，且下一步只剩「开始做/取消」',
+    '掌勺人推「选好了」→ 已安排 200，下一步是「开始做 / 做好了 / 取消」',
     planned.status === 200
       && planned.body?.status === 'PLANNED'
-      && (planned.body?.nextActions ?? []).map(a => a.status).sort().join(',') === 'CANCELED,COOKING',
+      && (planned.body?.nextActions ?? []).map(a => a.status).sort().join(',') === 'CANCELED,COOKING,DONE',
     `${planned.status} status=${planned.body?.status} next=${JSON.stringify((planned.body?.nextActions ?? []).map(a => a.status))}`,
   )
 
@@ -324,8 +343,28 @@ async function main() {
     `confirmedBy=${JSON.stringify(planned.body?.confirmedBy)} confirmedAt=${planned.body?.confirmedAt}`,
   )
 
-  const lockedAdd = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishB.id, mealDate: TODAY, meal: 'DINNER' } })
-  check('已安排的餐不能再加菜 → 409（要加先取消这餐）', lockedAdd.status === 409, `${lockedAdd.status} ${lockedAdd.body?.message ?? ''}`)
+  /*
+   * 用户 2026-10-15：「今天点了餐就不能修改了，也不能继续点，都要优化」——
+   * 加菜从"只有收集中"放开到**到「正在做」为止都能加**（与退菜同宽，只有做好了封口）。
+   * 所以这里原来那条"已安排 → 409"要反过来验：**已安排也能再加一道**。
+   */
+  const lateAdd = await callWithRetry('POST', '/orders/items', {
+    token: son.token,
+    body: { recipeId: dishB.id, mealDate: TODAY, meal: 'DINNER' },
+  })
+  check(
+    '已安排的餐还能再加一道（菜单"定了"不等于封口）——用户 2026-10-15 的口径',
+    lateAdd.status === 201
+      && lateAdd.body?.status === 'PLANNED'
+      && (lateAdd.body?.dishes ?? []).some(d => d.name === dishB.name),
+    `${lateAdd.status} status=${lateAdd.body?.status} dishes=${(lateAdd.body?.dishes ?? []).map(d => d.name).join('/')}`,
+  )
+  // 加完之后这一餐还是"已安排"（加菜不把状态打回去，掌勺人已经定过的那一版仍然算数）
+  check(
+    '加菜不动状态与留痕（这一版菜单还是掌勺人定的那一版）',
+    lateAdd.body?.confirmedBy?.nickname === '妈妈' && Boolean(lateAdd.body?.confirmedAt),
+    `confirmedBy=${JSON.stringify(lateAdd.body?.confirmedBy)}`,
+  )
 
   const alreadyGone = await callWithRetry('DELETE', `/orders/items/${sonDishAItem?.id}`, { token: son.token })
   check('已被撤掉的条目再撤 → 404', alreadyGone.status === 404, `${alreadyGone.status}`)
@@ -374,9 +413,9 @@ async function main() {
   )
 
   // 整桌退菜走得通的那一半：另起一餐推到「正在做」再退（第 4 天没被别的断言占用）
-  const bulkKey = `${plusDaysKey(4)}-LUNCH`
-  await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(4), meal: 'LUNCH' } })
-  const bulkSecond = await callWithRetry('POST', '/orders/items', { token: son.token, body: { recipeId: dishB.id, mealDate: plusDaysKey(4), meal: 'LUNCH' } })
+  const bulkKey = `${plusDaysKey(5)}-DINNER`
+  await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(5), meal: 'DINNER' } })
+  const bulkSecond = await callWithRetry('POST', '/orders/items', { token: son.token, body: { recipeId: dishB.id, mealDate: plusDaysKey(5), meal: 'DINNER' } })
   check(
     '为验证整桌退菜，新建一餐：两个人各点了一道（同一张卡两道菜）',
     bulkSecond.status === 201 && bulkSecond.body?.mealKey === bulkKey && bulkSecond.body?.dishes?.length === 2,
@@ -565,14 +604,24 @@ async function main() {
 
   const sonNarrowed = await callWithRetry('GET', '/orders', { token: son.token })
   const narrowedCards = sonNarrowed.body?.cards ?? []
+  /*
+   * 判据从"比总数小"改成**逐张核对**：早先这里是 `narrowed.length < familyAfterGuest.length`，
+   * 而那个快照是几段之前取的——后来小满又在今天晚餐里加了一道（加菜放开之后），
+   * 他参与过的餐次变多，"总数"就不再是这件事的判据了（会随数据漂成假红）。
+   * 现在直接问一句：**全家视角里"我没有份"的那几餐，是不是都不在我的列表里**。
+   */
+  // 判据要用**吃货自己**在共享还开着时的那份视角里"我没份"的餐次
+  // （拿掌勺人的 mineCount 去推吃货的可见性是想当然：同一张卡两个人的份各不相同）
+  const notMine = (sonSeesAll.body?.cards ?? []).filter(card => card.mineCount === 0)
   check(
     '共享关闭后吃货只看到自己参与的餐次（F2-07 生效）',
     sonNarrowed.status === 200
       && narrowedCards.length > 0
-      && narrowedCards.length < familyAfterGuest.body?.cards?.length
       && narrowedCards.every(card => card.mineCount > 0)
-      && narrowedCards.some(card => card.mealKey === `${TOMORROW}-LUNCH`),
-    `cards=${narrowedCards.length} (全家视角 ${familyAfterGuest.body?.cards?.length}) keys=${JSON.stringify(narrowedCards.map(c => c.mealKey))} allMine=${narrowedCards.every(c => c.mineCount > 0)}`,
+      && narrowedCards.some(card => card.mealKey === `${TOMORROW}-LUNCH`)
+      && notMine.length > 0
+      && notMine.every(card => !narrowedCards.some(mine => mine.mealKey === card.mealKey)),
+    `cards=${narrowedCards.length} (共享开着时 ${(sonSeesAll.body?.cards ?? []).length}) 我没份的=${JSON.stringify(notMine.map(c => c.mealKey))} keys=${JSON.stringify(narrowedCards.map(c => c.mealKey))}`,
   )
   const mamaStillAll = await callWithRetry('GET', '/orders', { token: mama.token })
   const mamaKeys = (mamaStillAll.body?.cards ?? []).map(card => card.mealKey)
@@ -596,7 +645,7 @@ async function main() {
   const yesterday = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(-1), meal: 'LUNCH' } })
   check('点昨天 → 400（过期的一天不能补）', yesterday.status === 400, `${yesterday.status} ${yesterday.body?.message ?? ''}`)
 
-  const seventhDay = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(6), meal: 'LUNCH' } })
+  const seventhDay = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(5), meal: 'LUNCH' } })
   check('点第 7 天 → 201（备菜计划最后一行也要能安排：看得见的都能点）', seventhDay.status === 201 || seventhDay.status === 200, `${seventhDay.status} ${seventhDay.body?.message ?? ''}`)
 
   const eighthDay = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(7), meal: 'LUNCH' } })

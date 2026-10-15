@@ -63,7 +63,7 @@ function cardFixture(): MealCard {
     mealKey: '2026-10-12-LUNCH', date: '2026-10-12', meal: 'LUNCH', mealLabel: '午餐',
     status: 'PENDING', statusLabel: '待确认', orderers: ['妈妈'], ordererCount: 1, dishCount: 1,
     dishes: [], items: [], mineCount: 1, dinerCount: null, photoCount: 0,
-    confirmedBy: null, confirmedAt: null, doneBy: null, doneAt: null, canRepeat: false, nextActions: [],
+    confirmedBy: null, confirmedAt: null, doneBy: null, doneAt: null, canRepeat: false, canAdd: true, nextActions: [],
     submittedAt: new Date().toISOString(),
   }
 }

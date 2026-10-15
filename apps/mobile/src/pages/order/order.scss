@@ -872,7 +872,7 @@
   border-top: 1px dashed color-mix(in srgb, #b4451f 30%, transparent);
 }
 
-/* 筛选行与「多选」并排：筛选可以横向滚，多选钉在右边不跟着滚 */
+/* 状态筛选那一行（chips 可以横向滚）。「多选」已经不在这儿了，见 `.order-multi` */
 .order-filter {
   display: flex;
   align-items: center;
@@ -885,8 +885,15 @@
   overflow-x: auto;
 }
 
-.order-filter__manage {
-  flex: none;
+/*
+ * 「多选」：钉在页头右上角（用户 2026-10-15：「多选按钮位置不对」）。
+ * 位置对着 `.corner-art--shifted`（插画让到 right: 52px 之后，这个按钮落在 right: 0 这一侧）。
+ */
+.order-multi {
+  position: absolute;
+  top: 22px;
+  right: 6px;
+  z-index: 1;
   padding: 5px 12px;
   font-size: 13px;
   color: var(--color-ink-soft);

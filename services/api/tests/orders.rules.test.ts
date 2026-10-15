@@ -56,20 +56,24 @@ import { CAPABILITIES } from '../src/modules/family/family.roles'
 
 // ---------- 状态机（F3-02） ----------
 
-test('状态机只放行图示的那几步，不跳级不回退', () => {
-  assert.deepEqual(ALLOWED_TRANSITIONS.PENDING, ['PLANNED', 'CANCELED'])
-  assert.deepEqual(ALLOWED_TRANSITIONS.PLANNED, ['COOKING', 'CANCELED'])
+test('状态机不回退，但「做好了」随时能到（用户 2026-10-15：「现在做好了点击不了」）', () => {
+  assert.deepEqual(ALLOWED_TRANSITIONS.PENDING, ['PLANNED', 'DONE', 'CANCELED'])
+  assert.deepEqual(ALLOWED_TRANSITIONS.PLANNED, ['COOKING', 'DONE', 'CANCELED'])
   assert.deepEqual(ALLOWED_TRANSITIONS.COOKING, ['DONE'])
   // 终态：已做好 / 已取消都不能再动（要重做就"再点一次"新建一餐）
   assert.deepEqual(ALLOWED_TRANSITIONS.DONE, [])
   assert.deepEqual(ALLOWED_TRANSITIONS.CANCELED, [])
 
   assert.ok(isAllowedTransition('PENDING', 'PLANNED'))
+  // 「做好了」不再被"选好了 → 开始做"这条链锁住：一家人在 App 上记一句"吃完了"，
+  // 不该先被要求去点"选好了""开始做"（而 EATER 连这两步都推不动，等于永远点不到做好）
+  assert.ok(isAllowedTransition('PENDING', 'DONE'), '待确认也能直接标成已做好')
+  assert.ok(isAllowedTransition('PLANNED', 'DONE'), '已安排也能直接标成已做好')
   assert.ok(isAllowedTransition('COOKING', 'DONE'))
-  // 跳级与回退都要被挡住
+  // 回退与"从终态复活"仍然挡住（取消过的餐要复活只能靠**加菜**，见 canAddItem）
   assert.ok(!isAllowedTransition('PENDING', 'COOKING'), '待确认不能直接跳到准备中')
-  assert.ok(!isAllowedTransition('PENDING', 'DONE'), '待确认不能直接标成已做好')
   assert.ok(!isAllowedTransition('DONE', 'COOKING'), '已做好不能回退')
+  assert.ok(!isAllowedTransition('DONE', 'CANCELED'), '已做好不能取消')
   assert.ok(!isAllowedTransition('CANCELED', 'PENDING'), '已取消不能复活')
 })
 
@@ -87,19 +91,23 @@ test('流转权限按目标状态算，且复用 M2 的能力键（不新增）'
   // 掌勺人/帮厨：能推 待确认→已安排→准备中，能确认做好，能取消
   for (const role of ['OWNER', 'COOK'] as const) {
     const pending = nextActionsFor(role, 'PENDING').map(action => action.status)
-    assert.deepEqual(pending, ['PLANNED', 'CANCELED'], `${role} 在待确认阶段应能安排或取消`)
+    assert.deepEqual(pending, ['PLANNED', 'DONE', 'CANCELED'], `${role} 在待确认阶段应能安排、做好或取消`)
     assert.deepEqual(nextActionsFor(role, 'COOKING').map(a => a.status), ['DONE'], `${role} 应能确认做好`)
   }
   /*
-   * 吃货：能点菜，也能**把「准备中」推成「做好了」**（2026-10-15 用户要求"任何人
-   * 都可以点击做好"，见 D-075）。但**其余一步都推不动**——安排、取消、开始做都是
-   * 掌勺人/帮厨的事。这一条的写法刻意是"逐个状态列出来"，而不是"除了 COOKING 都为空"：
-   * 前者在将来给 EATER 多放开一步时会红（那是我们想知道的），后者会静默跟着放行。
+   * 吃货：**任何非终态都能标"做好了"**（2026-10-15 用户要求"任何人都可以点击做好"，
+   * 见 D-075；当天用户又报「做好了点击不了」——因为那一步原来只能从「准备中」进，
+   * 而"选好了""开始做"都是 menu.manage，吃货一步都推不动，等于永远到不了）。
+   * 其余动作仍旧推不动：安排、取消、开始做都是掌勺人/帮厨的事。
+   *
+   * 写法刻意是**逐个状态列出来**，而不是"非终态都行"：将来给 EATER 多放开一步时
+   * 它会红（那是我们想知道的），而不是静默跟着放行。
    */
-  assert.deepEqual(nextActionsFor('EATER', 'COOKING').map(a => a.status), ['DONE'], '吃货能标"做好了"')
-  for (const status of ORDER_STATUSES) {
-    if (status === 'COOKING') continue
-    assert.deepEqual(nextActionsFor('EATER', status), [], `吃货不该能推动 ${status}`)
+  for (const status of ['PENDING', 'PLANNED', 'COOKING'] as const) {
+    assert.deepEqual(nextActionsFor('EATER', status).map(a => a.status), ['DONE'], `吃货应能标"做好了"（${status}）`)
+  }
+  for (const status of ['DONE', 'CANCELED'] as const) {
+    assert.deepEqual(nextActionsFor('EATER', status), [], `终态没有下一步（${status}）`)
   }
   // 能力点确实来自 M2 那张表
   assert.equal(CAPABILITIES.MENU_MANAGE, 'menu.manage')
@@ -135,13 +143,17 @@ test('共享开关关闭时，只有吃货被收窄到"只看我的"', () => {
   assert.equal(visibleToMember(false, 'OWNER'), 'family')
 })
 
-test('取消过的餐还能重新点菜，并复活成待确认', () => {
-  // 一餐的「日期+餐次」在库里唯一：取消后若永久不能点，一家人取消晚餐就再也点不了这一餐了
-  assert.ok(canAddItem('PENDING'))
-  assert.ok(canAddItem('CANCELED'), '被取消的餐必须能重新点菜')
-  assert.ok(!canAddItem('PLANNED'), '已安排的餐不能再加点（先取消）')
-  assert.ok(!canAddItem('COOKING'), '正在做的餐不能再加点')
-  assert.ok(!canAddItem('DONE'), '已做好是终态（连取消都不行）')
+test('加菜与退菜同宽：到「正在做」为止都能加，只有做好了封口', () => {
+  /*
+   * 2026-10-15 用户报「今天点了餐就不能修改了，也不能继续点，都要优化」——
+   * 原来「已安排」之后就不能加菜了（要先取消整餐）。"定了三个菜，我又想吃个凉菜"
+   * 是每天都会有的对话，让用户取消整餐、从头点一遍是用大动作换小动作。
+   */
+  assert.ok(canAddItem('PENDING'), '收集中正常点菜')
+  assert.ok(canAddItem('CANCELED'), '被取消的餐必须能重新点菜（这也是唯一的复活路径）')
+  assert.ok(canAddItem('PLANNED'), '已安排也能再加一道（菜单"定了"不等于封口）')
+  assert.ok(canAddItem('COOKING'), '正在做也能加（"顺手再热个菜"）')
+  assert.ok(!canAddItem('DONE'), '已做好是成品：明细不再是"接下来做什么"的输入，要改就是删记录')
 
   assert.equal(revivedStatus('CANCELED'), 'PENDING', '加菜要把整餐拉回待确认')
   assert.equal(revivedStatus('PENDING'), 'PENDING', '正常状态不动')

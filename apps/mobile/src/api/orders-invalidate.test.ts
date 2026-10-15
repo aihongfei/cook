@@ -76,7 +76,7 @@ it('点一道菜真的会同时作废清单（走真接口，不是只测那个�
       mealKey: '2026-10-14-DINNER', date: '2026-10-14', meal: 'DINNER', mealLabel: '晚餐',
       status: 'PENDING', statusLabel: '待确认', orderers: ['妈妈'], ordererCount: 1, dishCount: 1,
       dishes: [], items: [], mineCount: 1, dinerCount: null, photoCount: 0,
-      confirmedBy: null, confirmedAt: null, doneBy: null, doneAt: null, canRepeat: false, nextActions: [],
+      confirmedBy: null, confirmedAt: null, doneBy: null, doneAt: null, canRepeat: false, canAdd: true, nextActions: [],
       submittedAt: new Date().toISOString(),
     },
   } as never)

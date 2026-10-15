@@ -380,7 +380,31 @@ export default function OrderPage() {
   return (
     <Page>
       <div className="pscreen">
-        <PageHeader title="家宴点菜单" subtitle="记录大家想吃什么，也记录每顿饭的回应" art="order" />
+        {/*
+          「多选」的入口放**页头右上角**（用户 2026-10-15：「多选按钮位置不对」）。
+          它原来挤在状态筛选那一行的最右边，看着像第 4 个筛选 chip（而且那一行本身是横向滚动的，
+          它跟着滚就没有"钉在那儿"的意思了）——多选是**整页的模式**，不是某个筛选值，
+          所以搬到"页面级动作"该在的地方：标题那一行的右上角。插画随之往左让开（`withAction`）。
+        */}
+        <PageHeader
+          title="家宴点菜单"
+          subtitle="记录大家想吃什么，也记录每顿饭的回应"
+          art="order"
+          withAction={!selecting}
+        />
+        {/*
+          入口只在**非选择模式**时出现（选择模式里已经有整条操作条，再给一个"多选"是重复的）；
+          也只在列表里真有卡时给——没菜的时候给这个按钮是空的。
+        */}
+        {!selecting && (orders.data?.cards.length ?? 0) > 0 && (
+          <button
+            type="button"
+            className="order-multi"
+            onClick={() => enterSelect()}
+          >
+            多选
+          </button>
+        )}
 
         <div className="segmented">
           <button
@@ -450,20 +474,13 @@ export default function OrderPage() {
         ) : (
           family.data && orders.data && (
             <div className="order-filter">
-              <Chips items={chips} value={filter} onChange={setFilter} />
               {/*
-                显式入口：长按是**手势**，第一次用的人找不到（见 enterSelect 那段说明）。
-                只在列表里真有卡时给，没菜的时候给这个按钮是空的。
+                长按是**手势**，第一次用的人找不到（见 enterSelect 那段说明）——
+                所以另有一个显式入口，但它在这一页的**页头右上角**（`.order-multi`），
+                不放这一行：这一行是状态筛选，多选不是筛选值（用户 2026-10-15 的原话：
+                「多选按钮位置不对」）。
               */}
-              {(orders.data.cards.length > 0) && (
-                <button
-                  type="button"
-                  className="order-filter__manage"
-                  onClick={() => enterSelect()}
-                >
-                  多选
-                </button>
-              )}
+              <Chips items={chips} value={filter} onChange={setFilter} />
             </div>
           )
         )}

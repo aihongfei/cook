@@ -254,6 +254,21 @@ export default function OrderDetailPage() {
                 没有道理。判据仍然是后端的 `canRepeat`，前端不自己推。
               */}
               <div className="order-card__tools">
+                {/*
+                  「再加一道」（用户 2026-10-15：「今天点了餐就不能修改了，也不能继续点，都要优化」）。
+                  判据用后端的 `canAdd`（到「正在做」为止都能加，只有"做好了"封口）——
+                  与备菜计划那一行的「加菜」**同一条路**：跳到菜谱小书并带上这一餐当目标，
+                  挑完菜「点这道」就落进这一餐（见 plan-target），不在这一页另做一套点菜抽屉。
+                */}
+                {card.canAdd && (
+                  <Link
+                    className="order-card__add"
+                    to="/recipes"
+                    state={{ from: location.pathname, plan: { date: card.date, meal: card.meal, label: `这一餐（${card.date.slice(5)} ${card.mealLabel}）` } }}
+                  >
+                    ＋ 再加一道
+                  </Link>
+                )}
                 <button
                   type="button"
                   className="order-card__diners"

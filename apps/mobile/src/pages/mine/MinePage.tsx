@@ -11,6 +11,7 @@ import { useTasteFamily } from '@/api/taste'
 import { useRecipes } from '@/api/recipes'
 import Heatmap from '@/components/ui/Heatmap'
 import PageHeader from '@/components/ui/PageHeader'
+import NotifyStatusRow from './NotifyStatus'
 import Page from '@/components/ui/Page'
 import { toast } from '@/components/ui/toast'
 import SectionTitle from '@/components/ui/SectionTitle'
@@ -277,6 +278,13 @@ export default function MinePage() {
             没数就说它是干什么的）。**不写"0 条"**：那看着像"你没有消息"，
             而其实可能只是还没加载完（与「我的菜」那一行同一条）。
           */}
+          {/*
+            手机提醒的现状（2026-10-15 用户报「真机也没收到通知」之后加的）：
+            **只读**一行，把"权限给没给、排上了几条、最近一条是几点"摆出来。
+            没有这一行时，"没收到通知"在界面上完全看不出来（是没排上、权限没给、
+            还是本来就没有要提醒的事？），而用户只能干着急。开关仍然不给（D-080）。
+          */}
+          <NotifyStatusRow />
           <Link className="row" to="/notifications" state={{ from: '/mine' }}>
             <div className="row__icon">🔔</div>
             <div className="row__main">
