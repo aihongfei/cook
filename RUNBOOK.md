@@ -4908,3 +4908,39 @@ adb shell dumpsys notification --noredact | grep -i "com.yushan.cook" | head -20
 - **到点该做饭**：饭点前一小时；**只要这一餐还没定局就排**（`PENDING` 也排——"点了菜没人去点选好了"正是最该提醒的那一档），
   `DONE` / `CANCELED` 跳过（`cookReminders`）；
 - **有东西到期**：当天早上 9 点，并且**窗口内每一天各自排各天的**（哪天早上没打开过 App 也要响）。
+
+## R-081 在模拟器上验"左右滑动切换 tab"（真触摸事件），以及两个坐标坑（配套统一 R-069 / D-088，✅ 已验证 2026-10-15）
+
+### 一、用 CDP 的**真触摸**划，而不是在 JS 里造事件
+
+```bash
+# 从 (340,300) 划到 (140,305)：往左 200px（＝看下一个 tab）
+node /tmp/swipe.mjs http://127.0.0.1:9222 340 300 140 305
+```
+
+`/tmp/swipe.mjs` 发的是 `Input.dispatchTouchEvent` 的 `touchStart → 8×touchMove → touchEnd`，
+坐标是 **CSS px**。与在页面里 `dispatchEvent(new PointerEvent(...))` 的区别：**它走浏览器的输入流水线**，
+于是 `touch-action`、`overscroll-behavior`、以及浏览器的会话仲裁**都参与**——那几条正是这次要实现的东西
+（见 `RISKS.md` R-69），自己造事件会把它们全绕过去。
+
+### 二、两个坐标坑（都踩到了）
+
+1. **keep-alive 下 `.swipe-area` 有多个**：缓存页不卸载，`document.querySelector('.swipe-area')`
+   很可能拿到**隐藏那一页**的（实测 `w=0 h=0`）。先按可见性过滤再取 rect：
+   ```js
+   const vis = (el) => el.getClientRects().length > 0 && !el.closest('[hidden]')
+   ```
+   （同一条坑见 R-079 一。）
+2. **划动的两个点都要落在手势面**的矩形里：那次可见的 `.swipe-area` 是 `y=177–485`，
+   而第一版我把点选在 `y=500`（差 15px）——事件落在页面上而不是手势面里，表现是"划了没反应"，
+   看着像功能坏了。先读 rect 再决定坐标。
+
+### 三、这一轮验到的（模拟器上）
+
+| 验什么 | 结果 |
+| --- | --- |
+| 订单页列表往左划 | 筛选从「全部 4」→「待确认 4」 |
+| 我的菜谱往左划 / 往右划 | `?tab=favorites` → `?tab=mine` → 再划回 favorites；可见 tab 的下划线跟着走、内容真的换 |
+| 纵向划动（在列表里往下拽） | **只滚页面**（`scrollTop: 0 → 192`），筛选不动 |
+| 在筛选胶囊那一行上划 | 不换筛选（那一行自己会横滚，标了 `data-no-swipe`） |
+| 隐藏的缓存页 | 查询要按可见性过滤，否则读到的是别的页（见上面第 1 条） |

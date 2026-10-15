@@ -810,7 +810,12 @@
   /* 一排按钮 + （可能要的）一句为什么退不掉。**装进同一个卡片**：
      提示单摆在外面时，它看着像页面上的另一段话，而不是"这条操作条的附注"（用户 2026-10-15 反馈间隙） */
   overflow: hidden;
-  margin-bottom: 10px;
+  /*
+   * 左右跟着卡片走 `var(--spacing-page)`、上下各留 10px（用户 2026-10-15：
+   * 「多选菜单现在左右间隙也没有，上下也没有都需要优化」——原来它四面贴边，
+   * 上方紧挨分段控件、下方紧挨两个入口，看着像被压扁的一整条）。
+   */
+  margin: 10px var(--spacing-page);
   background: color-mix(in srgb, var(--color-brand) 8%, var(--color-paper));
   border: 1.5px solid var(--color-brand);
   border-radius: 14px;
@@ -820,7 +825,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  /* 11px 是这一条的里衬（外面还有 10px 的外边距）：四个角不顶字，按钮也不贴边 */
+  padding: 11px 12px;
 }
 
 .pick-bar__exit,
@@ -864,7 +870,7 @@
 /* 附注行：虚线把它和按钮排分开，底色比卡片本身再深一点（是解释，不是又一条操作） */
 .pick-bar__tip {
   margin: 0;
-  padding: 7px 12px 9px;
+  padding: 9px 14px 11px;
   font-size: 12.5px;
   line-height: 1.55;
   color: #b4451f;
@@ -872,11 +878,18 @@
   border-top: 1px dashed color-mix(in srgb, #b4451f 30%, transparent);
 }
 
-/* 状态筛选那一行（chips 可以横向滚）。「多选」已经不在这儿了，见 `.order-multi` */
+/*
+ * 状态筛选那一行：**chips 自己横着滚，多选图标钉在右边不跟着滚**
+ * （用户 2026-10-15：「多选按钮位置放到全部那行的右侧，改成图标吧，注意左右空白间隙」）。
+ *
+ * 左右间隙不是随手给的：这一行与卡片一样吃 `var(--spacing-page)` 的栏距，
+ * 所以图标右边缘与卡片右边缘在同一条竖线上（上一版它贴着屏幕边、也没跟卡片对齐）。
+ */
 .order-filter {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin: 0 var(--spacing-page);
 }
 
 .order-filter > :first-child {
@@ -886,18 +899,27 @@
 }
 
 /*
- * 「多选」：钉在页头右上角（用户 2026-10-15：「多选按钮位置不对」）。
- * 位置对着 `.corner-art--shifted`（插画让到 right: 52px 之后，这个按钮落在 right: 0 这一侧）。
+ * 「多选」：**图标**（用户 2026-10-15：「改成图标吧」），与筛选胶囊同一行、贴这一行最右。
+ *
+ * 三处尺寸是按"和胶囊一样高"定的：胶囊是 5px 12px 内边距 + 13px 字号 ≈ 31px 高，
+ * 所以这里圆钮给 31×31、图标 19px（描边图形在 19px 上仍看得清对勾）。
+ * `flex: none` 是关键——不给它的话 flex 会把它压扁（上一版在页头是绝对定位，没有这个问题）。
  */
 .order-multi {
-  position: absolute;
-  top: 22px;
-  right: 6px;
-  z-index: 1;
-  padding: 5px 12px;
-  font-size: 13px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 31px;
+  height: 31px;
+  padding: 0;
   color: var(--color-ink-soft);
   background: var(--color-paper);
   border: 1.5px solid var(--color-line);
   border-radius: 999px;
+}
+
+.order-multi:active {
+  color: var(--color-brand-ink, var(--color-brand));
+  border-color: var(--color-brand);
 }

@@ -196,6 +196,16 @@ async function main() {
 
   // ---------- 点单列表与筛选计数（F3-01/03） ----------
   const familyList = await callWithRetry('GET', '/orders', { token: mama.token })
+  /*
+   * 列表**只铺今天及之后**（用户 2026-10-15：「订单只显示今天及之后的订单，剩余的都放入点单历史中」）。
+   * 这个家是脚本现造的、还没有过去的餐次，所以这里只能钉住"回来的每一张都不早于今天"——
+   * "过去那几餐真的不出现了"由开发库那个有历史的家实测（见 RUNBOOK R-079）。
+   */
+  check(
+    '列表里没有今天之前的餐次（过去那几餐归点单历史）',
+    (familyList.body?.cards ?? []).every((card) => card.date >= TODAY),
+    `dates=${JSON.stringify((familyList.body?.cards ?? []).map((c) => c.date))}`,
+  )
   check(
     '全家视角看得到这一餐；计数徽标含全部状态',
     familyList.status === 200

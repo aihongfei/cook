@@ -125,6 +125,23 @@ export function PlusIcon(props: IconProps) {
  * 的墨迹也不在字形框中心——实测在 38px 的圆钮里**偏下 3.4px**。
  * 凡是"一颗按钮上只有一个叉"的地方都用这个，尺寸交给 `width`/`height`。
  */
+/**
+ * 「多选」（订单页筛选行最右那颗）。画的是"方框里一个对勾"——
+ * 用户 2026-10-15 要求这一处**用图标**（原来是一枚写着"多选"的文字胶囊）。
+ *
+ * 为什么是矢量而不是文字符号（`☑`/`▣` 这类）：本项目已经踩过两次——
+ * 文字字形的度量不居中，`＋` 实测偏左 3.7px / 偏下 2.7px、`×` 偏下 3.4px（见 D-056 与 CloseIcon 的说明）。
+ * 描边的方框 + 对勾在 20px 上是几何居中，且能用 `currentColor` 跟着文字色走。
+ */
+export function SelectIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="3.6" y="3.6" width="16.8" height="16.8" rx="4.4" />
+      <path d="M8 12.2l2.8 2.8L16.4 9.4" />
+    </svg>
+  )
+}
+
 export function CloseIcon(props: IconProps) {
   return (
     <svg {...base} strokeWidth={2.3} {...props}>

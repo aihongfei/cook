@@ -1281,30 +1281,49 @@ it('「做好了」的餐退不掉：按钮禁用并写明原因（不是静默�
   expect(screen.getByText(/已经「做好了」.*去点单历史/)).toBeTruthy()
 })
 
-it('「多选」在页头右上角，不在状态筛选那一行里（用户 2026-10-15：「多选按钮位置不对」）', async () => {
+/*
+ * 「多选」的入口位置与形态（用户 2026-10-15 两次定位置）：
+ * ① 「多选按钮位置不对」（当时是筛选行里一枚**文字**胶囊，看着像第 4 个 chip）→ 先搬去页头；
+ * ② 看过之后定稿：「多选按钮位置放到全部那行的右侧，改成图标吧，注意左右空白间隙」。
+ *
+ * 所以这一条盯三件事：**在这一行最右**（与 chips 同一行、但不在它那个横滚容器里）、
+ * **是图标**（没有文字，读屏靠 aria-label）、以及**左右间隙跟着卡片走**（`.order-filter` 吃
+ * `var(--spacing-page)`，图标右边缘与卡片右边缘对齐）。
+ */
+it('「多选」是筛选行最右的图标按钮（不跟着 chips 横滚、与卡片同一条栏距）', async () => {
   mockGet({ boards: { family: twoCards() } })
   renderOrder()
 
   const multi = await screen.findByRole('button', { name: '多选' })
-
-  /*
-   * ① 结构：它是页面容器（`.pscreen`，插画与页头都锚在它上面）的**直接子节点**，
-   *    而且**不在** `.order-filter` 里——那一行是状态筛选，多选不是某个筛选值
-   *    （挤在里面看着像第 4 个 chip，而且那一行能横滚，它跟着滚就没有"钉住"的意思了）。
-   */
-  expect(multi.parentElement?.className).toContain('pscreen')
-  expect(multi.closest('.order-filter')).toBeNull()
+  const row = document.querySelector('.order-filter') as HTMLElement
+  expect(row).toBeTruthy()
+  // ① 与筛选胶囊同一行，且是这一行的**最后一个**子节点（靠右）
+  expect(multi.parentElement).toBe(row)
+  expect(row.lastElementChild).toBe(multi)
+  // ② chips 那一截（第一个子节点）才是横滚容器，多选不在里面
+  expect(row.firstElementChild?.contains(multi)).toBe(false)
+  // ③ 是**图标**：一个字都没有，图形在；名字走 aria-label（读屏照样念得出）
+  expect(multi.textContent?.trim()).toBe('')
+  expect(multi.querySelector('svg')).toBeTruthy()
+  expect(multi.getAttribute('aria-label')).toBe('多选')
   expect(document.querySelector('.order-filter__manage')).toBeNull()
 
-  /* ② 样式：靠绝对定位钉在右上角。**不能只断言类名存在**——落回文档流也一样有类名 */
+  // ④ 样式：这一行吃页面栏距（左右间隙），图标 `flex: none` 不被压扁；
+  //    操作条（选择模式）也要有左右与上下的间隙——用户原话「左右间隙也没有，上下也没有」
   const css = readFileSync(join(__dirname, './order.scss'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
-  const rule = css.match(/\.order-multi\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
-  expect(rule, '没读到 .order-multi 规则').toBeTruthy()
-  expect(rule).toMatch(/position:\s*absolute/)
-  expect(rule).toMatch(/top:\s*\d+px/)
-  expect(rule).toMatch(/right:\s*\d+px/)
+  const rule = (name: string) => css.match(new RegExp(`\\.${name}\\s*\\{[\\s\\S]*?\\n\\}`))?.[0] ?? ''
+  const filter = rule('order-filter')
+  expect(filter, '没读到 .order-filter 规则').toBeTruthy()
+  expect(filter).toMatch(/margin\s*:[^;]*var\(--spacing-page\)/)
+  const icon = rule('order-multi')
+  expect(icon, '没读到 .order-multi 规则').toBeTruthy()
+  expect(icon).toMatch(/flex:\s*none/)
+  expect(icon, '图标不该再用绝对定位（它现在在筛选行里）').not.toMatch(/position:\s*absolute/)
+  const bar = rule('pick-bar')
+  expect(bar, '没读到 .pick-bar 规则').toBeTruthy()
+  expect(bar, '操作条要左右留栏距、上下留呼吸').toMatch(/margin\s*:\s*10px\s+var\(--spacing-page\)/)
 
-  // ③ 进了选择模式它自己退场（那时候整条操作条已经有一排按钮了）
+  // ⑤ 进了选择模式它自己退场（那时候整条操作条已经有一排按钮）
   await longPress((await screen.findByText('2026-10-13 · 晚餐')).closest('article') as HTMLElement)
   expect(await screen.findByText('已选 1 餐')).toBeTruthy()
   expect(screen.queryByRole('button', { name: '多选' })).toBeNull()

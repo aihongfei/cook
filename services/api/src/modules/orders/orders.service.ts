@@ -624,10 +624,22 @@ export class OrdersService {
     const scoped: Prisma.MealOrderWhereInput =
       scope === 'mine' ? { familyId, items: { some: { userId } } } : { familyId }
 
+    /*
+     * **只看今天及之后**（用户 2026-10-15：「订单只显示今天及之后的订单，剩余的都放入点单历史中」）。
+     *
+     * 过去的那几餐不是不见了——它们本来就在**点单历史**（F3-09）里，那一页是按天往前翻的，
+     * 回看、翻旧账、删记录都在那边。这一页是"接下来要做什么"（点菜、定菜单、做饭、退菜），
+     * 把已经吃完的那几餐也铺在这儿，会把"今天该干什么"淹掉。
+     *
+     * 写在 **where 里而不是取回来再 filter**：下面有 `take: 60`，先取后筛时一旦这个家常
+     * 用久了超过 60 条，被挤掉的会是**未来的**餐次（历史把名额吃光了），而那正是这一页要看的。
+     */
+    const from = dateOnly(todayKey())
+
     // 一次取**不带状态筛选**的全部餐次：卡片按状态筛，但计数徽标必须给出每个状态的数量，
     // 否则点了「待确认」之后，其它状态的徽标会全变成 0，用户就没法切回去了。
     const rows = await this.prisma.mealOrder.findMany({
-      where: scoped,
+      where: { ...scoped, mealDate: { gte: from } },
       include: MEAL_ORDER_INCLUDE,
       orderBy: [{ mealDate: 'desc' }, { meal: 'desc' }],
       take: 60,

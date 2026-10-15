@@ -4,6 +4,7 @@ import { apiErrorMessage } from '@/api/client'
 import { useFamily, CAPABILITY, can } from '@/api/family'
 import { useNotifications } from '@/api/notifications'
 import { onTabRetap } from '@/lib/tab-retap'
+import { SelectIcon } from '@/components/icons/TabIcons'
 import { useLongPress } from '@/lib/long-press'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import ConfirmMenuSheet from './components/ConfirmMenuSheet'
@@ -380,31 +381,7 @@ export default function OrderPage() {
   return (
     <Page>
       <div className="pscreen">
-        {/*
-          「多选」的入口放**页头右上角**（用户 2026-10-15：「多选按钮位置不对」）。
-          它原来挤在状态筛选那一行的最右边，看着像第 4 个筛选 chip（而且那一行本身是横向滚动的，
-          它跟着滚就没有"钉在那儿"的意思了）——多选是**整页的模式**，不是某个筛选值，
-          所以搬到"页面级动作"该在的地方：标题那一行的右上角。插画随之往左让开（`withAction`）。
-        */}
-        <PageHeader
-          title="家宴点菜单"
-          subtitle="记录大家想吃什么，也记录每顿饭的回应"
-          art="order"
-          withAction={!selecting}
-        />
-        {/*
-          入口只在**非选择模式**时出现（选择模式里已经有整条操作条，再给一个"多选"是重复的）；
-          也只在列表里真有卡时给——没菜的时候给这个按钮是空的。
-        */}
-        {!selecting && (orders.data?.cards.length ?? 0) > 0 && (
-          <button
-            type="button"
-            className="order-multi"
-            onClick={() => enterSelect()}
-          >
-            多选
-          </button>
-        )}
+        <PageHeader title="家宴点菜单" subtitle="记录大家想吃什么，也记录每顿饭的回应" art="order" />
 
         <div className="segmented">
           <button
@@ -474,13 +451,28 @@ export default function OrderPage() {
         ) : (
           family.data && orders.data && (
             <div className="order-filter">
-              {/*
-                长按是**手势**，第一次用的人找不到（见 enterSelect 那段说明）——
-                所以另有一个显式入口，但它在这一页的**页头右上角**（`.order-multi`），
-                不放这一行：这一行是状态筛选，多选不是筛选值（用户 2026-10-15 的原话：
-                「多选按钮位置不对」）。
-              */}
               <Chips items={chips} value={filter} onChange={setFilter} />
+              {/*
+                多选的**显式入口**：长按是手势，第一次用的人找不到（见 enterSelect 那段说明）。
+                用户 2026-10-15 两次给位置：「多选按钮位置不对」（当时是筛选行里一枚文字胶囊，
+                看着像第 4 个 chip）→ 先搬去页头 → 看过之后定稿：**放这一行最右边、改成图标**
+                （「多选按钮位置放到全部那行的右侧，改成图标吧，注意左右空白间隙」）。
+
+                所以它与 chips **同一行但不在滚动区里**：chips 那截自己横着滚、它与页面右栏距对齐
+                （见 `.order-filter` / `.order-multi` 的样式注释）。只在列表里真有卡时出现——
+                没菜的时候给这个按钮是空的；选择模式里这一行整个换成操作条，它自然退场。
+              */}
+              {!selecting && (orders.data.cards.length > 0) && (
+                <button
+                  type="button"
+                  className="order-multi"
+                  aria-label="多选"
+                  title="多选"
+                  onClick={() => enterSelect()}
+                >
+                  <SelectIcon width={19} height={19} />
+                </button>
+              )}
             </div>
           )
         )}
