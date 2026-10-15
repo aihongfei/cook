@@ -117,6 +117,21 @@ export class OrdersController {
     return this.orders.clearItems(userId, mealKey)
   }
 
+  /**
+   * 整条删掉一餐的**记录**（点单历史里那一格；用户 2026-10-15：「点单历史里面要有」）。
+   *
+   * 与上面两条的区别是"删的是什么"：退菜删的是**待做清单里的条目**（还在进行的餐次），
+   * 这一条删的是**已经发生的事实**（只有「做好了」与「已取消」两档，见 `canDeleteMeal`）。
+   * 路由只有一段 `:mealKey`，所以必须排在 `items/:id` 与 `meals/:mealKey/items` **之后**：
+   * Nest 按声明顺序匹配，前两条更具体，放后面就轮不到它们了。
+   */
+  @Delete(':mealKey')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '删掉一餐的记录（只有「做好了/已取消」能删；成品照会退回成独立打卡）（用户 2026-10-15）' })
+  async deleteMeal(@CurrentUserId() userId: string, @Param('mealKey') mealKey: string) {
+    return this.orders.deleteMeal(userId, mealKey)
+  }
+
   @Post('meals/:mealKey/diners')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard)

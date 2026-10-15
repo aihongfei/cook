@@ -265,6 +265,30 @@ export async function clearMealItems(mealKey: string): Promise<MealCard> {
   return data
 }
 
+/**
+ * 整条删掉一餐的**记录**（点单历史里那一格；用户 2026-10-15）。
+ *
+ * 与 `clearMealItems` 的分界：那条退的是"还没做的这一餐的菜"（到「正在做」为止都能退），
+ * 这条删的是**已经发生的事实**（只有「做好了」与「已取消」两档，服务端 `canDeleteMeal` 把关）。
+ * 返回的是被删掉的那一份信息（几道菜、几张成品照留下来了）——删完就取不回来了，
+ * 前端拿它拼回执。
+ */
+export async function deleteMealRecord(mealKey: string): Promise<DeletedMeal> {
+  const { data } = await apiClient.delete<DeletedMeal>(`/orders/${encodeURIComponent(mealKey)}`)
+  return data
+}
+
+export interface DeletedMeal {
+  mealKey: string
+  date: string
+  meal: MealSlot
+  mealLabel: string
+  /** 跟着记录一起没了的点单份数 */
+  dishCount: number
+  /** **没跟着死**的成品照张数（退回成"没挂餐次"的独立打卡） */
+  photoCount: number
+}
+
 export async function updateMealStatus(mealKey: string, status: OrderStatus): Promise<MealCard> {
   const { data } = await apiClient.post<MealCard>(
     `/orders/meals/${encodeURIComponent(mealKey)}/status`,
@@ -481,6 +505,24 @@ export const useUpdateMealStatus = () =>
   useOrderMutation((input: { mealKey: string; status: OrderStatus }) =>
     updateMealStatus(input.mealKey, input.status),
   )
+
+/**
+ * 删掉一餐的记录（点单历史里那一格）。
+ *
+ * **不并回看板缓存**（`useOrderMutation` 那套是"改了一张卡"），这一条是**把卡从历史里抹掉**：
+ * 所以作废历史（它已经变了）与点单/备菜那几份派生缓存（它们是按同一批餐次算的），
+ * 让界面去重取一遍，而不是在前端模拟"删掉一条记录之后的历史长什么样"。
+ */
+export function useDeleteMealRecord() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: deleteMealRecord,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['orders'], refetchType: 'active' })
+      invalidateAfterMenuChange(queryClient)
+    },
+  })
+}
 
 /**
  * 再点一次（F3-06）：返回的不是一张卡而是 `{added, skipped, card}`，

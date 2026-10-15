@@ -414,6 +414,98 @@ async function main() {
   const clearAgain = await callWithRetry('DELETE', `/orders/meals/${bulkKey}/items`, { token: mama.token })
   check('再退一次（这一餐已经没了）→ 404', clearAgain.status === 404, `${clearAgain.status}`)
 
+  // ---------- 删整条记录（用户 2026-10-15：「点单历史里面要有」删整条） ----------
+  /*
+   * 这一段自己造自己清：**每一条临时餐次最后都要回到"不存在"**。
+   * 后面的备菜计划断言靠的是"没有任何一条还在安排中的餐次"（settled ⟺ 不能加菜），
+   * 留下一条 PLANNED/COOKING 会让那一整组无辜变红（第一版就是这么踩的，
+   * 而且踩出来的还是"第 7 天点不进去"这种看着像真 bug 的假红）。
+   * 另外**不动 `mealKey`（今天晚餐）**：备菜计划要有一行"已做好"来验 canAdd=false。
+   */
+  const delPendingKey = `${plusDaysKey(4)}-DINNER`
+  await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishB.id, mealDate: plusDaysKey(4), meal: 'DINNER' } })
+  const delPending = await callWithRetry('DELETE', `/orders/${delPendingKey}`, { token: mama.token })
+  check(
+    '「待确认」的记录删不掉 → 409，并指路"取消它 / 退菜"（还在安排的那一餐不是一条记录）',
+    delPending.status === 409
+      && /取消/.test(delPending.body?.message ?? '')
+      && /退菜/.test(delPending.body?.message ?? ''),
+    `${delPending.status} ${delPending.body?.message ?? ''}`,
+  )
+  // 那条被拒的餐次按它自己指的路清掉（退菜到「正在做」都行，正是这一轮放开的口径）
+  const delPendingCleanup = await callWithRetry('DELETE', `/orders/meals/${delPendingKey}/items`, { token: mama.token })
+  check('照着 409 指的路把那一餐退掉 → 200（提示里的路必须真的走得通）', delPendingCleanup.status === 200, `${delPendingCleanup.status}`)
+
+  const delCookingKey = `${plusDaysKey(5)}-LUNCH`
+  await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishA.id, mealDate: plusDaysKey(5), meal: 'LUNCH' } })
+  await callWithRetry('POST', `/orders/meals/${delCookingKey}/status`, { token: mama.token, body: { status: 'PLANNED' } })
+  await callWithRetry('POST', `/orders/meals/${delCookingKey}/status`, { token: mama.token, body: { status: 'COOKING' } })
+  const delCooking = await callWithRetry('DELETE', `/orders/${delCookingKey}`, { token: mama.token })
+  check('「正在做」的记录也删不掉 → 409（做到一半把记录抹掉，厨房那口锅可不会跟着消失）', delCooking.status === 409, `${delCooking.status}`)
+  await callWithRetry('DELETE', `/orders/meals/${delCookingKey}/items`, { token: mama.token })
+
+  // 一年后的某一天：形状合法、库里没有记录 —— 用来说明"404 ≠ 不能删，是没这条"
+  const delMissing = await callWithRetry('DELETE', '/orders/2027-01-01-DINNER', { token: mama.token })
+  check('删一餐根本没有记录的 → 404（不是静默成功）', delMissing.status === 404, `${delMissing.status} ${delMissing.body?.message ?? ''}`)
+
+  // ② 已经做好的一餐整条删掉：先挂一张成品照，删完要能证明照片活着（CheckIn 是 SetNull，不是 Cascade）
+  /*
+   * 用**第 4 天晚餐**这一格：它在上一步"删不掉的待确认"里刚被退空，正好拿来验"能删的那一半"。
+   * （槽位是有限的：0~2 天和 5/6 天被后面的断言占着，4/5 这两格才是我自己造自己清的。）
+   */
+  const delDoneKey = `${plusDaysKey(4)}-DINNER`
+  await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishB.id, mealDate: plusDaysKey(4), meal: 'DINNER' } })
+  await callWithRetry('POST', `/orders/meals/${delDoneKey}/status`, { token: mama.token, body: { status: 'PLANNED' } })
+  await callWithRetry('POST', `/orders/meals/${delDoneKey}/status`, { token: mama.token, body: { status: 'COOKING' } })
+  const delDone = await callWithRetry('POST', `/orders/meals/${delDoneKey}/status`, { token: mama.token, body: { status: 'DONE' } })
+  check('为验证"删整条"，另起一餐推到「做好了」', delDone.status === 200 && delDone.body?.status === 'DONE', `${delDone.status} ${delDone.body?.status}`)
+
+  const tinyJpeg = 'data:image/jpeg;base64,' + Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00]).toString('base64')
+  const shot = await callWithRetry('POST', '/checkins', { token: mama.token, body: { image: tinyJpeg, note: '删记录前的成品照', mealKey: delDoneKey } })
+  check('往那一餐挂一张成品照（为验"删记录不吃掉照片"）', [200, 201].includes(shot.status), `${shot.status} ${shot.body?.message ?? ''}`)
+
+  const beforeDelete = await callWithRetry('GET', '/checkins', { token: mama.token })
+  const photosBefore = beforeDelete.body?.total ?? 0
+
+  const deleted = await callWithRetry('DELETE', `/orders/${delDoneKey}`, { token: son.token })
+  check(
+    '「做好了」的记录由**吃货**删得掉 200，并带回去删掉了什么（几道菜、几张成品照）',
+    deleted.status === 200
+      && deleted.body?.mealKey === delDoneKey
+      && deleted.body?.dishCount === 1
+      && deleted.body?.photoCount === 1
+      && typeof deleted.body?.mealLabel === 'string',
+    `${deleted.status} ${JSON.stringify(deleted.body)}`,
+  )
+
+  const afterDelete = await callWithRetry('GET', '/orders', { token: mama.token })
+  check('删掉之后这一餐不在列表里了', !(afterDelete.body?.cards ?? []).some(card => card.mealKey === delDoneKey), `keys=${JSON.stringify((afterDelete.body?.cards ?? []).map(c => c.mealKey))}`)
+
+  /*
+   * 那一格回到"没有安排"要用**本周菜单**看，不能用历史：历史是**从今天往前**铺的
+   * （`to` 默认今天），而被删的这条在第 5 天——它在未来，历史窗口里根本不该出现它
+   * （第一版就写成了查历史，于是断言拿到 undefined，看着像功能坏了）。
+   */
+  const boardAfterDelete = await callWithRetry('GET', '/orders/plan?days=7', { token: mama.token })
+  const delDoneRow = (boardAfterDelete.body?.days ?? [])
+    .find(day => day.date === plusDaysKey(4))?.meals?.find(m => m.meal === 'DINNER')
+  check(
+    '删掉之后那一格回到"没有安排"（同一天另一餐不受影响）',
+    delDoneRow?.dishCount === 0 && delDoneRow?.status === null && delDoneRow?.state === 'none',
+    JSON.stringify(delDoneRow && { meal: delDoneRow.meal, dishCount: delDoneRow.dishCount, status: delDoneRow.status, state: delDoneRow.state }),
+  )
+
+  const delAgain = await callWithRetry('DELETE', `/orders/${delDoneKey}`, { token: mama.token })
+  check('再删一次（记录已经没了）→ 404', delAgain.status === 404, `${delAgain.status}`)
+
+  const wall = await callWithRetry('GET', '/checkins', { token: mama.token })
+  const lonely = (wall.body?.items ?? []).find(item => item.note === '删记录前的成品照')
+  check(
+    '成品照**没跟着记录一起死**：总数不变，那张照片退回成"没挂餐次"的独立打卡',
+    (wall.body?.total ?? 0) === photosBefore && Boolean(lonely) && lonely.mealKey === null,
+    `total=${wall.body?.total}（删前 ${photosBefore}）mealKey=${lonely ? JSON.stringify(lonely.mealKey) : '照片不见了'}`,
+  )
+
   // 取消整餐：新建一餐来验（已做好那餐动不了）
   const cancelTarget = await callWithRetry('POST', '/orders/items', { token: mama.token, body: { recipeId: dishB.id, mealDate: TOMORROW, meal: 'DINNER' } })
   const cancelKey = `${TOMORROW}-DINNER`

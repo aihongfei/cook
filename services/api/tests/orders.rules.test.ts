@@ -22,6 +22,7 @@ import {
   STATUS_LABEL,
   aggregateItems,
   canAddItem,
+  canDeleteMeal,
   canRemoveItem,
   confirmStampFor,
   dayOptions,
@@ -157,6 +158,19 @@ test('退菜比加菜宽：到「正在做」为止都能退，只有「做好�
   assert.ok(canRemoveItem('COOKING'), '正在做也能退（临时发现没那食材）')
   assert.ok(canRemoveItem('CANCELED'), '已取消的餐里退菜是清理，没有副作用')
   assert.ok(!canRemoveItem('DONE'), '做好了是终态：它不是"接下来要做什么"的输入了，只是记录')
+})
+
+test('删整条记录比退菜**窄**：只有定局的两档能删（还在安排的那几档请用取消/退菜）', () => {
+  /*
+   * 用户 2026-10-15：「点单历史里面要有」删整条。与上面那条正好相反——
+   * 退菜是日常动作（到正在做都能退），删记录是**事故处理**：
+   * 只有"已经发生的事实"（做好了/已取消）才谈得上"这条记错了要抹掉"。
+   */
+  assert.ok(canDeleteMeal('DONE'), '做好了那餐的明细已经不能改，删整条是唯一的改错入口')
+  assert.ok(canDeleteMeal('CANCELED'), '取消过的那一餐留着多半是尾账，删掉正是清理')
+  assert.ok(!canDeleteMeal('PENDING'), '还在收集中：不想做就取消、去掉某几道就退菜，别删记录')
+  assert.ok(!canDeleteMeal('PLANNED'), '已安排同理：那是有下一步的一餐，不是一条记录')
+  assert.ok(!canDeleteMeal('COOKING'), '正在做：做到一半把记录抹掉，厨房里那口锅可不会跟着消失')
 })
 
 // ---------- 日期与餐次（F3-01） ----------

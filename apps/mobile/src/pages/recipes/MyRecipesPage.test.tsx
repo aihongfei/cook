@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError, type AxiosRequestConfig } from 'axios'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import type { RecipeSummary } from '@/api/recipes'
+import { useToasts } from '@/components/ui/toast'
 import { useAuth } from '@/stores/auth'
 import MyRecipesPage from './MyRecipesPage'
 
@@ -30,6 +31,12 @@ function requestParams(config: AxiosRequestConfig | undefined): Record<string, u
   return (config?.params ?? {}) as Record<string, unknown>
 }
 
+/** 落点探针：把路由 state 读出来（编辑入口带没带 `from` 是这条用例要盯的） */
+function EditLanding() {
+  const location = useLocation()
+  return <div data-testid="edit-page" data-from={JSON.stringify(location.state)} />
+}
+
 function mount() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, retryDelay: 0 }, mutations: { retry: false } },
@@ -42,6 +49,7 @@ function mount() {
           <Route path="/recipes/mine" element={<MyRecipesPage />} />
           <Route path="/recipes/new" element={<div data-testid="form-page" />} />
           <Route path="/recipes/:id" element={<div data-testid="detail-page" />} />
+          <Route path="/recipes/:id/edit" element={<EditLanding />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -264,4 +272,80 @@ it('认不出的 tab 值落回第一个（URL 是不可信输入）', async () =
   )
 
   expect(await screen.findByText('我做的排骨')).toBeTruthy()
+})
+
+// ---------------------------------------------------------------------------
+// 原创的：卡片上直接放「编辑 / 删除」（交付二 / D-085）
+// ---------------------------------------------------------------------------
+
+it('原创的：卡上直接给「编辑 / 删除」，编辑带 `from` 跳表单页（改完返回才回得到这一页）', async () => {
+  mockGet([own])
+  mount()
+
+  const edit = await screen.findByRole('button', { name: '编辑' })
+  // 与"点卡片进详情"**不是同一个动作**：这里直接进表单
+  fireEvent.click(edit)
+
+  const landing = await screen.findByTestId('edit-page')
+  expect(landing.dataset.from).toContain('/recipes/mine?tab=mine')
+  expect(screen.queryByTestId('detail-page')).toBeNull()
+})
+
+it('原创的：删除要先确认（不点卡片进详情），确认后发 DELETE 并报一句', async () => {
+  mockGet([own])
+  const remove = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: { id: 'own-1', name: '外婆的红烧肉' } } as never)
+  mount()
+
+  fireEvent.click(await screen.findByRole('button', { name: '删除' }))
+
+  // 两颗按钮是 `<Link>` 的**兄弟**：点它们不能顺势进详情（进详情就等于把确认框盖掉）
+  expect(screen.queryByTestId('detail-page')).toBeNull()
+  expect(remove).not.toHaveBeenCalled()
+  const dialog = screen.getByRole('dialog')
+  // 与详情页同一句：说清连带影响（收藏与常用组合里的引用也一起没了）
+  expect(dialog.textContent).toContain('「外婆的红烧肉」会从你们家的菜谱里删掉')
+  expect(dialog.textContent).toContain('收藏与常用组合里的这道也会一起消失')
+
+  fireEvent.click(within(dialog).getByRole('button', { name: '删除' }))
+
+  await waitFor(() => expect(remove).toHaveBeenCalledWith('/recipes/own-1'))
+  await waitFor(() => expect(
+    useToasts.getState().items.some((item) => item.text === '已删掉「外婆的红烧肉」'),
+  ).toBe(true))
+})
+
+it('删不掉时把后端那句话说出来，卡片留在原地（不假装删掉了）', async () => {
+  mockGet([own])
+  vi.spyOn(apiClient, 'delete').mockRejectedValue({
+    isAxiosError: true, response: { status: 403, data: { message: '这道菜谱不是你们家的，改不了' } },
+  } as never)
+  mount()
+
+  fireEvent.click(await screen.findByRole('button', { name: '删除' }))
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '删除' }))
+
+  await waitFor(() => expect(
+    useToasts.getState().items.some((item) => item.text === '这道菜谱不是你们家的，改不了'),
+  ).toBe(true))
+  expect(screen.getByText('外婆的红烧肉')).toBeTruthy()
+})
+
+it('不是自己传的那些不画「编辑 / 删除」（公共菜谱只能看：给个按钮再拿 403 拒绝比不给更糟）', async () => {
+  signIn()
+  mockAllThree()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', search: '?tab=favorites', state: { from: '/mine' } }]}>
+        <Routes>
+          <Route path="/recipes/mine" element={<MyRecipesPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  expect(await screen.findByText('我收的菜')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
 })

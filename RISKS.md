@@ -837,3 +837,16 @@ F16-10 让 AI 第一次**真的写库**，于是多出一类全新的假证据�
   - **file 那条在 jsdom 里验不出来**：testing-library 是把 `files` **直接挂在元素上**的，jsdom 的 `C:\fakepath\…` 取值器看不到它们，`input.value` 永远是空串——**第一版断言写成 `expect(input.value).toBe('')`，去掉修复照样绿**（白验一次）。改成**接住那次赋值**（`Object.defineProperty(input, 'value', { set })` 收集被赋的值）才真的会红。真机上的验证是直接读 `input.value`：修好之后选完就是 `''`，浏览器因此肯为同一个文件再发一次 `change`（脚本见 `RUNBOOK.md` R-078）。
   - **别指望在真机上"点两次同一张图"**：系统文件选择器是原生 UI，CDP 点不到，而 `DOM.setFileInputFiles` 每次都会触发 `change`（它绕过了浏览器那条"值没变就不发"的抑制）——**那条路验不了这个 bug**，只能用"读 value"这个可观测的间接证据 + 单测那条赋值断言。
 - **相关**：`apps/mobile/src/lib/long-press.ts`、`apps/mobile/src/pages/recipes/RecipeFormPage.tsx`、`apps/mobile/src/components/ui/PhotoSource.tsx`、`DECISIONS.md` **D-084**、`RUNBOOK.md` **R-077 / R-078**、`RISKS.md` R-66（同一族：界面分不出"做成了"与"看着做成了"）。
+
+## R-68 「判据要在**发生的那一刻**取」：挂载时取一次存着，实例活得久就会失效 🟢 已定规矩（2026-10-15 修「做好了点击不了」时查实）
+
+- **现象**：用户 2026-10-15 报「做好了点击不了」。真机复现下来是：**按钮没坏、处理器也进了**（在页面里给 `props.onClick` 包一层日志能看见它进、出都正常），但点下去**什么都不发生**——确认框一闪就被自己关掉。
+- **根因**：`ConfirmDialog` 记路由 key 用的是 `const openedAt = useRef(routeKey)`——`useRef` 的初值**只在挂载那一次**取。而它的用法是**常驻挂载 + `open` 开关**（`<ConfirmDialog open={Boolean(pending)} …/>`），页面又被 keep-alive 缓存、组件实例活得很久。于是只要用户在页面里走过几步（进详情再返回、换筛选 → 每次导航都是一个**新的 location.key**），"打开时"的路由 key 与"挂载时"那个就不是一个了 → `if (open && routeKey !== openedAt.current) onCancel()` **打开即取消**。
+- **这一族的判据问题**：有些比较是**跟着动作**的（"打开之后有没有换过页"），有些是**跟着实例**的（"这个实例挂载以来换过页没有"）。写成后者、用在长命实例上，第一次触发必然错位——而且**静默**：不报错、不打日志，只是"点了没反应"（与 R-66 / R-67 同一族：界面分不出"做成了"与"看着做成了"）。
+- **规矩**：
+  1. 这类"打开/触发之后才成立"的判据，**在那一刻记**（`useEffect` 里首次见到 `open === true` 时记下），**不要用 `useRef(值)` 的初值**——除非该组件确实是"开的时候才挂载"（`{open && <X/>}`）。
+  2. 写的时候问一句：**这个组件是常驻挂载的吗？这个判据是该跟着实例，还是该跟着这一次动作？**
+  3. **逃过的那个不代表没问题**：`ImageViewer` 是 `{viewing && <ImageViewer/>}`（开的时候才挂载），所以同样写法的 `useRef(routeKey)` 恰好取在了打开那一刻——**同一个写法在对的挂载方式下是对的，换个挂载方式就是 bug**（`ImageViewer.tsx` 里那条注释把这件事说成"运气"，保留原样即可，别照抄到常驻挂载的组件里）。
+  4. "点了没反应"类问题的排查顺序（本轮实证有效）：**Network 域抓包看有没有请求 → 给 `props.onClick` 包日志看处理器进没进 → 读 fiber 的 `key`/props 确认是哪一个 action → 最后才怀疑业务逻辑**。这一轮正是靠这条顺序把根因从"服务端规则"一路追到"弹窗自己关掉"。
+- **怎么测**：单测要**让组件实例活过一次路由变化**再打开它——做法是"在同一个路由元素上换查询串"（`navigate('?tab=two')`）：组件不卸载、`location.key` 变，正是真机上"进详情再返回"的等价物。`ConfirmDialog.test.tsx` 里两条：① 打开之后换页要关掉（原有意图）；② **挂载之后先换过页、再打开要留着**（这条**先证明会红**才改代码）。
+- **相关**：`apps/mobile/src/components/ui/ConfirmDialog.tsx`、`apps/mobile/src/components/ui/ImageViewer.tsx`、`apps/mobile/src/layouts/KeepAlivePages.tsx`、`DECISIONS.md` **D-086 五**、`RUNBOOK.md` **R-079**、`RISKS.md` R-66 / R-67（同一族）。

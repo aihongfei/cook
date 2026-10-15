@@ -7,7 +7,7 @@ import { TasteService } from '../taste/taste.service'
 import { judgeDish, type TasteJudgement } from '../taste/taste.rules'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
-  aggregateItems, canAddItem, canRemoveItem, canRepeatFrom, confirmStampFor, dateKey, doneStampFor, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
+  aggregateItems, canAddItem, canDeleteMeal, canRemoveItem, canRepeatFrom, confirmStampFor, dateKey, doneStampFor, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
   parseHistoryQuery, historyRange, hasEarlier, weekdayOf,
   parseItemTarget, parseBulkRecipeIds, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, planRepeat, revivedStatus, splitExisting,
   todayKey, todayMealState, visibleToMember,
@@ -96,6 +96,24 @@ export interface AddItemResult extends MealCardView {
    * 拦下来会让人以为菜谱库坏了。但要在**加入的那一刻**说，晚了就只剩添堵。
    */
   tasteWarning?: { verdict: 'warn' | 'block'; text: string }
+}
+
+/**
+ * 整条删掉一餐记录之后的回执（见 `deleteMeal`）。
+ *
+ * 这一餐已经不在库里了，所以这些数字只能由删除这件事**顺手带回来**：
+ * 前端拿它拼"删掉了 10-17 晚餐（3 道菜，2 张成品照留下来了）"，
+ * 用户才知道刚才那一下到底删掉了什么、什么没被删掉。
+ */
+export interface DeletedMealView {
+  mealKey: string
+  date: string
+  meal: MealSlot
+  mealLabel: string
+  /** 跟着一起没了的点单份数 */
+  dishCount: number
+  /** **没跟着死**的成品照张数（`CheckIn.mealOrderId` 会被置空，照片退回成独立打卡） */
+  photoCount: number
 }
 
 /** Prisma 的 `ingredients` 是 Json 列：读成判据要的形状，脏数据丢掉而不是抛（见 ai.service 的同名工具） */
@@ -381,9 +399,58 @@ export class OrdersService {
   }
 
   /**
+   * 整条删掉一餐的**记录**（用户 2026-10-15：「点单历史里面要有」删整条）。
+   *
+   * 这是"做好了"封口之后**唯一的改错入口**：那一餐的明细已经不能改（`canRemoveItem` 挡着），
+   * 而"这条记录本身就是错的"（点错了、重复记了一条、那顿其实没在家吃）只能整条删。
+   * 判据是 `canDeleteMeal`（**只有 DONE / CANCELED**，理由见那个纯规则）。
+   *
+   * 三件事想清楚了才这么写：
+   * - **谁都能删**，与退菜同一个口径（家里的事家里人说清就行，不是权限问题）。
+   *   代价交给确认框讲清（点名日期餐次 + 几道菜 + 几张成品照会退回成独立打卡）——
+   *   本项目对"不可逆"的一贯做法是**让它可见、让它可懂**，而不是靠角色拦着（D-066）；
+   * - **成品照不跟着死**：`CheckIn.mealOrderId` 是 `onDelete: SetNull`——照片退回成"没挂在哪一餐上的打卡"
+   *   （那是这家人的照片，删一条点单记录不该把照片一起删掉）。所以先数一遍再删，好把这句话说给用户听；
+   * - **把被删的那一份信息返回**：删完这一餐就不在了，前端拼"删掉了 10 月 17 日晚餐"的回执
+   *   只能靠这里带回去的数字（任何"再取一次"都拿不回来了）。
+   */
+  async deleteMeal(userId: string, mealKey: string): Promise<DeletedMealView> {
+    const { familyId } = await this.requireMember(userId)
+    const { mealDate, meal } = parseMealKey(mealKey)
+
+    const mealOrder = await this.prisma.mealOrder.findUnique({
+      where: { familyId_mealDate_meal: { familyId, mealDate, meal } },
+    })
+    if (!mealOrder) throw new NotFoundException('这一餐没有记录')
+
+    if (!canDeleteMeal(mealOrder.status)) {
+      throw new ConflictException(
+        `这一餐还在「${STATUS_LABEL[mealOrder.status]}」，删记录得先有定局——`
+        + '不想做这一餐就取消它，只想去掉某几道菜就退菜。',
+      )
+    }
+
+    const [dishCount, photoCount] = await Promise.all([
+      this.prisma.orderItem.count({ where: { mealOrderId: mealOrder.id } }),
+      this.prisma.checkIn.count({ where: { mealOrderId: mealOrder.id } }),
+    ])
+
+    await this.prisma.mealOrder.delete({ where: { id: mealOrder.id } })
+
+    return {
+      mealKey,
+      date: dateKey(mealOrder.mealDate),
+      meal,
+      mealLabel: MEAL_LABEL[meal],
+      dishCount,
+      photoCount,
+    }
+  }
+
+  /**
    * 再点一次（F3-06）：把**某一餐整桌**照抄到另一天某一餐。
    *
-   * 复用的是"点菜"这条链路（逐道调 `addItem`），所以"已安排之后不能加菜""取消过的餐加菜会复活"
+   * 复用的是"点菜"这条链路（逐道调 `addItem`），所以"做好了不能再加菜""取消过的餐加菜会复活"
    * 这些语义两处完全一致——另写一段写库逻辑迟早会分叉（combos 的"整组加入"也是这个做法）。
    *
    * 三件事刻意这样定：

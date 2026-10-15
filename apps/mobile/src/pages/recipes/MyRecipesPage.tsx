@@ -1,10 +1,13 @@
-import { useEffect, useRef } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { recipeErrorMessage, useRecipes } from '@/api/recipes'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { apiErrorMessage } from '@/api/client'
+import { recipeErrorMessage, useDeleteRecipe, useRecipes, type RecipeSummary } from '@/api/recipes'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
 import FilterTabs from '@/components/ui/FilterTabs'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
+import { toast } from '@/components/ui/toast'
 import { readBackLink } from '@/pages/back-link'
 import DishCard from '@/pages/kitchen/components/DishCard'
 import RecipeStatus from './components/RecipeStatus'
@@ -86,9 +89,13 @@ export default function MyRecipesPage() {
 /**
  * 原创的（F1-12）：这个家自己上传的那些。
  *
- * 与菜谱小书的区别不是"筛选了一下"，而是**这里的东西都能改**。
- * 所以卡片沿用同一张（翻菜的手感一致），编辑入口留在详情页——
- * 列表上每张卡再摆两个动作，会让"点卡片进去看做法"这件最常做的事变得不敢点。
+ * 与菜谱小书的区别不是"筛选了一下"，而是**这里的东西都能改**：所以卡片沿用同一张
+ * （翻菜的手感一致），但**卡上直接放「编辑 / 删除」**。
+ *
+ * 这两颗按钮原来是刻意留在详情页的（"列表上摆两个动作会让点卡片进去看做法变得不敢点"）。
+ * 用户 2026-10-15 提「我的菜谱里面现在也没有删除和编辑这种操作」，被问到放哪儿时选的是
+ * **"卡片上直接放"**——那就照做，同时把它们做成安静的一行（见 `dish-card__manage`）：
+ * 够得着，但不跟"点卡片看做法"抢注意力。
  *
  * 分页沿用列表接口那一套（`useRecipes` + 哨兵滚动），没有另写一个"我的"接口：
  * 后端给的是同一个列表的 `mine=1` 视图，前端再包一层只会多一处要跟着改的契约。
@@ -96,6 +103,11 @@ export default function MyRecipesPage() {
 function OwnRecipesList() {
   const recipes = useRecipes({ mine: true })
   const sentinel = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const remove = useDeleteRecipe()
+  // 待删的那一道（不可逆，先弹确认把代价说清；话术与详情页那份一致）
+  const [pending, setPending] = useState<RecipeSummary | null>(null)
   const items = recipes.data?.pages.flatMap((page) => page.items) || []
   const total = recipes.data?.pages[0]?.total || 0
   /*
@@ -152,9 +164,44 @@ function OwnRecipesList() {
 
       <div className="recipes-grid">
         {items.map((dish) => (
-          <DishCard key={dish.id} dish={dish} />
+          <DishCard
+            key={dish.id}
+            dish={dish}
+            manage={{
+              /*
+               * 编辑带 `from` 下去（**不是可选项**）：详情页与表单页的返回目标都靠它，
+               * 不带的话改完返回会落到菜谱小书而不是这儿（上一轮修过同一个坑，见 NOW.md 2026-10-13 那一刀）。
+               */
+              onEdit: () => navigate(
+                `/recipes/${encodeURIComponent(dish.id)}/edit`,
+                { state: { from: `${location.pathname}${location.search}` } },
+              ),
+              onDelete: () => setPending(dish),
+            }}
+          />
         ))}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(pending)}
+        title="删掉这道菜谱"
+        // 与详情页同一句：删掉之后收藏与常用组合里的引用也跟着没了，别只问一句"确定吗"
+        message={`「${pending?.name ?? '这道菜'}」会从你们家的菜谱里删掉，收藏与常用组合里的这道也会一起消失，删了不能恢复。`}
+        confirmText="删除"
+        tone="danger"
+        pending={remove.isPending}
+        onCancel={() => setPending(null)}
+        onConfirm={() => {
+          if (!pending) return
+          remove.mutate(pending.id, {
+            onSuccess: (result) => {
+              setPending(null)
+              toast.success(`已删掉「${result.name}」`)
+            },
+            onError: (error) => toast.error(apiErrorMessage(error)),
+          })
+        }}
+      />
 
       <div ref={sentinel} className="recipes-sentinel" aria-hidden="true" />
       {recipes.isFetchNextPageError && (

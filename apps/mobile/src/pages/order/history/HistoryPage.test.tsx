@@ -1,13 +1,14 @@
 /// <reference types="node" />
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import type { OrderHistory } from '@/api/orders'
+import { useToasts } from '@/components/ui/toast'
 import { useAuth } from '@/stores/auth'
 import HistoryPage from './HistoryPage'
 
@@ -231,3 +232,143 @@ it('裸文本块（摘要 / 收窄说明 / 翻页 / 到头了）都与卡片同�
     .not.toMatch(/padding(-inline)?\s*:[^;]*spacing-page/)
 })
 
+// ---------------------------------------------------------------------------
+// 删整条记录（交付二 / D-085）：只有"已经定局"的两档给，且不可逆要说清代价
+// ---------------------------------------------------------------------------
+
+/** 一页里同时摆着「已做好」「已取消」「已安排」「没有安排」四种，用来验按钮只出现在该出现的地方 */
+function fourKinds() {
+  return page({
+    days: [{
+      date: '2026-10-13', weekday: '周二',
+      meals: [
+        row({
+          meal: 'DINNER', label: '晚餐', state: 'settled', status: 'DONE', statusLabel: '已做好',
+          dishes: ['番茄炒蛋', '米饭'], dishCount: 2, ordererCount: 1, photoCount: 2,
+          mealKey: '2026-10-13-DINNER',
+        }),
+        row({
+          meal: 'LUNCH', label: '午餐', state: 'settled', status: 'CANCELED', statusLabel: '已取消',
+          dishes: ['青菜'], dishCount: 1, ordererCount: 1, mealKey: '2026-10-13-LUNCH',
+        }),
+      ],
+    }, {
+      date: '2026-10-12', weekday: '周一',
+      meals: [
+        row({
+          status: 'PLANNED', statusLabel: '已安排', state: 'open',
+          dishes: ['红烧肉'], dishCount: 1, ordererCount: 1, mealKey: '2026-10-12-LUNCH',
+        }),
+        row({ meal: 'DINNER', label: '晚餐', mealKey: '2026-10-12-DINNER' }),
+      ],
+    }],
+  })
+}
+
+it('「删除」只给已做好与已取消：还在收集/已安排/没安排的格子不给（与服务端 canDeleteMeal 同一条判据）', async () => {
+  mockGet(() => fourKinds())
+  renderHistory()
+
+  await screen.findByText(/番茄炒蛋/)
+  // 已做好 + 已取消 各一颗，别的格子一颗没有
+  const drops = screen.getAllByRole('button', { name: /删掉 .*的记录/ })
+  expect(drops.length).toBe(2)
+  expect(drops.map((b) => b.getAttribute('aria-label'))).toEqual([
+    '删掉 2026-10-13 晚餐的记录',
+    '删掉 2026-10-13 午餐的记录',
+  ])
+})
+
+it('删除是不可逆的：先弹确认把代价说清（几道菜 + 照片会留下来），没确认绝不发请求', async () => {
+  mockGet(() => fourKinds())
+  const remove = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: {} } as never)
+  renderHistory()
+
+  fireEvent.click(await screen.findByRole('button', { name: '删掉 2026-10-13 晚餐的记录' }))
+
+  expect(remove).not.toHaveBeenCalled()
+  const dialog = screen.getByRole('dialog')
+  expect(dialog.textContent).toContain('删掉 2026-10-13 晚餐 的记录？')
+  expect(dialog.textContent).toContain('2 道点单记录会被删掉')
+  // CheckIn 是 SetNull：照片退回成"没挂餐次"的独立打卡，这句话必须说（用户最担心的就是照片）
+  expect(dialog.textContent).toContain('拍的 2 张成品照会留下来')
+
+  // 取消＝什么都没发生
+  fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(remove).not.toHaveBeenCalled()
+})
+
+it('确认后发 DELETE，并把"删过什么"当场回报；删完那一格回到「没有安排」', async () => {
+  let gone = false
+  mockGet(() => {
+    if (!gone) return fourKinds()
+    // 删掉之后后端再给这一页时，"已做好"那一格已经不在了（历史里那一格回到"没有安排"）
+    const after = fourKinds()
+    after.days[0].meals = [
+      row({ meal: 'DINNER', label: '晚餐', mealKey: '2026-10-13-DINNER' }),
+      after.days[0].meals[1],
+    ]
+    return after
+  })
+  const remove = vi.spyOn(apiClient, 'delete').mockImplementation((() => {
+    gone = true
+    return Promise.resolve({
+      data: {
+        mealKey: '2026-10-13-DINNER', date: '2026-10-13', meal: 'DINNER',
+        mealLabel: '晚餐', dishCount: 2, photoCount: 2,
+      },
+    })
+  }) as never)
+  renderHistory()
+
+  fireEvent.click(await screen.findByRole('button', { name: '删掉 2026-10-13 晚餐的记录' }))
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '删掉这条' }))
+
+  await waitFor(() => expect(remove).toHaveBeenCalledWith('/orders/2026-10-13-DINNER'))
+  // 回执写的是"删掉了什么、什么留下了"（不是一句含糊的"删除成功"）
+  await waitFor(() => expect(
+    useToasts.getState().items.some((item) => item.text === '删掉了 10-13 晚餐的记录，2 张照片留了下来'),
+  ).toBe(true))
+  // 弹窗收走、页面上那一格真的翻新了（作废+重取，不是在前端假装删掉）
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  await waitFor(() => expect(screen.queryByText(/番茄炒蛋/)).toBeNull())
+  expect(screen.getAllByText('没有安排').length).toBeGreaterThan(0)
+})
+
+it('没有照片的那一餐不硬提照片（有几分照片说几分）', async () => {
+  mockGet(() => fourKinds())
+  vi.spyOn(apiClient, 'delete').mockResolvedValue({
+    data: {
+      mealKey: '2026-10-13-LUNCH', date: '2026-10-13', meal: 'LUNCH',
+      mealLabel: '午餐', dishCount: 1, photoCount: 0,
+    },
+  } as never)
+  renderHistory()
+
+  fireEvent.click(await screen.findByRole('button', { name: '删掉 2026-10-13 午餐的记录' }))
+  const dialog = screen.getByRole('dialog')
+  expect(dialog.textContent).not.toContain('成品照会留下来')
+
+  fireEvent.click(within(dialog).getByRole('button', { name: '删掉这条' }))
+  await waitFor(() => expect(
+    useToasts.getState().items.some((item) => item.text === '删掉了 10-13 午餐的记录'),
+  ).toBe(true))
+})
+
+it('删不掉时把后端那句话说出来，且弹窗留着（用户可以取消或再试）', async () => {
+  mockGet(() => fourKinds())
+  vi.spyOn(apiClient, 'delete').mockRejectedValue({
+    isAxiosError: true,
+    response: { status: 409, data: { message: '还在「准备中」，删记录得先有定局' } },
+  } as never)
+  renderHistory()
+
+  fireEvent.click(await screen.findByRole('button', { name: '删掉 2026-10-13 晚餐的记录' }))
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '删掉这条' }))
+
+  await waitFor(() => expect(
+    useToasts.getState().items.some((item) => item.text === '还在「准备中」，删记录得先有定局'),
+  ).toBe(true))
+  expect(screen.getByRole('dialog')).toBeTruthy()
+})

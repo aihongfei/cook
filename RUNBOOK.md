@@ -4798,3 +4798,113 @@ node /tmp/cdp.mjs http://127.0.0.1:9222 "(async () => {
 - **"点两次同一张图"在真机上点不出来**：系统文件选择器是原生 UI（CDP 点不到），而 `DOM.setFileInputFiles` **每次都会触发 `change`**（绕过了"值没变就不发"的抑制）——所以只能用上面"读 `value`"的间接证据 + 单测那条赋值断言。
 - **jsdom 里 `expect(input.value).toBe('')` 是假证**：testing-library 直接把 `files` 挂在元素上，那个 `C:\fakepath\…` 取值器看不到它，value 永远是空串（去掉修复也绿）。要**接住那次赋值**（`Object.defineProperty(input, 'value', { set })`）才算验到。
 - **图片显示依赖 `adb reverse tcp:9000`**（MinIO 在 9000）：这条映射在 adb 重启/设备重连后会掉，掉了的表现是"图存进去了但看不到"——排查时先 `adb reverse --list` 看一眼。
+
+## R-079 这一轮（交付二 + 四条优化）在模拟器上怎么验的，以及**三个坑**（✅ 已验证，2026-10-15）
+
+配套：`DECISIONS.md` **D-085 / D-086**、`RISKS.md` **R-67 / R-68**。
+
+### 一、三个坑（都会让你把"工具的问题"当成"实现的 bug"）
+
+1. **keep-alive 之后，DOM 查询必须按"可见性"过滤**。缓存页不卸载、只是藏起来（`hidden`），所以
+   `document.querySelector('.page-back')` 可能拿到的是**上一页**的那一个。本轮就踩过：读到的是隐藏着的
+   「这一餐」详情页的返回按钮，一度以为"再加一道"把返回链弄丢了。查询一律加：
+   ```js
+   const vis = (el) => el.getClientRects().length > 0 && !el.closest('[hidden]')
+   ```
+2. **CDP 派发点击要发"完整三连"**：`mouseMoved` → `mousePressed` →（~60ms）→ `mouseReleased`。
+   只发 press+release 时，这一轮的 WebView 里出现的是**点在了卡片上**（把订单页带进了选择模式），
+   于是后续看起来"整页按钮都不响应"——排查了大半天，真凶只是少发了一个 `mouseMoved`。
+   另外：JS 的 `el.click()` **只发一个 click**，与真点击不等价（它绕过命中测试，也会绕过"抬手补 click"那条路）。
+3. **"点了没反应"的排查顺序**（本轮实证有效，按这个顺序能把范围一刀刀切小）：
+   - `Network.enable` 抓包看**有没有请求**（没有 → 问题一定在点击到请求之间）；
+   - 给按钮的 `props.onClick` 包一层日志（`btn[Object.keys(btn).find(k => k.startsWith('__reactProps'))]`）看**处理器进没进**；
+   - 读 fiber 的 `key` / props 确认**是哪一个 action**（`action.status` 与按钮文案对不对得上）；
+   - 最后才怀疑业务逻辑。本轮正是这样把根因从"服务端规则"追到"弹窗一开就自己关掉"（`RISKS.md` R-68）。
+
+### 二、本轮的命令（可直接复用）
+
+```bash
+# 造包、装机、连线（dev 模式，接口走 adb reverse 到本机容器）
+pnpm --dir apps/mobile exec vite build --mode development
+pnpm --dir apps/mobile exec cap sync android
+(cd apps/mobile/android && ./gradlew assembleDebug)
+adb install -r apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+adb reverse tcp:3000 tcp:3000 && adb reverse tcp:9000 tcp:9000
+adb shell am force-stop com.yushan.cook && adb shell am start -n com.yushan.cook/.MainActivity
+PID=$(adb shell cat /proc/net/unix | grep -o "webview_devtools_remote_[0-9]*" | head -1 | sed 's/.*_//')
+adb forward tcp:9222 localabstract:webview_devtools_remote_$PID
+
+# 求值 / 派发点击（脚本在 /tmp，见 R-062 与本节一）
+node /tmp/cdp.mjs http://127.0.0.1:9222 "location.pathname"
+node /tmp/click.mjs http://127.0.0.1:9222 ".order-card__action" --index 0   # 完整三连的那种
+```
+
+- **取包里的新代码**：`cap sync` 之后 gradle 会复用 zip、看起来"1s BUILD SUCCESSFUL"，核对方式是
+  `unzip -l app-debug.apk | grep assets/public/assets/index-`，看 hash 文件名与 `vite build` 打印的**一致**。
+- **用真机上的会话造数据**（令牌不出页面）：在 WebView 里读 `localStorage['yushan-auth']` 拿 token，
+  直接用 `fetch` 调本机 API；返回值只带 `mealKey / status / id`，**不要把 token 打出来**。
+
+### 三、本轮验到的（逐条，均为模拟器上的事实）
+
+| 验什么 | 结果 |
+| --- | --- |
+| 「多选」在页头右上角 | 胶囊 x 355–405 / y 46–78；插画让到 left 273–362（`--shifted`），不压字不压图 |
+| 吃货（EATER）能点「做好了」 | 「待确认」的卡上有按钮 → 确认框出来（修 R-68 之前它一闪就没）→ 卡变「已做好」 |
+| 库里真的换了状态 | `MealOrder.status=DONE`、`doneById` = 这位吃货、`doneAt` 有值 |
+| 「＋ 再加一道」进得去 | 详情 → 菜谱小书 → 「点这道」→ **库里这一餐变成 2 道** |
+| 历史页删整条记录 | 确认框点名日期餐次 + 几道点单记录 → 「删掉这条」→ 回执 → **库里餐次行与点单项都没了**、列表翻新成"没有安排" |
+| 「我的菜谱」卡上删除 | 点删除**没跳详情** → 确认框（与详情页同一句）→ 卡片消失、**库里那道菜谱也没了** |
+| 「手机提醒」现状行 | 「已排 4 条 · 最近的是 10 月 15 日 17:00「晚餐该做饭了」」 |
+
+### 四、前后端测试的"预期状态"（别把环境依赖当成回归）
+
+- 前端：`pnpm --dir apps/mobile run test` → **714/714（66 文件）**；`tsc -b` 干净；`oxlint` **18 warnings / 0 errors**（这是当前基线）。
+- 后端：`pnpm --dir services/api run test` → **545 例里 543 过**，两条固定的红是 `aisle-audit` / `zz-summary`
+  要读 `/tmp/all-ingredients.json`（一份**机器本地**的食材快照，`/tmp` 清理后就不在）——与本轮改动无关，
+  不要为了"全绿"去改它们。
+
+### 五、一次性数据**造完要收干净**
+
+历史的删除只能在"过去的日子"上验，而点菜接口只收**今天到本周三**（`只能点从今天到周三这 7 天内的菜`）。
+本轮的做法：直接在 MySQL 里插一条**过去的 DONE 记录**（`MealOrder` + 一条 `OrderItem`），验完在界面里删掉，
+再核对 `SELECT COUNT(*)` 回到原值；另造的菜谱/餐次也在验完后删掉并复核行数。
+
+## R-080 真机「没收到通知」怎么查（配套 R-071 / D-080 与本轮 D-086 四，✅ 2026-10-15 加）
+
+### 一、先在应用里看那一行（用户自己能看的那一步）
+
+**「我的」页 → 「📣 手机提醒」**（`apps/mobile/src/pages/mine/NotifyStatus.tsx`）会说出四件事之一：
+
+- 权限没给（`denied`）→ 明话"发不出来，去手机设置里打开"（**不弹第二次权限框**：系统对问过被拒的 App 不会再弹，点了也是白点）；
+- 还没问过（`prompt`）→ "下次打开 App 会问一次"；
+- 已开但没排上 → "现在没有要提醒的事"（**不写"0 条"**，那看着像"你没有消息"）；
+- 已排上 → **「已排 N 条 · 最近的是 10 月 15 日 17:00「晚餐该做饭了」」**（条数 + 最近一条的时间与标题）。
+
+**没有这一行时，"没收到"在界面上完全看不出来**——是没排上、权限没给、还是本来就没有要提醒的事？（R-66 那一族。）
+
+### 二、设备侧的命令
+
+```bash
+# 系统里到底有没有我们的闹钟（本机通知走的是系统闹钟，关掉 App 也会响）
+adb shell dumpsys alarm | grep -B2 -A6 TimedNotificationPublisher | head -40
+# 通知权限
+adb shell dumpsys package com.yushan.cook | grep -i "POST_NOTIFICATIONS\|granted"
+# 通知栏里出现过什么（历史条目）
+adb shell dumpsys notification --noredact | grep -i "com.yushan.cook" | head -20
+```
+
+### 三、两条**平台事实**（这一轮踩出来的，写在这里免得下次再撞）
+
+1. **`LocalNotifications.getPending()` 回来的 `schedule.at` 是字符串**，不是类型声明里的 `Date`：
+   Android 侧给的是 `Date.toString()` 的形状，实测一条长这样：`Sun Oct 18 17:00:00 GMT+08:00 2026`。
+   `new Date(...)` 能正确解析（V8 认这个形状）。**别用 `instanceof Date` 过滤**——那样"最近一条"恒为 null，
+   而且**不报错**，界面上只是安静地少半句话。判断这件事的代码收在纯规则 `pendingSummary` 里（可单测）。
+2. **一律不精确闹钟**（`isExactNotification: false`，D-080）：精确闹钟要用户在系统设置里单独开，
+   而插件的默认行为会**自己把那个设置页拉起来**（"我什么都没点，怎么跳到设置里去了"）。代价是可能晚几分钟到半小时，
+   对"到点该做饭"（提前一小时）完全可以接受。
+
+### 四、提醒口径（本轮更新）
+
+- **到点该做饭**：饭点前一小时；**只要这一餐还没定局就排**（`PENDING` 也排——"点了菜没人去点选好了"正是最该提醒的那一档），
+  `DONE` / `CANCELED` 跳过（`cookReminders`）；
+- **有东西到期**：当天早上 9 点，并且**窗口内每一天各自排各天的**（哪天早上没打开过 App 也要响）。

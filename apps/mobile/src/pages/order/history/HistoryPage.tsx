@@ -1,11 +1,14 @@
+import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { useFamily } from '@/api/family'
-import { useOrderHistory, type HistoryDay, type MealProgressRow } from '@/api/orders'
+import { useDeleteMealRecord, useOrderHistory, type HistoryDay, type MealProgressRow } from '@/api/orders'
 import { readBackLink } from '@/pages/back-link'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import { STATUS_TONE } from '@/components/ui/status-tone'
+import { toast } from '@/components/ui/toast'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
 import '../../shared.scss'
 import './history.scss'
@@ -33,8 +36,16 @@ function dayBadge(day: HistoryDay, today: string, yesterday: string): string {
   return String(Number(day.date.slice(8)))
 }
 
-function mealRow(meal: MealProgressRow, from: string) {
+function mealRow(meal: MealProgressRow, from: string, date: string, onDelete: () => void) {
   const hasContent = meal.dishCount > 0
+  /*
+   * 只有**已经定局**的那两档给删除入口，与服务端的 `canDeleteMeal` 是同一条判据：
+   * 「做好了」是"这条记录唯一的改错入口"（明细已经不能改了），「已取消」是清尾账。
+   * 还在收集中/已安排/正在做的不给——那几档的正路是**取消**或**退菜**（就在点菜单上），
+   * 删记录会把"这餐还在安排"这个事实一起抹掉，而用户想表达的从来不是那个意思
+   * （给个按钮再拿 409 拒绝，比不给按钮更糟）。
+   */
+  const deletable = hasContent && (meal.status === 'DONE' || meal.status === 'CANCELED')
 
   return (
     <div className="history__row" key={meal.meal}>
@@ -58,6 +69,16 @@ function mealRow(meal: MealProgressRow, from: string) {
       {hasContent && meal.status && (
         <span className={['stamp', STATUS_TONE[meal.status]].filter(Boolean).join(' ')}>{meal.statusLabel}</span>
       )}
+      {deletable && (
+        <button
+          type="button"
+          className="history__drop"
+          aria-label={`删掉 ${date} ${meal.label}的记录`}
+          onClick={onDelete}
+        >
+          删除
+        </button>
+      )}
     </div>
   )
 }
@@ -67,6 +88,12 @@ export default function HistoryPage() {
   const family = useFamily()
   const history = useOrderHistory({ enabled: Boolean(family.data) })
   const back = readBackLink(location.state, '/mine')
+  /*
+   * 待删的那一餐（用户 2026-10-15：「点单历史里面要有」删整条）。
+   * 状态留在页面这一层而不是每一格：一次只可能删一条，弹窗也只有一个。
+   */
+  const [pending, setPending] = useState<{ mealKey: string; date: string; label: string; dishes: number; photos: number } | null>(null)
+  const drop = useDeleteMealRecord()
 
   const pages = history.data?.pages ?? []
   const days = pages.flatMap((page) => page.days)
@@ -129,7 +156,18 @@ export default function HistoryPage() {
                   <span className="history__date">{day.date}</span>
                   <span className="history__weekday">{day.weekday}</span>
                 </div>
-                {day.meals.map((meal) => mealRow(meal, location.pathname))}
+                {day.meals.map((meal) => mealRow(
+                  meal,
+                  location.pathname,
+                  day.date,
+                  () => setPending({
+                    mealKey: meal.mealKey,
+                    date: day.date,
+                    label: meal.label,
+                    dishes: meal.dishCount,
+                    photos: meal.photoCount,
+                  }),
+                ))}
               </section>
             ))}
 
@@ -159,6 +197,44 @@ export default function HistoryPage() {
           </>
         )}
       </div>
+
+      {/*
+        删整条记录：**不可逆**，所以按本项目对不可逆的一贯做法——把代价说清，
+        而不是含糊地问一句"确定吗"（用户看不出确定之后会失去什么）。
+        这里点名日期餐次、几道菜，以及**照片会留下来**（CheckIn 是 SetNull，
+        照片退回成"没挂餐次"的独立打卡）——那句话是用户最可能担心的那件事。
+      */}
+      <ConfirmDialog
+        open={Boolean(pending)}
+        title={`删掉 ${pending?.date ?? ''} ${pending?.label ?? ''} 的记录？`}
+        message={(
+          <>
+            <p>
+              这一餐的 {pending?.dishes ?? 0} 道点单记录会被删掉，点单历史里这一格回到"没有安排"。
+              {(pending?.photos ?? 0) > 0 && `拍的 ${pending?.photos} 张成品照会留下来，只是不再挂在这一餐上。`}
+            </p>
+            <p>只是少一道菜或者不想做这一餐，已经不用回来删记录了——点菜单上退菜、取消就行。</p>
+          </>
+        )}
+        confirmText="删掉这条"
+        tone="danger"
+        pending={drop.isPending}
+        onCancel={() => setPending(null)}
+        onConfirm={() => {
+          if (!pending) return
+          drop.mutate(pending.mealKey, {
+            onSuccess: (gone) => {
+              setPending(null)
+              // 删完就取不回来了，把"删掉了什么、什么留下了"当场说一遍
+              toast.success(
+                `删掉了 ${gone.date.slice(5)} ${gone.mealLabel}的记录`
+                + (gone.photoCount > 0 ? `，${gone.photoCount} 张照片留了下来` : ''),
+              )
+            },
+            onError: (error) => toast.error(apiErrorMessage(error)),
+          })
+        }}
+      />
     </Page>
   )
 }

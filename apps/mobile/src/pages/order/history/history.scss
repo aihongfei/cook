@@ -149,3 +149,20 @@
 .history__status {
   padding: 14px;
 }
+
+/* 删掉这一条记录（只有「做好了/已取消」的格子才有）：安静的描边小按钮，
+   破坏性由确认框承担——摆一颗醒目的红按钮，会让"回看历史"这一页看着像删东西的地方 */
+.history__drop {
+  flex: none;
+  padding: 3px 9px;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  background: transparent;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.history__drop:active {
+  color: #b4451f;
+  border-color: color-mix(in srgb, #b4451f 40%, var(--color-line));
+}

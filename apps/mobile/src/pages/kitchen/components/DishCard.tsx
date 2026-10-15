@@ -36,12 +36,21 @@ export default function DishCard({
   dish,
   favorited = false,
   onToggleFavorite,
+  manage,
 }: {
   dish: RecipeSummary
   /** 我收藏过这道没有（由**父级批量查**一次给下来，见下） */
   favorited?: boolean
   /** 点那颗心。**不给就不画心**（没登录时父级不传，别让用户白点一次再收 401） */
   onToggleFavorite?: () => void
+  /**
+   * 自己写的菜的**改/删**入口（用户 2026-10-15：「我的菜谱里面现在也没有删除和编辑这种操作」
+   * → 选的是"卡片上直接放"）。只有「我的菜谱 → 原创的」传它。
+   *
+   * 为什么不是每张卡都有：另外两处（菜谱小书、首页）翻的是**公共菜谱库**，
+   * 本来就不许改——给个按钮再拿 403 告诉用户不行，比不给更糟（与"不能点菜时不画点这道"同一条）。
+   */
+  manage?: { onEdit: () => void; onDelete: () => void }
 }) {
   const location = useLocation()
   // 路由 state 是不可信输入，统一走 readPlanTarget 校验（见该文件）；这里只负责"原样传下去"
@@ -151,6 +160,18 @@ export default function DishCard({
           )
         )}
       </div>
+
+      {/*
+        自己写的菜：改与删（见 `manage` 的说明）。与上面两个动作**同一层**（都是 `<Link>` 的兄弟），
+        所以点它们不会冒泡到"进详情"上。做成安静的一行而不是两颗大按钮：
+        这一页最常做的事仍然是"点卡片进去看做法"，管理动作要够得着、但不抢眼。
+      */}
+      {manage && (
+        <div className="dish-card__manage">
+          <button type="button" className="dish-card__edit" onClick={manage.onEdit}>编辑</button>
+          <button type="button" className="dish-card__remove" onClick={manage.onDelete}>删除</button>
+        </div>
+      )}
     </article>
   )
 }
