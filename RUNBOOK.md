@@ -4970,3 +4970,74 @@ node /tmp/swipe.mjs http://127.0.0.1:9222 340 300 140 305
 就换了元素，卡片一次 `pointermove` 都收不到 → 500ms 后长按照常触发。修法是起手之后在 **window** 上补一份
 capture 监听（`pointermove` / `touchmove` / `pointerup` / `pointercancel`），结束就摘。
 **这也说明"慢速划动"这个测法本身有价值**：正常速度的自动化测试根本撞不到它（跑到 500ms 之前早就抬手了）。
+
+## R-082 加表但**不能清库**时怎么走（`migrate diff` + `migrate deploy`）（配套 RISKS R-70 / D-089 六，✅ 已验证 2026-10-15）
+
+### 一、症状与判别
+
+给打卡加 `CheckInComment` 表时，`prisma migrate dev --name checkin_comments` 要求**重置整个数据库**。
+**先别答应**，按这个顺序判一遍：
+
+```bash
+cd services/api
+export DATABASE_URL="mysql://cook:<app密码>@127.0.0.1:3306/cook"   # 或走 docker compose exec
+pnpm exec prisma migrate status
+```
+
+```bash
+# 记账行里有没有"失败但没清掉"的（这是本次的真凶）
+docker compose exec -T mysql mysql -ucook -p<pw> cook -e \
+  "SELECT migration_name, applied_steps_count, rolled_back_at FROM _prisma_migrations WHERE applied_steps_count = 0;"
+```
+
+```bash
+# 逐条核对校验和：成功的那些必须与磁盘迁移文件一致
+pnpm exec prisma migrate status   # 期望：Database schema is up to date!
+```
+
+**本次的实测结论**：`applied_steps_count=0` 且 `rolled_back_at` 非空的有 **2 行**（历史失败操作留下的），
+而所有成功行的 checksum 与迁移文件**一一对上**、`migrate status` 说 up-to-date —— 是**记账问题**，不是真漂移。
+**真漂移**（磁盘迁移与库结构不一致）才该谈重置，而且那时也该先 `migrate diff` 看清差在哪里。
+
+### 二、不动数据的那条路
+
+```bash
+# 1) 由"库的现状"与"schema.prisma 的目标"生成 SQL（不连影子库、不写库）
+pnpm exec prisma migrate diff \
+  --from-schema-datasource prisma/schema.prisma \
+  --to-schema-datamodel prisma/schema.prisma \
+  --script > prisma/migrations/20261015140000_checkin_comments/migration.sql
+
+# 2) 人工过一遍这份 SQL（本次它除了建表，还带出一条无关的 avatar 列定义改动——要自己判断留不留）
+
+# 3) 正式应用（这也是容器启动时自动跑的那条命令）
+docker compose exec api npx prisma migrate deploy
+```
+
+**实测输出（2026-10-15）**：
+
+```
+1 migration found in prisma/migrations
+Applying migration `20261015140000_checkin_comments`
+The following migration have been applied:
+migrations/
+└─ 20261015140000_checkin_comments/
+  └─ migration.sql
+All migrations have been successfully applied.
+```
+
+### 三、应用之后必须做的两件事
+
+```bash
+# ① 数据一条没少（迁移前后各查一次；本次 92 / 850 / 616 前后一致）
+docker compose exec -T mysql mysql -ucook -p<pw> cook -e \
+  "SELECT (SELECT COUNT(*) FROM CheckIn) AS checkins, (SELECT COUNT(*) FROM MealOrder) AS meals, (SELECT COUNT(*) FROM Recipe) AS recipes;"
+
+# ② 那个模块的接口验收照常跑（本次 67/67，含新建的评论四条与"删打卡连带删评论"）
+node services/api/scripts/verify-checkins-http.cjs
+```
+
+### 四、为什么不去"补一次 `migrate dev`"
+
+那两条残破记账行留着不影响使用（`migrate deploy` 只看成功记录）。硬要清理得动 `_prisma_migrations` 里的行，
+那是一次**手改迁移元数据**的操作，比"多两行没人看的记录"风险大得多。真到必须清的那天，单独开一刀、单独验收。

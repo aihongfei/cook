@@ -39,6 +39,8 @@ model User {
   orderItems         OrderItem[]
   /// 这个账号的打卡照片（M9 / F9-07）
   checkIns           CheckIn[]
+  /// 这个账号在打卡底下说过的话（F9 二期）
+  checkInComments    CheckInComment[]
   /// 这个账号组过的常用组合（M4 / F4-04）
   combos             Combo[]
   /// 这个账号定下来的餐（M4 / F4-05 的确认留痕）
@@ -335,12 +337,38 @@ model CheckIn {
   /// 一句交代，如"给小满做的生日面"
   note        String?    @db.VarChar(60)
   createdAt   DateTime   @default(now())
+  /// 墙上一张照片底下家里人说的话（F9-02 二期）
+  comments    CheckInComment[]
 
   /// 家庭墙按时间倒序取 + 热力图按日期聚合
   @@index([familyId, createdAt])
   @@index([familyId, checkDate])
   @@index([userId, checkDate])
   @@index([mealOrderId])
+}
+
+/// 打卡底下的一条评论（用户 2026-10-15：「我的打卡墙要添加评论功能，还要添加打开编辑和删除功能，评论也要」）。
+///
+/// 与打卡本身分开两张表的理由：一条照片底下会有好几句话，而打卡的其余字段（照片、日期、挂哪一餐）
+/// 都是"照片的属性"——把它们和评论挤在一行里，评论就是一条只能写一句的记录。
+///
+/// 删除口径（D-089）：**谁写的谁改、谁写的谁删**；打卡被删时评论跟着走（Cascade），
+/// 不留"看不见的句子的孤儿行"。
+model CheckInComment {
+  id        String   @id @default(cuid())
+  checkInId String
+  checkIn   CheckIn  @relation(fields: [checkInId], references: [id], onDelete: Cascade)
+  /// 写这条评论的人
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 说的话
+  body      String   @db.VarChar(200)
+  createdAt DateTime @default(now())
+  /// 改过之后要看得出来（图片没变、话变了，不记时间就分不清哪句是后来改的）
+  updatedAt DateTime @updatedAt
+
+  /// 一张照片底下的评论按时间正序读（先说的话在上面）
+  @@index([checkInId, createdAt])
 }
 
 /// 常用组合（M4 / F4-04）：把常一起点的一组菜存成一个"套餐"，一键整组加进某一餐。

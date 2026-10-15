@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common'
+import type { FamilyRole } from '@prisma/client'
 
 /**
  * 打卡的纯规则（M9 / F9-03、F9-07、F9-08；口径见 D-023）。
@@ -176,4 +177,60 @@ export function streakOf(counts: Map<string, number>, today: Date = new Date()):
     cursor.setDate(cursor.getDate() - 1)
   }
   return streak
+}
+
+// ---------------------------------------------------------------------------
+// 编辑、删除与评论（用户 2026-10-15：「我的打卡墙要添加评论功能，还要添加打开编辑和删除功能，
+// 评论也要」）。判定放这里，服务层只取事实（与 orders.rules 同一套路）。
+// ---------------------------------------------------------------------------
+
+/** 一句评论的上限。比打卡备注（60）宽：备注是"给照片起个名"，评论是"对着照片说说感想" */
+export const COMMENT_MAX = 200
+
+/**
+ * **谁能改这张打卡**：只有上传者本人。
+ *
+ * 为什么不是"全家都能改"：打卡是"**我**今天做了这道菜"的个人记录，别人改了它，
+ * 照片底下署的还是原作者的名字——那是在替他说话。退菜/改菜单那几处放开，
+ * 是因为那些是**共同事务**（一桌菜是大家的事）；打卡不是。
+ * 家里其他人想看、想评论都能，改与删只归本人。
+ */
+export function canEditCheckIn(role: FamilyRole, isOwner: boolean): boolean {
+  void role
+  return isOwner
+}
+
+/** 同上：删也归本人（照片是"我的作品"，只有我能把它从墙上摘下来） */
+export function canDeleteCheckIn(role: FamilyRole, isOwner: boolean): boolean {
+  void role
+  return isOwner
+}
+
+/**
+ * **谁能改/删一条评论**：写它的人。
+ *
+ * 与打卡本身同一条口径（各自的东西各自管），**不额外给掌勺人/家长特权**：
+ * 一条评论被"家长"改掉之后，下面还署着原来那个人的名字，读起来就是"他说了这句他没说过的话"。
+ * 照片的作者想清掉别人在自己照片底下的胡话？——这一版不给这个能力；
+ * 要清就删整张打卡（评论跟着一起没，见 D-089）。这是刻意的小口径，不装作有。
+ */
+export function canEditComment(role: FamilyRole, isAuthor: boolean): boolean {
+  void role
+  return isAuthor
+}
+
+export function canDeleteComment(role: FamilyRole, isAuthor: boolean): boolean {
+  return canEditComment(role, isAuthor)
+}
+
+/**
+ * 评论内容：去掉首尾空白；空的不收（"发一条空的"没有任何意思，多半是误触发送）；
+ * 超长直接拒并告诉上限（截断更糟——用户以为发出去了，其实后半句没了）。
+ */
+export function parseComment(raw: unknown): string {
+  if (typeof raw !== 'string') throw new BadRequestException('评论只能是一段文字')
+  const body = raw.trim()
+  if (!body) throw new BadRequestException('评论不能是空的')
+  if (body.length > COMMENT_MAX) throw new BadRequestException(`评论最多 ${COMMENT_MAX} 个字`)
+  return body
 }

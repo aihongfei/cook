@@ -4,13 +4,19 @@ import { BadRequestException, UnauthorizedException } from '@nestjs/common'
 import {
   CHECKIN_MAX_BYTES,
   CHECKIN_NOTE_MAX,
+  COMMENT_MAX,
   sniffImageType,
   buildHeatmap,
+  canDeleteCheckIn,
+  canDeleteComment,
+  canEditCheckIn,
+  canEditComment,
   dayKey,
   dayStart,
   extensionFor,
   heatLevel,
   heatmapStart,
+  parseComment,
   parseContentType,
   parseDayKey,
   parseNote,
@@ -244,4 +250,43 @@ test('签名链接：过期后拒绝（有效期是 24 小时）', () => {
 
   const justAfter = new Date((Number(expires) + 1) * 1000)
   assert.throws(() => verifyPhotoSignature('ck-1', expires, signature, justAfter), UnauthorizedException)
+})
+
+// ---------------------------------------------------------------------------
+// 编辑/删除/评论的判定（用户 2026-10-15：「还要添加打开编辑和删除功能，评论也要」）
+// ---------------------------------------------------------------------------
+
+test('打卡只能本人改、本人删——角色不参与（别人替你改，底下还署你的名字）', () => {
+  // 六个角色 × 两种身份：只有"本人"那一列通过
+  // 就这三个角色（schema 的 FamilyRole：OWNER 掌勺人 / COOK 帮厨 / EATER 吃货）
+  const roles = ['OWNER', 'COOK', 'EATER'] as const
+  for (const role of roles) {
+    assert.equal(canEditCheckIn(role, true), true, `${role} 本人应该能改`)
+    assert.equal(canEditCheckIn(role, false), false, `${role} 非本人不该能改`)
+    assert.equal(canDeleteCheckIn(role, true), true, `${role} 本人应该能删`)
+    assert.equal(canDeleteCheckIn(role, false), false, `${role} 非本人不该能删`)
+  }
+})
+
+test('评论同理：谁写的谁改谁删（掌勺人也没有特权）', () => {
+  for (const role of ['OWNER', 'COOK', 'EATER'] as const) {
+    assert.equal(canEditComment(role, true), true)
+    assert.equal(canEditComment(role, false), false)
+    assert.equal(canDeleteComment(role, true), true)
+    assert.equal(canDeleteComment(role, false), false)
+  }
+})
+
+test('评论内容：去首尾空白、空的不收、超长明说上限', () => {
+  assert.equal(parseComment('  今天这盘真好看  '), '今天这盘真好看')
+  assert.equal(parseComment('a'.repeat(COMMENT_MAX)), 'a'.repeat(COMMENT_MAX))
+
+  // 空 / 只有空白 / 不是字符串 → 400（"发一条空的"多半是误触）
+  assert.throws(() => parseComment(''), BadRequestException)
+  assert.throws(() => parseComment('   '), BadRequestException)
+  assert.throws(() => parseComment(null), BadRequestException)
+  assert.throws(() => parseComment(123), BadRequestException)
+
+  // 超长**不截断**：截断会让人以为发出去了，其实后半句没了
+  assert.throws(() => parseComment('a'.repeat(COMMENT_MAX + 1)), BadRequestException)
 })

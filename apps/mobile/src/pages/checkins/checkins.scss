@@ -426,3 +426,230 @@
 .checkin-detail__note--empty {
   color: var(--color-ink-3);
 }
+
+/*
+ * ---- 详情里的编辑/删除与评论（用户 2026-10-15：「还要添加打开编辑和删除功能，评论也要」）----
+ *
+ * 这一屏原来只有"照片 + 谁 + 时间 + 备注"四行字，现在多了两组**可操作的东西**：
+ * 一颗"改交代"/"删掉这张"，和底下一条评论流。做法上跟着这个 App 的语汇：
+ * 主键用品牌暖色、次要动作用安静的小字按钮（与 `dish-card__manage`、`order-card__action` 同一套），
+ * 危险的删只用**砖红文字**而不是填色按钮——它就在照片底下，做成大红块会喧宾夺主。
+ */
+.checkin-detail__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.checkin-detail__ghost,
+.checkin-detail__danger,
+.checkin-comment__actions button {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  background: transparent;
+  border-radius: 999px;
+  transition: transform 0.12s ease;
+}
+
+.checkin-detail__ghost {
+  color: #8a5a34;
+  border: 1px solid #e2c9a8;
+}
+
+/* 危险动作：砖红文字 + 淡红描边（与"退菜""删掉这条"同一档语气） */
+.checkin-detail__danger {
+  color: #b4482a;
+  border: 1px solid #e8bda8;
+}
+
+.checkin-detail__primary {
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  color: #fff8ee;
+  cursor: pointer;
+  background: var(--color-brand);
+  border: none;
+  border-radius: 999px;
+}
+
+.checkin-detail__ghost:active,
+.checkin-detail__danger:active,
+.checkin-detail__primary:active,
+.checkin-comment__actions button:active {
+  transform: scale(0.94);
+}
+
+.checkin-detail__primary:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.checkin-detail__editor {
+  margin-top: 12px;
+}
+
+.checkin-detail__editor input,
+.checkin-comments__compose input,
+.checkin-comment__editor input {
+  width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink);
+  background: var(--color-paper);
+  border: 1px solid #e2c9a8;
+  border-radius: 10px;
+}
+
+.checkin-detail__editor-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.checkin-detail__hint {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+}
+
+/*
+ * 评论流。
+ *
+ * 与照片区之间一条细线分隔：上面是"这张照片"，下面是"大家围着它说的话"——
+ * 不划线的话，第一条评论看起来像是这张照片的另一段说明。
+ */
+.checkin-comments {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed #e6d3b8;
+}
+
+.checkin-comments__title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6e3a1c;
+}
+
+.checkin-comments__title span {
+  display: inline-block;
+  min-width: 17px;
+  margin-left: 5px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 17px;
+  color: #8a5a34;
+  text-align: center;
+  background: #f7e9d7;
+  border-radius: 999px;
+}
+
+.checkin-comments__empty {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-ink-3);
+}
+
+.checkin-comments__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checkin-comment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  padding: 9px 0;
+  border-bottom: 1px solid rgb(230 211 184 / 45%);
+}
+
+.checkin-comment__who {
+  flex: none;
+  font-size: 12px;
+  color: #8a5a34;
+}
+
+.checkin-comment__body {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-ink-2);
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* 「（改过）」跟着正文走，不抢眼但看得见 */
+.checkin-comment__edited {
+  margin-left: 4px;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--color-ink-3);
+}
+
+.checkin-comment__actions {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+
+.checkin-comment__actions button {
+  padding: 2px 8px;
+  color: #8a5a34;
+}
+
+/* 改评论时输入框独占一行（与"取消/保存"排在同一段里） */
+.checkin-comment__editor {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.checkin-comment__editor input {
+  flex: 1;
+}
+
+.checkin-comments__compose {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.checkin-comments__compose input {
+  flex: 1;
+}
+
+.checkin-comments__compose button {
+  flex: none;
+  padding: 9px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  color: #fff8ee;
+  cursor: pointer;
+  background: var(--color-brand);
+  border: none;
+  border-radius: 999px;
+  transition: transform 0.12s ease;
+}
+
+.checkin-comments__compose button:active {
+  transform: scale(0.94);
+}
+
+.checkin-comments__compose button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}

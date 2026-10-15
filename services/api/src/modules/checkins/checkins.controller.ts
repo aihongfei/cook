@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Header, HttpCode, Param, Post, Query, Res, UseGuards } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Delete, Get, Header, HttpCode, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common'
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import type { Response } from 'express'
@@ -78,6 +78,68 @@ export class CheckInsController {
   @ApiOperation({ summary: '我的打卡统计（热力图 + 连续天数）与全家累计（F9-03）' })
   async stats(@CurrentUserId() userId: string) {
     return this.checkins.stats(userId)
+  }
+
+  /*
+   * ---- 打卡的编辑/删除与评论（用户 2026-10-15：「还要添加打开编辑和删除功能，评论也要」）----
+   *
+   * ⚠️ **路由顺序**：`comments/:commentId` 这两条必须写在 `:id` 之前吗？——不必，
+   * 因为段数不同（3 段 vs 2 段），不会互相吃掉。但 `GET :id` 与 `GET photos/:id` 都是 2 段，
+   * 而 `photos` 是**字面量**、`id` 是参数：Nest 按声明顺序匹配，`photos/:id` 声明在前
+   * （见文件末尾），所以 `GET /checkins/photos/xxx` 不会被 `:id` 抢走。**别把 `:id` 挪到它前面。**
+   */
+
+  /** 单张打卡（详情抽屉据此拿 `canEdit`/`canDelete` 与最新评论；点开时重取一次） */
+  @Get(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '一张打卡的详情（含评论与我的编辑权限）（F9-03 二期）' })
+  async one(@CurrentUserId() userId: string, @Param('id') id: string) {
+    return this.checkins.one(userId, id)
+  }
+
+  /** 改一句交代（只有上传者本人；照片不换，换图请删掉重传） */
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '改打卡的备注（只有本人）' })
+  async update(@CurrentUserId() userId: string, @Param('id') id: string, @Body() body: { note?: unknown }) {
+    return this.checkins.updateNote(userId, id, { note: body?.note })
+  }
+
+  /** 删一张打卡（含评论；照片本体留在私有桶里，见服务层说明） */
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '删掉一张打卡（只有本人；评论一起删）' })
+  async remove(@CurrentUserId() userId: string, @Param('id') id: string) {
+    return this.checkins.remove(userId, id)
+  }
+
+  /** 在打卡底下说一句（家里人谁都可以） */
+  @Post(':id/comments')
+  @HttpCode(201)
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '评论一张打卡（家庭成员都能说）（F9 二期）' })
+  async addComment(@CurrentUserId() userId: string, @Param('id') id: string, @Body() body: { body?: unknown }) {
+    return this.checkins.addComment(userId, id, { body: body?.body })
+  }
+
+  /** 改一条评论（只有写它的人） */
+  @Patch('comments/:commentId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '改一条评论（只有作者）' })
+  async updateComment(
+    @CurrentUserId() userId: string,
+    @Param('commentId') commentId: string,
+    @Body() body: { body?: unknown },
+  ) {
+    return this.checkins.updateComment(userId, commentId, { body: body?.body })
+  }
+
+  /** 删一条评论（只有写它的人） */
+  @Delete('comments/:commentId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '删一条评论（只有作者）' })
+  async removeComment(@CurrentUserId() userId: string, @Param('commentId') commentId: string) {
+    return this.checkins.removeComment(userId, commentId)
   }
 
   /**

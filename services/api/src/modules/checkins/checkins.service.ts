@@ -8,7 +8,8 @@ import {
 } from '../media/media.storage'
 import { PrismaService } from '../recipes/prisma.service'
 import {
-  assertSize, buildHeatmap, dayKey, extensionFor, parseContentType, parseDayKey, parseNote, sniffImageType, storedDayKey,
+  assertSize, buildHeatmap, canDeleteCheckIn, canDeleteComment, canEditCheckIn, canEditComment,
+  dayKey, extensionFor, parseComment, parseContentType, parseDayKey, parseNote, sniffImageType, storedDayKey,
   type HeatmapGrid,
 } from './checkins.rules'
 import { signedPhotoPath } from './checkins.signature'
@@ -20,6 +21,21 @@ import { signedPhotoPath } from './checkins.signature'
  * - 照片存**私有桶**并只给**签名短链**（见 checkins.signature.ts）；
  * - 可挂在「已做好」的一餐上（F9-08），其它状态不给挂（后端强制校验）。
  */
+
+export interface CheckInCommentView {
+  id: string
+  body: string
+  createdAt: string
+  /** 改过之后会晚于 createdAt（"这句是后来改的"要看得出来） */
+  updatedAt: string
+  userId: string
+  nickname: string
+  avatar: string
+  isMe: boolean
+  /** 我能不能改/删这一条（后端算好，前端只负责显示按钮——判定不许抄两遍） */
+  canEdit: boolean
+  canDelete: boolean
+}
 
 export interface CheckInView {
   id: string
@@ -36,6 +52,11 @@ export interface CheckInView {
   /** 挂在哪一餐上（成品照）；独立打卡为 null */
   mealKey: string | null
   mealLabel: string | null
+  /** 我能不能改/删这一张（只归上传者本人，见 rules 里的说明） */
+  canEdit: boolean
+  canDelete: boolean
+  /** 照片底下家里人说的话（时间正序：先说的在上面） */
+  comments: CheckInCommentView[]
 }
 
 export interface CheckInWall {
@@ -59,6 +80,19 @@ export interface CheckInStats {
 }
 
 const DAY_MS = 86_400_000
+
+/**
+ * 读一张打卡时要一起取回来的东西。
+ *
+ * 提出来是因为**四个地方都要用同一份**（上传回传、墙、单张、改完回传）：
+ * 少写一个 `comments` 就会出现"墙上有评论、改一次备注回传之后评论没了"这种只在某条路径上
+ * 复现的 bug。`comments` 按**时间正序**（先说的话在上面，看对话的习惯）。
+ */
+const CHECKIN_INCLUDE = {
+  user: true,
+  mealOrder: true,
+  comments: { include: { user: true }, orderBy: { createdAt: 'asc' } },
+} as const
 
 @Injectable()
 export class CheckInsService {
@@ -120,7 +154,7 @@ export class CheckInsService {
         note,
       },
       // mealOrder 也要 include：否则成品照虽然挂上了餐，返回的卡片里 mealKey 却是 null
-      include: { user: true, mealOrder: true },
+      include: CHECKIN_INCLUDE,
     })
 
     return this.view(row, userId)
@@ -140,13 +174,131 @@ export class CheckInsService {
 
     const rows = await this.prisma.checkIn.findMany({
       where: { familyId, ...(mineOnly ? { userId } : {}) },
-      include: { user: true, mealOrder: true },
+      include: CHECKIN_INCLUDE,
       orderBy: { createdAt: 'desc' },
       take: take + 1,
     })
 
     const items = rows.slice(0, take).map(row => this.view(row, userId))
     return { items, total: items.length, hasMore: rows.length > take, scope: mineOnly ? 'mine' : 'family' }
+  }
+
+  /**
+   * 单张打卡（详情抽屉、以及改/删/评论之后的回传）。
+   *
+   * **可见性与墙一字不差**：共享关闭时吃货看不到别人上传的那张——
+   * 否则"墙上没有、直接输 id 却看得到"就是一个洞（与点单详情同一条规矩）。
+   */
+  async one(userId: string, checkInId: string): Promise<CheckInView> {
+    const { familyId, role } = await this.requireMember(userId)
+    const family = await this.prisma.family.findUnique({ where: { id: familyId } })
+    if (!family) throw new NotFoundException('家庭不存在')
+
+    const row = await this.prisma.checkIn.findUnique({ where: { id: checkInId }, include: CHECKIN_INCLUDE })
+    if (!row || row.familyId !== familyId) throw new NotFoundException('这张照片不存在')
+    if (!family.shared && role === 'EATER' && row.userId !== userId) {
+      throw new NotFoundException('这张照片不存在')
+    }
+    return this.view(row, userId)
+  }
+
+  /**
+   * 改打卡（用户 2026-10-15：「还要添加打开编辑和删除功能」）。
+   *
+   * 只能改**一句交代**（`note`）——照片本身不给换：换图等于换了一条记录，
+   * 而旧照片已经在对象存储里按内容哈希存着、热力图也按它记过一天。
+   * 要"换一张"的正路是删掉重传（两步都可见、都有回执）。
+   *
+   * 谁能改：只有上传者本人（`canEditCheckIn`）。别人替他说"我今天做了什么"是不对的。
+   */
+  async updateNote(userId: string, checkInId: string, input: { note?: unknown }): Promise<CheckInView> {
+    const { familyId, role } = await this.requireMember(userId)
+    const row = await this.prisma.checkIn.findUnique({ where: { id: checkInId }, include: CHECKIN_INCLUDE })
+    if (!row || row.familyId !== familyId) throw new NotFoundException('这张照片不存在')
+    if (!canEditCheckIn(role, row.userId === userId)) throw new ForbiddenException('只能改自己上传的那一张')
+
+    const note = parseNote(input?.note)
+    const updated = await this.prisma.checkIn.update({
+      where: { id: checkInId },
+      data: { note },
+      include: CHECKIN_INCLUDE,
+    })
+    return this.view(updated, userId)
+  }
+
+  /**
+   * 删打卡（含它底下的评论——外键 Cascade，见 schema）。
+   *
+   * 只删**数据库里的记录**，**不删对象存储里的照片**：同一张图按内容哈希只存一份，
+   * 别人可能也传过同一张（幂等命名）；而"删掉这个 key"会把他们的照片一起弄坏。
+   * 存储里留着的那份是**只读、要签名+家庭成员双重校验**才取得到的（见 controller），
+   * 不会因为这条记录没了而泄漏。这是刻意的取舍，不是漏了。
+   */
+  async remove(userId: string, checkInId: string): Promise<{ id: string; removedComments: number }> {
+    const { familyId, role } = await this.requireMember(userId)
+    const row = await this.prisma.checkIn.findUnique({
+      where: { id: checkInId },
+      include: { _count: { select: { comments: true } } },
+    })
+    if (!row || row.familyId !== familyId) throw new NotFoundException('这张照片不存在')
+    if (!canDeleteCheckIn(role, row.userId === userId)) throw new ForbiddenException('只能删自己上传的那一张')
+
+    await this.prisma.checkIn.delete({ where: { id: checkInId } })
+    return { id: checkInId, removedComments: row._count.comments }
+  }
+
+  /** 在某张打卡底下说一句（家里人谁都可以——评论是"对着照片回应"，不是"改这张照片"） */
+  async addComment(userId: string, checkInId: string, input: { body?: unknown }): Promise<CheckInCommentView> {
+    const { familyId, role } = await this.requireMember(userId)
+    const family = await this.prisma.family.findUnique({ where: { id: familyId } })
+    if (!family) throw new NotFoundException('家庭不存在')
+
+    const row = await this.prisma.checkIn.findUnique({ where: { id: checkInId } })
+    if (!row || row.familyId !== familyId) throw new NotFoundException('这张照片不存在')
+    // 看都看不到的那张（共享关闭 + 别人的）也不该能评论
+    if (!family.shared && role === 'EATER' && row.userId !== userId) {
+      throw new NotFoundException('这张照片不存在')
+    }
+
+    const body = parseComment(input?.body)
+    const created = await this.prisma.checkInComment.create({
+      data: { checkInId, userId, body },
+      include: { user: true },
+    })
+    return this.commentView(created, userId)
+  }
+
+  /** 改一条评论（只有写它的人，见 `canEditComment` 的说明） */
+  async updateComment(userId: string, commentId: string, input: { body?: unknown }): Promise<CheckInCommentView> {
+    const { familyId, role } = await this.requireMember(userId)
+    const row = await this.prisma.checkInComment.findUnique({
+      where: { id: commentId },
+      include: { user: true, checkIn: true },
+    })
+    if (!row || row.checkIn.familyId !== familyId) throw new NotFoundException('这条评论不存在')
+    if (!canEditComment(role, row.userId === userId)) throw new ForbiddenException('只能改自己写的那句')
+
+    const body = parseComment(input?.body)
+    const updated = await this.prisma.checkInComment.update({
+      where: { id: commentId },
+      data: { body },
+      include: { user: true },
+    })
+    return this.commentView(updated, userId)
+  }
+
+  /** 删一条评论（只有写它的人） */
+  async removeComment(userId: string, commentId: string): Promise<{ id: string; checkInId: string }> {
+    const { familyId, role } = await this.requireMember(userId)
+    const row = await this.prisma.checkInComment.findUnique({
+      where: { id: commentId },
+      include: { checkIn: true },
+    })
+    if (!row || row.checkIn.familyId !== familyId) throw new NotFoundException('这条评论不存在')
+    if (!canDeleteComment(role, row.userId === userId)) throw new ForbiddenException('只能删自己写的那句')
+
+    await this.prisma.checkInComment.delete({ where: { id: commentId } })
+    return { id: commentId, checkInId: row.checkInId }
   }
 
   /**
@@ -205,6 +357,10 @@ export class CheckInsService {
       id: string; userId: string; note: string | null; checkDate: Date; createdAt: Date
       user: { nickname: string; avatar: string }
       mealOrder?: { mealDate: Date; meal: string } | null
+      comments?: {
+        id: string; body: string; createdAt: Date; updatedAt: Date; userId: string
+        user: { nickname: string; avatar: string }
+      }[]
     },
     viewerId: string,
   ): CheckInView {
@@ -222,6 +378,32 @@ export class CheckInsService {
       isMe: row.userId === viewerId,
       mealKey: row.mealOrder ? `${storedDayKey(row.mealOrder.mealDate)}-${row.mealOrder.meal}` : null,
       mealLabel: row.mealOrder ? (row.mealOrder.meal === 'LUNCH' ? '午餐' : '晚餐') : null,
+      // 判定按**本人**算，不看角色（rules 里写了为什么只归上传者）
+      canEdit: row.userId === viewerId,
+      canDelete: row.userId === viewerId,
+      comments: (row.comments ?? []).map(comment => this.commentView(comment, viewerId)),
+    }
+  }
+
+  /** 一条评论的对外形状（`isMe`/`canEdit`/`canDelete` 都按**看的人**算） */
+  private commentView(
+    row: {
+      id: string; body: string; createdAt: Date; updatedAt: Date; userId: string
+      user: { nickname: string; avatar: string }
+    },
+    viewerId: string,
+  ): CheckInCommentView {
+    return {
+      id: row.id,
+      body: row.body,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      userId: row.userId,
+      nickname: row.user.nickname,
+      avatar: row.user.avatar,
+      isMe: row.userId === viewerId,
+      canEdit: row.userId === viewerId,
+      canDelete: row.userId === viewerId,
     }
   }
 

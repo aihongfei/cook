@@ -13,6 +13,21 @@ import { apiClient } from './client'
  *    缩图在浏览器里做（canvas），后端只兜 8MB 上限与真实图片类型。
  */
 
+export interface CheckInComment {
+  id: string
+  body: string
+  createdAt: string
+  /** 改过之后会晚于 createdAt */
+  updatedAt: string
+  userId: string
+  nickname: string
+  avatar: string
+  isMe: boolean
+  /** 我能不能改/删这一条（后端算好，前端只负责显示按钮） */
+  canEdit: boolean
+  canDelete: boolean
+}
+
 export interface CheckIn {
   id: string
   /** 服务端的签名路径（不是可直接放进 img 的地址，见文件头说明） */
@@ -28,6 +43,11 @@ export interface CheckIn {
   /** 挂在哪一餐上（成品照）；独立打卡为 null */
   mealKey: string | null
   mealLabel: string | null
+  /** 我能不能改/删这一张（只归上传者本人） */
+  canEdit: boolean
+  canDelete: boolean
+  /** 照片底下家里人说的话（时间正序） */
+  comments: CheckInComment[]
 }
 
 export interface CheckInWall {
@@ -181,4 +201,113 @@ export async function fetchPhotoBlobUrl(signedPath: string): Promise<string> {
   // axios 会把 baseURL(/api) 与这个相对路径拼起来，所以直接传服务端给的路径
   const { data } = await apiClient.get<Blob>(signedPath, { responseType: 'blob' })
   return URL.createObjectURL(data)
+}
+
+// ---------------------------------------------------------------------------
+// 编辑、删除与评论（用户 2026-10-15：「还要添加打开编辑和删除功能，评论也要」）
+//
+// 权限判定全在后端（`canEdit` / `canDelete` 随数据一起下发），前端只负责按它显示按钮——
+// 与 `nextActions`、`canAdd` 那条口径一致：**判定不抄两遍**，抄了迟早分叉，
+// 而分叉的表现是"按钮看得见、点下去 403"。
+// ---------------------------------------------------------------------------
+
+export async function fetchCheckIn(id: string): Promise<CheckIn> {
+  const { data } = await apiClient.get<CheckIn>(`/checkins/${encodeURIComponent(id)}`)
+  return data
+}
+
+export async function updateCheckInNote(id: string, note: string): Promise<CheckIn> {
+  const { data } = await apiClient.patch<CheckIn>(`/checkins/${encodeURIComponent(id)}`, { note })
+  return data
+}
+
+export async function deleteCheckIn(id: string): Promise<{ id: string; removedComments: number }> {
+  const { data } = await apiClient.delete<{ id: string; removedComments: number }>(`/checkins/${encodeURIComponent(id)}`)
+  return data
+}
+
+export async function addCheckInComment(checkInId: string, body: string): Promise<CheckInComment> {
+  const { data } = await apiClient.post<CheckInComment>(`/checkins/${encodeURIComponent(checkInId)}/comments`, { body })
+  return data
+}
+
+export async function updateCheckInComment(commentId: string, body: string): Promise<CheckInComment> {
+  const { data } = await apiClient.patch<CheckInComment>(`/checkins/comments/${encodeURIComponent(commentId)}`, { body })
+  return data
+}
+
+export async function deleteCheckInComment(commentId: string): Promise<{ id: string; checkInId: string }> {
+  const { data } = await apiClient.delete<{ id: string; checkInId: string }>(`/checkins/comments/${encodeURIComponent(commentId)}`)
+  return data
+}
+
+/**
+ * 单张详情（点开抽屉时取一次）。
+ *
+ * `staleTime: 0`：每次点开都要拿最新的评论——墙上那张卡里的 `comments` 是列表那一趟的快照，
+ * 别人刚说的话不在里面。抽屉是"大家都在看同一个相册"的地方，看到隔夜的状态会很怪。
+ */
+export function useCheckIn(id: string | null) {
+  const token = useAuth((state) => state.token)
+  return useQuery({
+    queryKey: ['checkins', 'one', id],
+    queryFn: () => fetchCheckIn(id as string),
+    enabled: Boolean(token) && Boolean(id),
+    staleTime: 0,
+  })
+}
+
+/** 改备注：成功后就地更新详情与墙（不整墙重取，照片字节没必要重下） */
+export function useUpdateCheckInNote() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, note }: { id: string; note: string }) => updateCheckInNote(id, note),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['checkins', 'one', updated.id], updated)
+      void queryClient.invalidateQueries({ queryKey: ['checkins'], refetchType: 'active' })
+    },
+  })
+}
+
+/**
+ * 删一张打卡。
+ *
+ * **照片字节不动**（服务端也不动对象存储，见服务端注释）：删的是"这张记录在墙上"，
+ * 而不是"这张图从世界上消失"。删完让墙与统计都重取——热力图与连续天数都跟着这张走。
+ */
+export function useDeleteCheckIn() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => deleteCheckIn(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['checkins'] })
+      // 挂在餐上的成品照删掉之后，点单卡上的张数要跟着变（与上传那条对称）
+      void queryClient.invalidateQueries({ queryKey: ['orders'] })
+    },
+  })
+}
+
+/** 评论/改评论/删评论：三件事都会改"这一张底下的评论列表"，所以都作废 ['checkins'] 这一支 */
+export function useAddCheckInComment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ checkInId, body }: { checkInId: string; body: string }) => addCheckInComment(checkInId, body),
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['checkins'] }) },
+  })
+}
+
+export function useUpdateCheckInComment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ commentId, body }: { commentId: string; body: string }) => updateCheckInComment(commentId, body),
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['checkins'] }) },
+  })
+}
+
+export function useDeleteCheckInComment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (commentId: string) => deleteCheckInComment(commentId),
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['checkins'] }) },
+  })
 }

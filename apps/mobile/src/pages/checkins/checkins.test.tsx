@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
-import type { CheckIn, CheckInStats, CheckInWall } from '@/api/checkins'
+import type { CheckIn, CheckInComment, CheckInStats, CheckInWall } from '@/api/checkins'
 import type { Family } from '@/api/family'
 import { Toaster, useToasts } from '@/components/ui/toast'
 import { useAuth } from '@/stores/auth'
@@ -62,6 +62,10 @@ function entry(overrides: Partial<CheckIn> = {}): CheckIn {
     isMe: true,
     mealKey: null,
     mealLabel: null,
+    // 编辑/删除与评论（用户 2026-10-15）：默认是"我自己上传的、还没人说话"
+    canEdit: true,
+    canDelete: true,
+    comments: [],
     ...overrides,
   }
 }
@@ -71,11 +75,25 @@ function statsFixture(overrides: Partial<CheckInStats> = {}): CheckInStats {
   return { mine: empty, family: empty, mineTotal: 0, familyTotal: 0, attachableMeals: [], ...overrides }
 }
 
-function mockGet({ family, wall, stats }: { family: Family | null; wall?: CheckInWall; stats?: CheckInStats }) {
+function mockGet({ family, wall, stats, detail }: { family: Family | null; wall?: CheckInWall; stats?: CheckInStats; detail?: CheckIn | null }) {
   vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
     if (url === '/family') return Promise.resolve({ data: family } as never)
     if (url === '/checkins') return Promise.resolve({ data: wall ?? { items: [], total: 0, hasMore: false, scope: 'family' } } as never)
     if (url === '/checkins/stats') return Promise.resolve({ data: stats ?? statsFixture() } as never)
+    /*
+     * 单张详情（2026-10-15：抽屉里能看到最新评论、拿到 canEdit/canDelete）。
+     *
+     * 不给 `detail` 时就**照着墙上那张卡回一份**——组件本来就能拿卡片先画首屏
+     * （`detail.data ?? entry`），这里让"取详情"这条路也有个诚实的回应，
+     * 不然每条用例都会撞上"未预期的请求"而看不出来。
+     * 明确传 `detail: null` 才是"详情取不到"那种情形（离线、已被删）。
+     */
+    const one = /^\/checkins\/(?!photos\/|stats$|comments\/)([^/]+)$/.exec(url)
+    if (one) {
+      if (detail === null) return Promise.reject(new Error('这张照片不存在'))
+      const fallback = wall?.items.find(item => item.id === decodeURIComponent(one[1]))
+      return Promise.resolve({ data: detail ?? fallback ?? entry({ id: decodeURIComponent(one[1]) }) } as never)
+    }
     // 照片：给一个空图片 blob，让 <img> 能进入已加载状态
     if (url.startsWith('/checkins/photos/')) return Promise.resolve({ data: new Blob(['x'], { type: 'image/png' }) } as never)
     throw new Error(`未预期的请求：${url}`)
@@ -295,4 +313,222 @@ it('照片加载失败时，详情里的文字仍然看得到（不能整屏白�
   // 关键：照片挂了不该把"谁、什么时候、说了什么"一起藏掉
   // （墙上那张卡里也有一份同样的文字，所以这里按"至少有一份"断言）
   expect(screen.getAllByText('红烧排骨').length).toBeGreaterThan(0)
+})
+
+/*
+ * 编辑、删除与评论（用户 2026-10-15：「还要添加打开编辑和删除功能，评论也要」）。
+ *
+ * 这一组盯四件事：
+ * ① **入口按后端给的 `canEdit`/`canDelete` 出**（不是前端自己判"是不是我传的"）——
+ *    判定抄两遍迟早分叉，分叉的表现是"按钮看得见、点下去 403"；
+ * ② 删除是**不可逆**的，必须先确认、且把"评论一起没"说清；
+ * ③ 评论能写、能改自己的、能删自己的，**别人的没有那两个小按钮**；
+ * ④ 改过的评论要标出来（不然"他明明说的是另一句"没法解释）。
+ */
+
+function commentFixture(overrides: Partial<CheckInComment> = {}): CheckInComment {
+  return {
+    id: 'cm1',
+    body: '好香啊',
+    createdAt: '2026-10-12T10:20:00.000Z',
+    updatedAt: '2026-10-12T10:20:00.000Z',
+    userId: 'u2',
+    nickname: '小满',
+    avatar: '🐰',
+    isMe: false,
+    canEdit: false,
+    canDelete: false,
+    ...overrides,
+  }
+}
+
+/** 打开某一项的详情抽屉（等评论区那个输入框出来——标题里带一条分隔的计数，用文本匹配会碎） */
+async function openDetail(name = /打卡详情/) {
+  fireEvent.click(await screen.findByRole('button', { name }))
+  await screen.findByLabelText('写一句评论')
+}
+
+it('本人打开详情：有「改交代」与「删掉这张」两颗入口', async () => {
+  mockGet({
+    family: familyFixture(),
+    wall: { items: [entry({ id: 'ck1', isMe: true, canEdit: true, canDelete: true })], total: 1, hasMore: false, scope: 'family' },
+  })
+  renderWall()
+  await openDetail()
+
+  expect(screen.getByRole('button', { name: '改交代' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '删掉这张' })).toBeTruthy()
+})
+
+it('别人打开详情：一颗入口都没有（只能看、能评论）', async () => {
+  mockGet({
+    family: familyFixture(),
+    wall: {
+      items: [entry({ id: 'ck1', isMe: false, nickname: '妈妈', canEdit: false, canDelete: false })],
+      total: 1, hasMore: false, scope: 'family',
+    },
+  })
+  renderWall()
+  await openDetail()
+
+  expect(screen.queryByRole('button', { name: '改交代' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '删掉这张' })).toBeNull()
+  // 但评论是人人可以说的
+  expect(screen.getByLabelText('写一句评论')).toBeTruthy()
+})
+
+it('改交代：点开→改写→保存，发 PATCH 并说一句', async () => {
+  const patch = vi.spyOn(apiClient, 'patch').mockResolvedValue({
+    data: entry({ id: 'ck1', note: '改过的交代', canEdit: true, canDelete: true }),
+  } as never)
+  mockGet({
+    family: familyFixture(),
+    wall: { items: [entry({ id: 'ck1' })], total: 1, hasMore: false, scope: 'family' },
+  })
+  renderWall()
+  await openDetail()
+
+  fireEvent.click(screen.getByRole('button', { name: '改交代' }))
+  const input = screen.getByLabelText('改这句交代') as HTMLInputElement
+  fireEvent.change(input, { target: { value: '改过的交代' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+  await waitFor(() => expect(patch).toHaveBeenCalledWith('/checkins/ck1', { note: '改过的交代' }))
+  await waitFor(() => expect(useToasts.getState().items.some(item => item.text === '交代改好了')).toBe(true))
+})
+
+it('删掉这张：先确认（把"评论一起没"说清），确认后才发 DELETE', async () => {
+  const remove = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: { id: 'ck1', removedComments: 2 } } as never)
+  mockGet({
+    family: familyFixture(),
+    wall: {
+      items: [entry({
+        id: 'ck1',
+        comments: [commentFixture({ id: 'c1' }), commentFixture({ id: 'c2', body: '我也想吃' })],
+      })],
+      total: 1, hasMore: false, scope: 'family',
+    },
+  })
+  renderWall()
+  await openDetail()
+
+  fireEvent.click(screen.getByRole('button', { name: '删掉这张' }))
+  // 没确认之前绝不能发请求：这一步不可逆
+  expect(remove).not.toHaveBeenCalled()
+  const dialog = screen.getByRole('dialog')
+  expect(dialog.textContent).toContain('2 条评论也会一起没')
+
+  fireEvent.click(within(dialog).getByRole('button', { name: '删掉' }))
+  await waitFor(() => expect(remove).toHaveBeenCalledWith('/checkins/ck1'))
+  await waitFor(() => expect(useToasts.getState().items.some(item => item.text === '删掉了，底下的评论也一起删了')).toBe(true))
+})
+
+it('评论流：时间正序、自己写的才带「改/删」、改过的标出来', async () => {
+  mockGet({
+    family: familyFixture(),
+    wall: {
+      items: [entry({
+        id: 'ck1',
+        comments: [
+          commentFixture({ id: 'c1', body: '好香啊', nickname: '小满', canEdit: false, canDelete: false }),
+          commentFixture({
+            id: 'c2', body: '谢谢小满', nickname: '妈妈', avatar: '🍳', isMe: true, canEdit: true, canDelete: true,
+            createdAt: '2026-10-12T11:00:00.000Z', updatedAt: '2026-10-12T11:30:00.000Z',
+          }),
+        ],
+      })],
+      total: 1, hasMore: false, scope: 'family',
+    },
+  })
+  renderWall()
+  await openDetail()
+
+  const bodies = [...document.querySelectorAll('.checkin-comment__body')].map(node => node.textContent)
+  expect(bodies[0]).toContain('好香啊')
+  expect(bodies[1]).toContain('谢谢小满')
+
+  // 只有自己那条有「改 / 删」
+  const items = [...document.querySelectorAll('.checkin-comment')]
+  expect(items[0].querySelector('.checkin-comment__actions')).toBeNull()
+  expect(items[1].querySelector('.checkin-comment__actions')).not.toBeNull()
+  // 改过的要说出来
+  expect(items[1].querySelector('.checkin-comment__edited')?.textContent).toBe('（改过）')
+  expect(items[0].querySelector('.checkin-comment__edited')).toBeNull()
+})
+
+it('发一条评论：POST 到这一张底下、正文去空白，发完清空输入框', async () => {
+  const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: commentFixture({ isMe: true, canEdit: true, canDelete: true }) } as never)
+  mockGet({
+    family: familyFixture(),
+    wall: { items: [entry({ id: 'ck1' })], total: 1, hasMore: false, scope: 'family' },
+  })
+  renderWall()
+  await openDetail()
+
+  const input = screen.getByLabelText('写一句评论') as HTMLInputElement
+  fireEvent.change(input, { target: { value: '  真好看  ' } })
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/checkins/ck1/comments', { body: '真好看' }))
+  await waitFor(() => expect((screen.getByLabelText('写一句评论') as HTMLInputElement).value).toBe(''))
+})
+
+it('空评论发不出去（发送键点不动），不用等后端回一个 400', async () => {
+  const post = vi.spyOn(apiClient, 'post')
+  mockGet({
+    family: familyFixture(),
+    wall: { items: [entry({ id: 'ck1' })], total: 1, hasMore: false, scope: 'family' },
+  })
+  renderWall()
+  await openDetail()
+
+  expect((screen.getByRole('button', { name: '发送' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.change(screen.getByLabelText('写一句评论'), { target: { value: '   ' } })
+  expect((screen.getByRole('button', { name: '发送' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('改自己的评论：点「改」→ 输入框变成那句原文 → 保存发 PATCH', async () => {
+  const patch = vi.spyOn(apiClient, 'patch').mockResolvedValue({ data: commentFixture({ isMe: true, canEdit: true, canDelete: true }) } as never)
+  mockGet({
+    family: familyFixture(),
+    wall: {
+      items: [entry({
+        id: 'ck1',
+        comments: [commentFixture({ id: 'c2', body: '谢谢小满', isMe: true, canEdit: true, canDelete: true })],
+      })],
+      total: 1, hasMore: false, scope: 'family',
+    },
+  })
+  renderWall()
+  await openDetail()
+
+  fireEvent.click(screen.getByRole('button', { name: '改' }))
+  const input = screen.getByLabelText('改这句评论') as HTMLInputElement
+  expect(input.value).toBe('谢谢小满')
+  fireEvent.change(input, { target: { value: '谢谢，明天还想吃' } })
+  // 编辑态下的保存键（与"发送"是同一颗，文案变了）
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+  await waitFor(() => expect(patch).toHaveBeenCalledWith('/checkins/comments/c2', { body: '谢谢，明天还想吃' }))
+})
+
+it('删自己的评论：点「删」直接发（可再写、不必弹框确认）', async () => {
+  const remove = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: { id: 'c2', checkInId: 'ck1' } } as never)
+  mockGet({
+    family: familyFixture(),
+    wall: {
+      items: [entry({
+        id: 'ck1',
+        comments: [commentFixture({ id: 'c2', body: '谢谢小满', isMe: true, canEdit: true, canDelete: true })],
+      })],
+      total: 1, hasMore: false, scope: 'family',
+    },
+  })
+  renderWall()
+  await openDetail()
+
+  fireEvent.click(screen.getByRole('button', { name: '删' }))
+  await waitFor(() => expect(remove).toHaveBeenCalledWith('/checkins/comments/c2'))
+  await waitFor(() => expect(useToasts.getState().items.some(item => item.text === '删掉了')).toBe(true))
 })

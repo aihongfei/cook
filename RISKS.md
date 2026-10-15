@@ -864,3 +864,17 @@ F16-10 让 AI 第一次**真的写库**，于是多出一类全新的假证据�
 - **还有两条设计口径**：**到头不循环**（这是翻页，不是转盘）；**落位收尾不能靠 `transitionend`**（动效可能压根不跑：系统关了动效、WebView 节流）——要认定时器，且终态（谁在屏上、画在哪）不能依赖动画跑没跑。
 - **怎么测**：判定写成纯函数单测（`lib/tab-swipe.rules.test.ts` **17 条**，把上面每一条各钉一遍）；接线用 `SwipePager.test.tsx`（**跟手时轨道像素位移 / 拖动中两页同时在地 / 够远翻页 / 不够弹回 / 到头不循环 / 纵向不动 / 拖动后那次 click 被吞**）与 `FilterTabs.test.tsx`；长按的取消用 `long-press.test.tsx`（滑出卡片后继续移动要取消、只有 touch 事件时也要取消）；真机上用 **CDP 的真触摸事件**划（`Input.dispatchTouchEvent`，见 `RUNBOOK.md` R-081）——它走浏览器输入流水线，`touch-action` 与会话仲裁都参与，比在 JS 里造 PointerEvent 更接近手指。
 - **相关**：`apps/mobile/src/lib/tab-swipe.rules.ts`、`apps/mobile/src/components/ui/SwipeArea.tsx`、`Chips.tsx`、`FilterTabs.tsx`、`DECISIONS.md` **D-088**、`RUNBOOK.md` **R-081**、`RISKS.md` R-67（同一族：手势/事件"什么时候不该算"）。
+
+## R-70 `prisma migrate dev` 会为了**残破的记账行**要求清库：别答应，走 `migrate diff` + `deploy` 🟢 已定规矩（2026-10-15 加 `CheckInComment` 表时定下）
+
+- **现象**：`prisma migrate dev --name checkin_comments` 报数据库结构"漂移/需要重置"，要求执行会**清空整个开发库**的重置。开发库里有 92 张打卡、850 餐点单、616 道菜谱——答应了就是一次不可逆的数据销毁。
+- **根因不是数据库坏了**，而是 `_prisma_migrations` 里有**两条早已失败、没人清理的记账行**（`applied_steps_count=0`、`rolled_back_at` 非空）。数据库本身是好的：**所有已成功迁移的 `checksum` 与磁盘上的迁移文件逐一对得上**，`prisma migrate status` 也说 up to date。
+- **规矩**：
+  1. 见到"要求重置"**先停下**——不要 Proceed。先跑 `prisma migrate status`，再直接把 `_prisma_migrations` 里 `applied_steps_count = 0` 的行查出来看；
+  2. 确认是**记账行**问题（结构没问题、校验和都对得上）之后，**手写 SQL 应用**，别走 `migrate dev`：
+     `prisma migrate diff --from-schema-datasource --to-schema-datamodel --script` → 存成正式的迁移文件 → `prisma migrate deploy`；
+  3. 迁移文件头写清**为什么手写**（否则下一个人会以为是偷懒，回头"补一次 `migrate dev`"）；
+  4. 应用**之后立刻核对数据条数**（迁移前后各查一次），并跑一遍那个模块的接口验收脚本。
+- **判别要点**：`migrate dev` 是为了"开发时生成迁移 + 保持影子库一致"，它要重置时**先问一句"这是记账问题还是真漂移"**。真漂移（磁盘上的迁移与库结构不一致）才该谈重置，而且那时也该先 `migrate diff` 看清差在哪。
+- **怎么测**：无自动化（这是流程题，不是代码题）——证据是迁移前后 `CheckIn/MealOrder/Recipe` 三张表的条数不变 + 打卡接口验收 67/67（见 `RUNBOOK.md` R-082）。
+- **相关**：`RUNBOOK.md` **R-082**、`DECISIONS.md` **D-089 六**、`services/api/prisma/migrations/20261015140000_checkin_comments/`、`RISKS.md` R-10（同一族：数据/结构与"我以为的状态"不一致）。

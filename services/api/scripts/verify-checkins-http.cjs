@@ -468,6 +468,158 @@ async function main() {
 
   await callWithRetry('PATCH', '/family', { token: mama.token, body: { shared: true } })
 
+  // ---------- 编辑 / 删除 / 评论（用户 2026-10-15：「还要添加打开编辑和删除功能，评论也要」）----------
+  // 这一段的照片都是这一轮新建的，结束时会连着记录一起删干净（不留测试垃圾）
+
+  // 第一次上传的那张（妈妈的）拿来当主角
+  const detail = await callWithRetry('GET', `/checkins/${encodeURIComponent(firstId)}`, { token: mama.token })
+  check(
+    '单张详情：本人看得到 canEdit/canDelete，且评论一开始是空的',
+    detail.status === 200
+      && detail.body?.canEdit === true && detail.body?.canDelete === true
+      && Array.isArray(detail.body?.comments) && detail.body.comments.length === 0,
+    `${detail.status} canEdit=${detail.body?.canEdit} comments=${detail.body?.comments?.length}`,
+  )
+  const sonSees = await callWithRetry('GET', `/checkins/${encodeURIComponent(firstId)}`, { token: son.token })
+  check(
+    '单张详情：家里别人看得到，但 canEdit/canDelete 都是 false（只能看、不能改）',
+    sonSees.status === 200 && sonSees.body?.canEdit === false && sonSees.body?.canDelete === false,
+    `${sonSees.status} canEdit=${sonSees.body?.canEdit} canDelete=${sonSees.body?.canDelete}`,
+  )
+  const detailNoAuth = await call('GET', `/checkins/${encodeURIComponent(firstId)}`)
+  check('未登录看单张详情 → 401', detailNoAuth.status === 401, `${detailNoAuth.status}`)
+
+  // 改备注：本人可以，别人不行
+  const renamed = await callWithRetry('PATCH', `/checkins/${encodeURIComponent(firstId)}`, {
+    token: mama.token,
+    body: { note: '  改过的交代  ' },
+  })
+  check(
+    '本人改备注 → 200，且首尾空白被去掉、评论区跟着回来',
+    renamed.status === 200 && renamed.body?.note === '改过的交代' && Array.isArray(renamed.body?.comments),
+    `${renamed.status} note=${JSON.stringify(renamed.body?.note)}`,
+  )
+  const renameBySon = await callWithRetry('PATCH', `/checkins/${encodeURIComponent(firstId)}`, {
+    token: son.token,
+    body: { note: '我替你改' },
+  })
+  check(
+    '别人改我的打卡 → 403（照片底下署的是我的名字，不能替他说话）',
+    renameBySon.status === 403,
+    `${renameBySon.status} ${renameBySon.body?.message ?? ''}`,
+  )
+  const clearNote = await callWithRetry('PATCH', `/checkins/${encodeURIComponent(firstId)}`, { token: mama.token, body: {} })
+  check('备注可以清空（不传 note 就是没有备注，不是"改不了"）', clearNote.status === 200 && clearNote.body?.note === null, `${clearNote.status} note=${clearNote.body?.note}`)
+
+  // 评论：谁都能说
+  const comment1 = await callWithRetry('POST', `/checkins/${encodeURIComponent(firstId)}/comments`, {
+    token: son.token,
+    body: { body: '  好香啊  ' },
+  })
+  check(
+    '家里人都能评论 → 201，带去空白后的正文与作者标记',
+    comment1.status === 201 && comment1.body?.body === '好香啊' && comment1.body?.isMe === true && comment1.body?.nickname === '小满',
+    `${comment1.status} body=${JSON.stringify(comment1.body?.body)}`,
+  )
+  const comment2 = await callWithRetry('POST', `/checkins/${encodeURIComponent(firstId)}/comments`, {
+    token: mama.token,
+    body: { body: '谢谢小满' },
+  })
+  check('照片作者也能评论自己的打卡', comment2.status === 201 && comment2.body?.isMe === true, `${comment2.status}`)
+
+  const emptyComment = await callWithRetry('POST', `/checkins/${encodeURIComponent(firstId)}/comments`, {
+    token: son.token,
+    body: { body: '   ' },
+  })
+  check('空白评论 → 400（多半是误触发送，不该留下一条空记录）', emptyComment.status === 400, `${emptyComment.status}`)
+  const longComment = await callWithRetry('POST', `/checkins/${encodeURIComponent(firstId)}/comments`, {
+    token: son.token,
+    body: { body: 'a'.repeat(201) },
+  })
+  check('超长评论 → 400 且说明上限（不静默截断）', longComment.status === 400 && String(longComment.body?.message ?? '').includes('200'), `${longComment.status} ${longComment.body?.message ?? ''}`)
+
+  const withComments = await callWithRetry('GET', `/checkins/${encodeURIComponent(firstId)}`, { token: son.token })
+  check(
+    '评论按时间正序给（先说的在上面），且每条都告诉我能不能改',
+    withComments.body?.comments?.length === 2
+      && withComments.body.comments[0].body === '好香啊'
+      && withComments.body.comments[1].body === '谢谢小满'
+      && withComments.body.comments[0].canEdit === true      // 小满看自己的那条
+      && withComments.body.comments[1].canEdit === false,    // 妈妈写的那条他改不了
+    JSON.stringify((withComments.body?.comments ?? []).map(c => `${c.nickname}:${c.body}:${c.canEdit}`)),
+  )
+
+  // 改评论：只有作者
+  const editComment = await callWithRetry('PATCH', `/checkins/comments/${encodeURIComponent(comment1.body.id)}`, {
+    token: son.token,
+    body: { body: '好香啊，我也想吃' },
+  })
+  check(
+    '作者改自己的评论 → 200，且 updatedAt 晚于 createdAt（改过看得出来）',
+    editComment.status === 200
+      && editComment.body?.body === '好香啊，我也想吃'
+      && new Date(editComment.body.updatedAt).getTime() >= new Date(editComment.body.createdAt).getTime(),
+    `${editComment.status} ${editComment.body?.body}`,
+  )
+  const editOtherComment = await callWithRetry('PATCH', `/checkins/comments/${encodeURIComponent(comment1.body.id)}`, {
+    token: mama.token,
+    body: { body: '改成我说的' },
+  })
+  check(
+    '改别人写的评论 → 403（连照片作者也不行：署名人不能被他改）',
+    editOtherComment.status === 403,
+    `${editOtherComment.status}`,
+  )
+
+  // 删评论：只有作者；删了不影响别人那条
+  const deleteOtherComment = await callWithRetry('DELETE', `/checkins/comments/${encodeURIComponent(comment1.body.id)}`, { token: mama.token })
+  check('删别人写的评论 → 403', deleteOtherComment.status === 403, `${deleteOtherComment.status}`)
+  const deleteOwnComment = await callWithRetry('DELETE', `/checkins/comments/${encodeURIComponent(comment1.body.id)}`, { token: son.token })
+  check('作者删自己的评论 → 200', deleteOwnComment.status === 200 && deleteOwnComment.body?.id === comment1.body.id, `${deleteOwnComment.status}`)
+  const goneComment = await callWithRetry('DELETE', `/checkins/comments/${encodeURIComponent(comment1.body.id)}`, { token: son.token })
+  check('再删同一条 → 404', goneComment.status === 404, `${goneComment.status}`)
+  const afterCommentDelete = await callWithRetry('GET', `/checkins/${encodeURIComponent(firstId)}`, { token: mama.token })
+  check(
+    '删掉一条之后，另一条还在（不是把整片评论清掉）',
+    afterCommentDelete.body?.comments?.length === 1 && afterCommentDelete.body.comments[0].body === '谢谢小满',
+    JSON.stringify((afterCommentDelete.body?.comments ?? []).map(c => c.body)),
+  )
+
+  // 评论不存在 / 乱 id
+  const commentMissing = await callWithRetry('PATCH', '/checkins/comments/no-such-comment', { token: son.token, body: { body: 'x' } })
+  check('改一条不存在的评论 → 404', commentMissing.status === 404, `${commentMissing.status}`)
+
+  // 删打卡：别人不行，本人可以，评论跟着没
+  const commentForCascade = await callWithRetry('POST', `/checkins/${encodeURIComponent(firstId)}/comments`, {
+    token: son.token,
+    body: { body: '删之前留一句' },
+  })
+  const deleteBySon = await callWithRetry('DELETE', `/checkins/${encodeURIComponent(firstId)}`, { token: son.token })
+  check(
+    '别人删我的打卡 → 403',
+    deleteBySon.status === 403,
+    `${deleteBySon.status} ${deleteBySon.body?.message ?? ''}`,
+  )
+  const deleted = await callWithRetry('DELETE', `/checkins/${encodeURIComponent(firstId)}`, { token: mama.token })
+  check(
+    '本人删打卡 → 200，并告诉我连带删了几条评论',
+    deleted.status === 200 && deleted.body?.id === firstId && deleted.body?.removedComments === 2,
+    `${deleted.status} removedComments=${deleted.body?.removedComments}`,
+  )
+  const goneCheckIn = await callWithRetry('GET', `/checkins/${encodeURIComponent(firstId)}`, { token: mama.token })
+  check('删掉之后再取那张 → 404', goneCheckIn.status === 404, `${goneCheckIn.status}`)
+  const orphanComment = await callWithRetry('PATCH', `/checkins/comments/${encodeURIComponent(commentForCascade.body?.id ?? 'x')}`, {
+    token: son.token,
+    body: { body: '还想改' },
+  })
+  check('打卡删了之后，它底下的评论也一起没了（不留看不见的孤儿行）', orphanComment.status === 404, `${orphanComment.status}`)
+  const wallAfterDelete = await callWithRetry('GET', '/checkins', { token: mama.token })
+  check(
+    '墙上也少了一张',
+    !(wallAfterDelete.body?.items ?? []).some(item => item.id === firstId),
+    `items=${wallAfterDelete.body?.items?.length}`,
+  )
+
   for (const item of results) {
     console.log(`${item.ok ? '✅' : '❌'} ${item.name}${item.detail ? `  — ${item.detail}` : ''}`)
   }
