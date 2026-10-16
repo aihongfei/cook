@@ -6437,3 +6437,68 @@ adb shell input motionevent UP 400 800
 `apps/mobile/android/app/src/main/AndroidManifest.xml`（那个开关）、
 `apps/mobile/capacitor.config.ts`（`disableBackButtonHandler`）、
 `apps/mobile/src/api/back-gesture-native.ts`、`apps/mobile/src/lib/back-gesture.ts`。
+
+## R-100 验"发现页补内容"这一族（时令精选 / 家庭月报 / 抽屉场合胶囊）：四层证据（2026-10-16，配套 D-110 / R-90）
+
+这一族的特点是**每个模块都有一个印在界面上的数字**（「38 道」「74 道」「一起吃了 3 顿」），
+而那些数字全都来自"某次筛选的结果"。所以验证的重点不是"画出来了没有"，
+而是**那个数字与点进去/算出来之后的东西是不是同一个数**。
+
+### 第一层：接口本身的数（真请求，别用旧容器）
+
+⚠️ 老坑（R-097 那条同一个）：`docker ps` 里那个 `cook-api-1` 跑的是旧镜像，
+新写的路由在它上面是 404。**另起一个跑新代码的实例**：
+
+```bash
+cd services/api && PORT=3100 pnpm exec nest start        # 等 "successfully started"
+curl -s http://127.0.0.1:3100/api/health                  # 200 才算起来
+```
+
+然后逐个查（注册一个临时账号 + 建家庭，见 `/tmp/verify-d108-final.sh` 那种骨架）：
+
+| 要验的事 | 怎么问 | 期望 |
+| --- | --- | --- |
+| 单标签 vs 并集 vs 搜索 | `/recipes?tag=秋季` / `tag=秋季,秋季菜谱,秋季养生` / `q=秋季` | 35 / **38** / 38 |
+| 四季并集 | 四个季节各查一次 | 春 21 / 夏 **81** / 秋 38 / 冬 50 |
+| 时令接口的数与上面一致 | `/discover/seasonal` 的 `count` | 必须等于当季那条并集的结果 |
+| 场合词的道数是真的 | `/discover/occasions` 的 `count` vs `tag=<那个词>` | 74 / 46 / 33 / 33 逐个对上 |
+| 场合真的生效 | `decide?occasion=宴请` 连挑 8 次 | 8 道不同菜，**每道都真带「宴请」标签** |
+| 不认识的场合 | `decide?occasion=早餐` | **400**（不静默当没给） |
+| 月报"不足 3 顿不画" | 全新家庭的 `/discover/report` | `report: null`（不是一堆 0） |
+| 月报算得对 | 造 3 顿、把一顿推到 DONE | `meals=3 done=1 kinds=1`，`line` 里那句只写真事 |
+| 翻牌子已下线 | `GET /discover/flip` | **404** |
+
+### 第二层：390×844 真浏览器（尺寸 + 那个数字）
+
+```js
+// 关键就是这几行：把三块的高度与那一行的 href 一起取出来
+const box = (s) => { const e = document.querySelector(s); const r = e?.getBoundingClientRect(); return r && { h: Math.round(r.height) } }
+({ season: box('.season'), report: box('.report'),
+   href: document.querySelector('.season__more')?.getAttribute('href'),
+   docW: document.documentElement.scrollWidth })   // docW 必须等于 390
+```
+
+- 时令 **154px**（预览里 157，差的是真实行高）、月报 **152px**、工具行 41px；
+- `docW` 必须是 390——大于它就是有东西把页面撑宽了
+  （`.season__pic` 忘了 `display:block` 时就是这个症状，见下一条）；
+- 然后**点那一行走一遍**：菜谱小书报的「共 N 道」必须等于发现页写的 N。
+
+### 第三层：两个容易误判点（都不是 bug，但看着像）
+
+1. **`.season__pic` 必须是 `display:block`**：那层是 `<span>`，行内元素吃不上
+   width/height，里面的 `<img>` 会按原始尺寸铺开——表现是这一块从 154 涨到 230、
+   图片也糊。预览里踩过一次，CSS 里留了 ⚠️。
+2. **注入 localStorage 登录这条路不可靠**：应用自己的状态会把写进去的值覆盖掉
+   （`version` 对不上时直接丢弃 → 跳回 `/login`）。要验页面就**用真实表单登录**
+   （`getByRole('textbox', {name:'账号'})` 那套），别图快。
+
+### 第四层：新家庭那一档（最容易被忽略的一层）
+
+用真实接口注册一个**新账号、建家庭、什么都不做**，再打开发现页：
+
+- 「家人最爱」只有空态（不塞推荐填坑）；
+- **月报整块不在 DOM 里**（`document.querySelector('.report') === null`）——
+  注意是"不在"，不是"画了一堆 0"；
+- 「时令精选」照常在（它不依赖历史）。
+
+这一层必须单独跑：有历史的账号永远看不到这条分支，而它正是新用户的第一眼。

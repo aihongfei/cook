@@ -36,6 +36,16 @@ interface TodaySession {
   /** 这一场**已经问过了**（见文件头：StrictMode 会重挂载，标记不能只放组件里） */
   asked: boolean
 
+  /**
+   * 「换个场合挑」选中的那个场合（标签名，如 `宴请`；`null` = 没选）。
+   *
+   * **也在 store 里**，理由与 `result` 一样：这一行是抽屉的一部分，而抽屉里的菜名
+   * 点得进详情——用户点了「来客人了」、挑出一道菜、点菜名去看做法、再返回时，
+   * 那一行必须还是选中的那一个（否则他会以为"我点的场合没了"，
+   * 与用户 2026-10-13 在这个抽屉上定的"保持原样"是同一条要求）。
+   */
+  occasion: string | null
+
   // ---------- 下半：想提要求时问 AI（M16 子集） ----------
 
   /** 用户在输入框里打过的字（返回后还在，不必重打） */
@@ -63,6 +73,7 @@ interface TodaySession {
   setResult: (result: DecideResult) => void
   pushSeen: (recipeId: string) => void
   setDecideAdded: (added: boolean) => void
+  setOccasion: (occasion: string | null) => void
   /** 请求失败：把 result 清回 `null`，但**不关抽屉、也不清 seen**——点「再试一次」时还要用 */
   reset: () => void
 
@@ -78,11 +89,12 @@ interface TodaySession {
 
 /** 一场会话开始时（以及结束时）的所有字段。**不写 `as const`**：
  * 那会让数组变成 `readonly []`，与上面的接口对不上（TS2322）。 */
-const EMPTY: Omit<TodaySession, 'open' | 'start' | 'close' | 'markAsked' | 'setResult' | 'pushSeen' | 'setDecideAdded' | 'reset' | 'markAiAsked' | 'setAiOpen' | 'setHint' | 'setPicks' | 'markAiAdded' | 'clearAiAdded' | 'setQuickHints'> = {
+const EMPTY: Omit<TodaySession, 'open' | 'start' | 'close' | 'markAsked' | 'setResult' | 'pushSeen' | 'setDecideAdded' | 'setOccasion' | 'reset' | 'markAiAsked' | 'setAiOpen' | 'setHint' | 'setPicks' | 'markAiAdded' | 'clearAiAdded' | 'setQuickHints'> = {
   result: null,
   seen: [],
   decideAdded: false,
   asked: false,
+  occasion: null,
   hint: '',
   picks: null,
   aiAdded: [],
@@ -102,6 +114,7 @@ export const useTodaySession = create<TodaySession>()((set) => ({
     state.seen.includes(recipeId) ? state : { seen: [...state.seen, recipeId] }
   )),
   setDecideAdded: (decideAdded) => set({ decideAdded }),
+  setOccasion: (occasion) => set({ occasion }),
   reset: () => set({ result: null }),
   markAiAsked: () => set({ aiAsked: true }),
   setAiOpen: (aiOpen) => set({ aiOpen }),

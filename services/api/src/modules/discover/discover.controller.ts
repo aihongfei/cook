@@ -61,13 +61,57 @@ export class DiscoverController {
    *
    * `exclude` 是「换一道」用的：把这一轮已经看过的 id 报回来（逗号分隔），
    * 于是"再换"不会换到同一道。校验与上限在 `decide.rules` 的 `parseExclude`。
+   *
+   * `occasion` 是抽屉里那行「换个场合挑」（2026-10-16 定）：**可选**，默认不问场合。
+   * 给的是**标签名**（`快手菜`/`下饭菜`/`宴请`/`儿童`），不是界面上那三个字
+   * ——展示名会改，而 URL 上这个值一旦发出去就有人保存。可用的值见 `/discover/occasions`。
    */
   @Get('decide')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '帮我决定：只给一道、且是此刻最该做的那道（F5-05）' })
   @ApiQuery({ name: 'exclude', required: false, description: '这一轮已经看过的菜谱 id，逗号分隔（「换一道」用）' })
-  async decide(@CurrentUserId() userId: string, @Query('exclude') exclude?: string) {
-    return this.discover.decide(userId, exclude)
+  @ApiQuery({ name: 'occasion', required: false, description: '换个场合挑：标签名，取值见 /discover/occasions' })
+  async decide(
+    @CurrentUserId() userId: string,
+    @Query('exclude') exclude?: string,
+    @Query('occasion') occasion?: string,
+  ) {
+    return this.discover.decide(userId, exclude, occasion)
+  }
+
+  /**
+   * 「时令精选」（发现页那一块，2026-10-16 新增）：这个季节有什么。
+   *
+   * **季节由后端按月份算**，不接受参数（见 service 里的说明：能传就会有人做出"十二月看夏菜"）。
+   */
+  @Get('seasonal')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '时令精选：按当月季节取应季菜（D-108）' })
+  async seasonal(@CurrentUserId() userId: string) {
+    return this.discover.seasonal(userId)
+  }
+
+  /**
+   * 「换个场合挑」的那几个词与它们的道数（发现页抽屉里的那一行胶囊）。
+   *
+   * 不需要登录：它读的是公共菜谱库的标签统计，与"谁在看"无关。
+   */
+  @Get('occasions')
+  @ApiOperation({ summary: '换个场合挑：四个场合词与各自的道数（D-108）' })
+  async occasions() {
+    return this.discover.occasions()
+  }
+
+  /**
+   * 「家庭月报」（发现页那一块，2026-10-16 新增）：全家这个月过得怎么样。
+   *
+   * **不足 3 顿返回 `report: null`**（不是错误、也不是一堆 0）：界面据此整块不画。
+   */
+  @Get('report')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '家庭月报：本月全家的四个数（D-108）' })
+  async report(@CurrentUserId() userId: string) {
+    return this.discover.monthlyReport(userId)
   }
 
   /**

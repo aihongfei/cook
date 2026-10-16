@@ -178,6 +178,31 @@ describe('recipe browsing states', () => {
     expect(get.mock.calls.filter(([, config]) => requestParams(config).page === 2)).toHaveLength(3)
   })
 
+  /*
+   * `?tag=` 是发现页「时令精选」点进来的落点（2026-10-16，见 D-108）。
+   * 这一条守住三件事，每一件都对应一个真实会犯的错：
+   * ① 请求带的是 `tag` 而**不是 `q`**（用搜索兜会多出名字里带"秋"的 3 道，数字对不上）；
+   * ② 标签**不持久化**到本地存储（品类/菜系才是"我平时爱看什么"，标签是一次性入口
+   *    ——进了时令精选，过两天打开菜谱小书还只看见秋菜是坏的）；
+   * ③ 生效中要有一条**可关的**说明：不说的话用户只看到"共 2 道"，会以为菜谱库没了。
+   */
+  it('`?tag=` 时按标签精确筛、不落到本地存储，并给一条可关的说明', async () => {
+    const get = mockList()
+    mount('/recipes?tag=' + encodeURIComponent('秋季,秋季菜谱'))
+    await screen.findByText('番茄炒蛋')
+
+    const tagCall = get.mock.calls.find(([, config]) => requestParams(config).tag)
+    expect(tagCall, '请求里没有 tag').toBeTruthy()
+    expect(requestParams(tagCall![1]).tag).toBe('秋季,秋季菜谱')
+    expect(requestParams(tagCall![1]).q).toBeUndefined()
+    expect(localStorage.getItem('yushan-recipe-filters')).not.toContain('秋季')
+
+    // 那一枚胶囊写着标签名；去掉之后 URL 与请求都不再带它
+    fireEvent.click(screen.getByRole('button', { name: /去掉标签筛选：秋季、秋季菜谱/ }))
+    await waitFor(() => expect(screen.getByTestId('location').textContent).not.toContain('tag='))
+    await waitFor(() => expect(get.mock.calls.some(([, config]) => !requestParams(config).tag && requestParams(config).page === 1)).toBe(true))
+  })
+
   it('renders actual detail fields and source, and leaves an absent video as text', async () => {
     vi.spyOn(apiClient, 'get').mockResolvedValue({ data: {
       ...dish, aliases: ['木须番茄'], spiciness: 0,

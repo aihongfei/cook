@@ -73,6 +73,13 @@ export interface RecipeSearch {
   q?: string
   category?: string
   cuisine?: string
+  /**
+   * 按**标签精确筛**（可多个＝命中其一）。发现页「时令精选」点进来时用它
+   * （`tag=秋季,秋季菜谱,秋季养生`）——**不能用 `q` 代替**：那一个是"文本里出现过这两个字"
+   * （菜名、食材名都算），而这一个才是"打了这个标签"。两者今天恰好一致，但判据不同，
+   * 而界面上写着"38 道"——数字对不上就没人信了（详见后端 recipe.query 的 tagList）。
+   */
+  tag?: string
   /** 只看自己家上传的（「我的菜谱」用）；未登录/没家庭时后端返回空列表 */
   mine?: boolean
 }
@@ -87,6 +94,7 @@ export async function fetchRecipes(
       q: search.q?.trim() || undefined,
       category: search.category || undefined,
       cuisine: search.cuisine || undefined,
+      tag: search.tag || undefined,
       // 后端只认 '1'：传 false/0 会被当成"多了一个不认识的参数"而报 400，所以不筛时干脆不带
       mine: search.mine ? 1 : undefined,
       page,
@@ -144,13 +152,15 @@ export function useRecipeFilters() {
 
 export function useRecipes(search: RecipeSearch) {
   return useInfiniteQuery({
-    // `mine` 要进 key：不然「我的菜谱」与菜谱小书共用同一份缓存，两边会互相看见对方的条目
+    // `mine` 与 `tag` 要进 key：不然「我的菜谱」/「时令精选」与菜谱小书共用同一份缓存，
+    // 两边会互相看见对方的条目
     queryKey: [
       'recipes',
       'list',
       search.q || '',
       search.category || '',
       search.cuisine || '',
+      search.tag || '',
       search.mine ? 'mine' : '',
     ],
     queryFn: ({ pageParam, signal }) => fetchRecipes(search, pageParam, signal),

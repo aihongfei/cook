@@ -52,11 +52,26 @@ export class BuiltinRecipeProvider implements RecipeProvider {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(query: RecipeQuery): Promise<RecipePage> {
+    /*
+     * 三个筛选条件都收进 `and` 数组里，**不直接铺在 where 上**：
+     * `visibility()` 自己带一个 `OR`（全局库 + 自己家的 + 我自己的），而标签命中也是 `OR`
+     * ——两个 `OR` 同层的话后写的那个会把前面整个覆盖掉，等于**悄悄放开了可见性**。
+     * 这种错不会报错，只会让不该看见的菜谱出现在列表里，所以这里从一开始就分开。
+     */
+    const and: Prisma.RecipeWhereInput[] = []
+    if (query.q) and.push({ AND: query.q.toLowerCase().split(/\s+/).map(term => ({ searchText: { contains: term } })) })
+    /*
+     * 标签：`array_contains` 是 JSON 数组的**元素精确相等**（不是子串），
+     * 多个标签之间是 OR＝命中其中一个即可（见 parseRecipeQuery 的 tagList）。
+     * `tags` 列可空：库里 16 道自建菜没有标签，array_contains 对它们一律不命中，
+     * 这正是"按标签筛"该有的样子。
+     */
+    if (query.tags && query.tags.length > 0) and.push({ OR: query.tags.map(tag => ({ tags: { array_contains: tag } })) })
     const where: Prisma.RecipeWhereInput = {
       ...visibility(query),
       ...(query.category ? { category: query.category } : {}),
       ...(query.cuisine ? { cuisine: query.cuisine } : {}),
-      ...(query.q ? { AND: query.q.toLowerCase().split(/\s+/).map(term => ({ searchText: { contains: term } })) } : {}),
+      ...(and.length > 0 ? { AND: and } : {}),
     }
     const [rows, total] = await this.prisma.$transaction([
       /*

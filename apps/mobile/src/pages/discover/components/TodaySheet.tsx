@@ -4,7 +4,8 @@ import { DotLoading } from 'antd-mobile'
 import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
 import { toast } from '@/components/ui/toast'
-import { useDecide } from '@/api/decide'
+import { useDecide, useDecideForOccasion } from '@/api/decide'
+import { useOccasions } from '@/api/discover-page'
 import { useAddOrderItem, useOrderOptions } from '@/api/orders'
 import { useFamily } from '@/api/family'
 import { nextMealDefaults } from '@/pages/order/next-meal'
@@ -79,6 +80,25 @@ export default function TodaySheet({ visible, onClose }: { visible: boolean; onC
    */
   const [closing, setClosing] = useState(false)
   const closeTimer = useRef<number | null>(null)
+
+  /*
+   * 「换个场合挑」（2026-10-16 定，见 D-108）：原来发现页上那四个场景词**收进这里**。
+   *
+   * 为什么合并：用户当时问「"今天想吃什么感觉的"和 ai 帮决定是不是重复了」——确实像。
+   * 它俩都在回答"我想不出吃什么"，而这一页的大标题本来就是「今天吃什么？」；
+   * 2026-10-13 已经有过一次同类合并（两个"我替你决定"收进这个抽屉，见 D-061）。
+   * 但两者不是同一件事：抽屉里给的是**一道**（点「就它了」就进菜单），场景词给的是一**批**
+   * （要自己逛）。所以合并的方向不是删掉，而是**把场合变成这里的一个可选条件**：
+   * 默认不问场合，想收窄的时候点一下。
+   *
+   * 合并不只是少一块：`decide` 原先只读冰箱 / 口味 / 做过的菜，**它不知道场合**
+   * ——这一行给了它一个新维度。而因为是可选的，默认那条路（毫秒级、纯规则、
+   * 不依赖 AI）一个字没变。
+   */
+  const occasion = useTodaySession((state) => state.occasion)
+  const setOccasion = useTodaySession((state) => state.setOccasion)
+  const occasions = useOccasions()
+  const forOccasion = useDecideForOccasion()
 
   const toggleAi = () => {
     if (aiOpen) {
@@ -170,9 +190,45 @@ export default function TodaySheet({ visible, onClose }: { visible: boolean; onC
     )
   }
 
+  /**
+   * 点一枚场合胶囊：**同名的再点一下 = 取消**（回到不问场合）。
+   *
+   * 取消时不是"把上一次的结果留下来"，而是**重新问一次不带场合的**：用户取消场合，
+   * 意思就是"刚才那个限制不要了，重新给我挑"——留着一道为了宴客挑的菜、只把胶囊弹起来，
+   * 会让人以为按钮没生效（菜没变）。这一条是刻意的，不是偷懒。
+   */
+  function pickOccasion(tag: string) {
+    const next = occasion === tag ? null : tag
+    const excluding = next ? [] : seen
+    forOccasion.mutate(
+      { occasion: next ?? '', exclude: excluding },
+      {
+        onSuccess: (data) => {
+          setOccasion(next)
+          setResult(data)
+          setAdded(false)
+          /*
+           * 把这一道记进"看过"：之后点「换一道」不会换回它。
+           * **取消场合这一趟不记**——那一次问的是不带场合的池子，与这里挑的这道无关。
+           */
+          if (next && data.recipe) pushSeen(data.recipe.id)
+        },
+        onError: (error) => toast.error(apiErrorMessage(error)),
+      },
+    )
+  }
+
   return (
     <BottomSheet visible={visible} title="今天吃什么" onClose={onClose}>
-      <p className="decide__lead">按你家冰箱、口味和平时爱吃的，替你挑一道。</p>
+      {/*
+        导语跟着场合变：用户点了一枚胶囊，第一句话就要说明"这一次是按那个场合挑的"
+        （后端也会把那句话拼进 `reason`，但那是菜名下面那一行小字——用户先看到的是这里）。
+      */}
+      <p className="decide__lead">
+        {occasion
+          ? `照你说的「${occasions.data?.items.find((item) => item.tag === occasion)?.label ?? ''}」挑，也看了冰箱与口味。`
+          : '按你家冰箱、口味和平时爱吃的，替你挑一道。'}
+      </p>
 
       {decide.isPending && (
         <>
@@ -249,6 +305,35 @@ export default function TodaySheet({ visible, onClose }: { visible: boolean; onC
                 去记两样 →
               </Link>
             </p>
+          )}
+
+          {/*
+            「换个场合挑」：原来发现页上那一块四个场景词，现在收在这里（2026-10-16，见 D-108
+            与组件上方那段说明）。
+
+            摆在这里而不是抽屉最上面，是因为它是**收窄条件**：默认不问场合——用户来这儿
+            最常见的心态是"随便，你定"，先给他一道就对了；想收窄的人往下看两眼就能找到。
+            每枚胶囊都带**真实道数**（后端算的）：不写数字就会出现"点进去是空的"。
+            再点一下选中的那枚 = 取消（回到不问场合那道），所以它是个开关而不是单选框。
+          */}
+          {(occasions.data?.items.length ?? 0) > 0 && (
+            <div className="decide__occasion">
+              <span className="decide__occasion-title">换个场合挑</span>
+              <div className="decide__occasion-row">
+                {occasions.data?.items.map((item) => (
+                  <button
+                    key={item.tag}
+                    type="button"
+                    className="decide__occasion-pill"
+                    aria-pressed={occasion === item.tag}
+                    disabled={forOccasion.isPending}
+                    onClick={() => pickOccasion(item.tag)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           <div className="decide__actions">

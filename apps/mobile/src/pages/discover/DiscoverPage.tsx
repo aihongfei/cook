@@ -5,6 +5,8 @@ import Page from '@/components/ui/Page'
 import { useTodaySession } from '@/stores/today-session'
 import { useSpreadSession } from '@/stores/spread-session'
 import FamilyPicks from './components/FamilyPicks'
+import SeasonalPicks from './components/SeasonalPicks'
+import MonthlyReport from './components/MonthlyReport'
 import AiChatSheet from './components/AiChatSheet'
 import TodaySheet from './components/TodaySheet'
 import SpreadSheet from './components/SpreadSheet'
@@ -116,8 +118,25 @@ export default function DiscoverPage() {
         <FamilyPicks />
 
         {/*
+          下面三块是 2026-10-16 加的（用户：「这个页面的内容有些少了，还能加些什么」，
+          见 D-108）。**排列取「回顾在前」**：
+          今天吃什么（决策）→ 时令精选（应季的）→ 家人最爱（你家的）
+          → 家庭月报（这个月的总结）→ 工具行。读起来像从今天往回翻一本杂志。
+
+          两块的合意是刻意的：**时令不依赖历史**，新家庭打开也有东西可看；
+          有过几顿饭之后月报自己长出来（≥3 顿才画，见 MonthlyReport）。
+          所以新家庭看到的是"一块内容 + 一句空态"，而不是一整页的"还没有数据"。
+
+          「翻牌子」原本在这一批里（翻菜收着，收下的进家人最爱），
+          **2026-10-16 用户看完预览后定「不要翻牌子了」**，于是整块没做——
+          那一天的预览（previews/discover-content.html）里记了它的形态，别再照着加回来。
+        */}
+        <SeasonalPicks />
+        <MonthlyReport />
+
+        {/*
           两个工具入口（原来挂在「本周菜单」卡头上，那块删掉之后搬到这里）。
-          做成一行两枚并列的胶囊：它们是**整页最下面的一档**，视觉重量低于上面两块内容
+          做成一行两枚并列的胶囊：它们是**整页最下面的一档**，视觉重量低于上面几块内容
           （用品牌淡底 + 描边，与「去安排」那种次要动作同一套语汇），但明确是能点的。
         */}
         <div className="discover-tools">

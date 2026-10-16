@@ -1235,3 +1235,229 @@
     transform: none;
   }
 }
+
+/* =====================================================================
+ * 2026-10-16 新增的两块（时令精选 / 家庭月报，见 D-108）。
+ * 尺寸就是 `previews/discover-content.html` 里量出来的那些值，改之前先看那一份。
+ * 「翻牌子」原本也在这三块里，用户当天看完预览后定「不要翻牌子了」，整块没做。
+ * ===================================================================== */
+
+/*
+ * 时令精选：一行横滑的橱窗（标题行 24 + 横滑行 133 ≈ 157px）。
+ *
+ * 它不是一块 `.card`：这一块的内容是**横向溢出**的（往右滑还有），
+ * 而 `.card` 自带 15px 内边距——横滑行会被两侧的 padding 夹住，
+ * 滑到尽头时卡片边缘贴不到屏幕边，看着像"卡住了"。所以这里自己给版式：
+ * 标题行吃页面的左右栏距，横滑行**只吃左边**（右边留 0，滑出去才是"还有更多"的暗示）。
+ */
+.season {
+  margin-top: 18px;
+}
+
+.season__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 var(--spacing-page);
+  margin-bottom: 8px;
+}
+
+.season__title {
+  font-size: 15px;
+  color: #6e3a1c;
+}
+
+.season__note {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.season__more {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: #c4652a;
+  text-decoration: none;
+}
+
+.season__status { padding: 4px 0 8px var(--spacing-page); }
+
+.season__empty {
+  margin: 0 var(--spacing-page);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--color-ink-3);
+}
+
+.season__list {
+  display: flex;
+  gap: 10px;
+  /* 右边不留 padding：最后一张卡滑到屏边，才像"还有更多" */
+  padding: 0 0 2px var(--spacing-page);
+  margin: 0;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: none;
+}
+
+.season__list::-webkit-scrollbar { display: none; }
+
+.season__card {
+  display: block;
+  width: 116px;
+  color: inherit;
+  text-decoration: none;
+}
+
+/*
+ * ⚠️ `display: block` 不能少：这层是 `<span>`，而**行内元素吃不上 width/height**——
+ * 里面的图会按原始尺寸铺开（预览里第一版实测：这一块从 114px 涨到 230px，图也糊）。
+ * 同一个坑在 `.picks__pic` 上不存在：那是 flex 的子项，会被自动块化。
+ */
+.season__pic {
+  display: block;
+  width: 116px;
+  height: 84px;
+  overflow: hidden;
+  background: var(--color-cream-2);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+}
+
+.season__pic img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.season__name {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--color-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.season__meta {
+  display: block;
+  font-size: 10.5px;
+  color: var(--color-ink-3);
+}
+
+/*
+ * 家庭月报：四个数一行 + 一句脚注 ≈ 150px。
+ * 用淡渐变底（与「今天吃什么」那张主卡同一手法，但轻得多）——
+ * 它是这一页的**总结**，视觉上要收尾而不是又开一块内容。
+ */
+.report {
+  margin: 18px var(--spacing-page) 0;
+  padding: 14px;
+  background: linear-gradient(180deg, var(--color-cream-2), var(--color-paper));
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+}
+
+.report__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.report__title { font-size: 15px; color: #6e3a1c; }
+.report__note { font-size: 11.5px; color: var(--color-ink-3); }
+
+.report__grid {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.report__cell {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+}
+
+.report__num {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-brand);
+}
+
+.report__num small {
+  margin-left: 1px;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--color-ink-3);
+}
+
+.report__label {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--color-ink-2);
+}
+
+.report__foot {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-ink-2);
+  border-top: 1px dashed var(--color-line);
+}
+
+/*
+ * 抽屉里那一行「换个场合挑」（2026-10-16 定，见 D-108）。
+ *
+ * 摆在菜与「就它了」之间：它是**收窄条件**，默认一个都不选——用户来这儿最常见的心态是
+ * "随便，你定"，先给他一道就对了；想收窄的人往下看两眼就能找到。
+ * 高度约 73px（标题行 18 + 胶囊行 41 + 上边距 14），加在抽屉里，**页面高度 0**。
+ */
+.decide__occasion { margin-top: 14px; }
+
+.decide__occasion-title {
+  font-size: 12px;
+  color: var(--color-ink-3);
+}
+
+.decide__occasion-row {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 2px;
+  margin-top: 7px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.decide__occasion-row::-webkit-scrollbar { display: none; }
+
+.decide__occasion-pill {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--color-ink);
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+
+  /* 选中的那枚：品牌橙底白字（与全站其余选中的胶囊同一套），再点一下取消 */
+  &[aria-pressed='true'] {
+    font-weight: 600;
+    color: #fff;
+    background: var(--color-brand);
+    border-color: var(--color-brand);
+  }
+
+  &:disabled { opacity: 0.55; }
+}

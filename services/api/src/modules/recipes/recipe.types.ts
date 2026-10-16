@@ -45,6 +45,11 @@ export interface RecipeQuery {
   q?: string
   category?: string
   cuisine?: string
+  /**
+   * 按**标签精确命中**筛选（可多个＝"其中一个命中"，见 parseRecipeQuery 的 tagList）。
+   * 与 `q` 的区别是这里不看菜名与食材名——「秋季」只给真打了这个标签的菜。
+   */
+  tags?: string[]
   page: number
   pageSize: number
   /** 只看自己家的（F1-12「我的菜谱」）；未登录时为 false */

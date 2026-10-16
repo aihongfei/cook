@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>发现页补内容 · 定稿（御膳）</title>
+<style>
+/* =====================================================================
+ * 这个文件是**定稿 + 给实现方的约束**，不是成品页面。
+ * token 抄自 apps/mobile/src/styles/tailwind.css（唯一来源）；
+ * 「今天吃什么」「家人最爱」「工具行」量自 apps/mobile/src/pages/discover/，
+ * 新加的两块（时令精选 / 家庭月报）与抽屉里那行胶囊的 px 就是接下来要落地的 px。
+ *
+ * 2026-10-16 定稿相比上一版三处改动（都是这一版才定下来的）：
+ * ① 排列取 **A**（回顾在前）；
+ * ② **场景入口不再独立成一块**，收进「帮我决定」抽屉当一行「换个场合挑」——
+ *    见页脚「③ 去哪了」；
+ * ③ 「早上吃什么」换成「做给孩子」：**这一版的餐次只有午饭/晚饭**
+ *    （`MealSlot = LUNCH | DINNER`），把早餐菜加进晚饭是硬错，见页脚「一个差错」。
+ *
+ * 三处刻意简化（不属于对比，也不影响尺寸）：
+ * ① 右上角插画用色块示意（应用里是 84×84 的水彩 PNG，旋转 4°）；
+ * ② 图标用 emoji（应用里是手绘风图标），字体用系统字体；
+ * ③ 菜图来自本机 MinIO（与 App 同源），取不到时退化成色块。
+ *
+ * 数据全部是真的（2026-10-16 从库里取的）：
+ * - 时令：按**标签精确**取，四个季节的**去重**道数 春 21 / 夏 81 / 秋 38 / 冬 50
+ *   （每季是几个标签的并集，见页脚「季节按标签取」）；
+ * - 场合：快手菜 74 / 下饭菜 46 / 宴请 33 / 儿童 33（都是精确标签数）；
+ * - 月报：小满一家 10 月 —— 10 餐次 / 做好 4 顿 / 试过 10 种菜 / 打卡 6 张；
+ * - 家人最爱：小满一家 6 道，前 4 道是真名与真图；
+ * - 抽屉里那道菜也是真名真图。
+ * ===================================================================== */
+:root{
+  --brand:#e07b39; --brick:#b94a2c;
+  --ink:#5a3520; --ink-2:#8e6b52; --ink-3:#a8785a;
+  --cream:#fcf1da; --cream-2:#f8ead4; --paper:#fffbf2; --line:#eadcc4;
+  --title:#6e3a1c; --body:#4a3225;
+  --card-dash:#d9c4a4; --accent-line:#e2a06c;
+  --radius-card:20px; --radius-tile:18px;
+  --shadow-card:0 8px 18px rgb(150 100 60 / 10%);
+  --spacing-page:16px; --tabbar:58px;
+  --grain:radial-gradient(rgb(190 160 120 / 10%) 1px, transparent 1px);
+}
+html[data-theme=dark]{
+  --ink:#f4e6d6; --ink-2:#cdb097; --ink-3:#a98c74;
+  --cream:#221913; --cream-2:#2c2019; --paper:#31241c; --line:#4b3a2e;
+  --title:#f3d3ac; --body:#e8d6c2;
+  --card-dash:#5d4633; --accent-line:#8a5a34;
+  --shadow-card:0 8px 18px rgb(0 0 0 / 40%);
+}
+
+/* ---------------- 预览脚手架（不属于应用） ---------------- */
+*{box-sizing:border-box}
+body{
+  margin:0; padding:0 0 60px;
+  font:13px/1.6 ui-sans-serif,system-ui,'PingFang SC','Microsoft YaHei',sans-serif;
+  color:#3b2a1e; background:#f3ece0;
+}
+html[data-theme=dark] body{ color:#e8dccd; background:#1a1310 }
+.pv-top{
+  display:flex; flex-wrap:wrap; gap:14px 26px; align-items:flex-end;
+  padding:18px 24px 14px; border-bottom:1px solid #e2d6c3;
+}
+html[data-theme=dark] .pv-top{ border-color:#3a2c22 }
+.pv-top h1{ margin:0 0 4px; font-size:17px; font-weight:600 }
+.pv-top .pv-lede{ margin:0; max-width:900px; font-size:12.5px; opacity:.82 }
+.pv-group{ display:flex; flex-direction:column; gap:5px }
+.pv-group > b{ font-size:11px; font-weight:600; letter-spacing:.4px; opacity:.6 }
+.pv-row{ display:flex; gap:6px; flex-wrap:wrap }
+.pv-chip{
+  padding:5px 11px; font:inherit; font-size:12px; color:inherit; cursor:pointer;
+  background:#fff; border:1px solid #dfd0bb; border-radius:999px;
+}
+html[data-theme=dark] .pv-chip{ background:#2a1f18; border-color:#4b3a2e }
+.pv-chip[aria-pressed=true]{ color:#fff; background:var(--brand); border-color:var(--brand) }
+.pv-main{ display:flex; gap:26px; align-items:flex-start; padding:22px 24px 8px }
+.pv-col{ flex:0 0 auto }
+.pv-col > h2{ margin:0 0 8px; font-size:13px }
+.pv-col > .pv-note{ margin:0 0 10px; width:390px; font-size:11.5px; opacity:.72 }
+
+/* ---------------- 手机壳（390×844，与真机一致） ---------------- */
+.phone{
+  position:relative; width:390px; height:844px; overflow:hidden;
+  background:var(--cream); background-image:var(--grain); background-size:8px 8px;
+  border:10px solid #2b201a; border-radius:36px;
+}
+html[data-theme=dark] .phone{ border-color:#0c0908 }
+.app{ display:flex; flex-direction:column; width:100%; height:100% }
+.chrome{ flex:0 0 auto; padding:18px var(--spacing-page) 0; background:var(--cream) }
+.scroll{
+  flex:1 1 auto; overflow-y:auto; padding:0 var(--spacing-page) 96px;
+  scrollbar-width:none;
+}
+.scroll::-webkit-scrollbar{ display:none }
+.tabbar{
+  position:absolute; left:0; right:0; bottom:0; height:var(--tabbar);
+  display:flex; align-items:center; justify-content:space-around;
+  font-size:10px; color:var(--ink-2);
+  background:var(--paper); border-top:1px solid var(--line);
+}
+.tabbar span{ display:flex; flex-direction:column; align-items:center; gap:2px }
+.tabbar span.is-on{ color:var(--brand) }
+.tabbar i{ font-style:normal; font-size:17px }
+.ai-ball{
+  position:absolute; right:14px; bottom:calc(var(--tabbar) + 14px);
+  display:grid; place-items:center; width:54px; height:54px; font-size:20px;
+  background:var(--paper); border:1px solid var(--line); border-radius:999px;
+  box-shadow:var(--shadow-card);
+}
+
+/* ---------------- 应用内的块 ---------------- */
+.page-head{ position:relative; padding-bottom:14px }
+.page-head .ptitle{ font-size:19px; font-weight:700; color:var(--title) }
+.page-head .psub{ margin-top:2px; font-size:12px; color:var(--ink-3) }
+.page-head .art{
+  position:absolute; top:-8px; right:4px; width:84px; height:84px;
+  font-size:38px; display:grid; place-items:center; opacity:.5;
+}
+
+.sec{ margin-top:18px }
+.sec__head{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px }
+.sec__title{ font-size:15px; font-weight:600; color:var(--title) }
+.sec__sub{ margin-left:6px; font-size:11.5px; color:var(--ink-3) }
+.sec__more{ font-size:12px; color:var(--brand); text-decoration:none }
+
+/* 今天吃什么（现有，137px） */
+.today{
+  padding:14px 14px 12px; background:linear-gradient(180deg,#f7d3ae,#fac49a);
+  border:1px solid #e8b183; border-radius:var(--radius-card);
+}
+.today__head{ display:flex; align-items:baseline; gap:10px; margin-bottom:12px }
+.today__en{ font-size:9.5px; letter-spacing:1.6px; color:#8a5b34 }
+.today__title{ font-size:17px; font-weight:700; color:#6b3a17 }
+.today__row{ display:flex; gap:10px }
+.today__btn{
+  flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+  height:52px; font-size:14.5px; font-weight:600; color:#6b3a17;
+  background:var(--paper); border:1px solid transparent; border-radius:16px;
+}
+.today__row .today__btn:last-child{ border-color:#e0a273 }
+.today__ask{
+  display:flex; justify-content:flex-end; gap:4px; margin-top:10px;
+  font-size:11.5px; color:#7a4a22;
+}
+.today__ask b{ color:#8b3f10 }
+
+/* 时令精选（新） */
+.season{ display:flex; gap:10px; overflow-x:auto; padding-bottom:2px; scrollbar-width:none }
+.season::-webkit-scrollbar{ display:none }
+.season__card{ flex:0 0 auto; width:116px }
+/*
+ * `display:block` 不能少：这一层是 `<span>`，而行内元素**吃不上 width/height**——
+ * 里面的 img 于是按原始尺寸铺开（第一版实测：这一块从 114 涨到 230，图片也糊）。
+ * 同一个坑在 `.picks__pic` 上不存在：那是 flex 的子项，会被自动块化。
+ */
+.season__pic{
+  display:block; width:116px; height:84px; overflow:hidden;
+  background:var(--cream-2); border:1px solid var(--line); border-radius:14px;
+}
+.season__pic img{ width:100%; height:100%; object-fit:cover; display:block }
+.season__name{
+  margin-top:5px; font-size:12.5px; line-height:1.35; color:var(--body);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.season__meta{ font-size:10.5px; color:var(--ink-3) }
+
+/* 家人最爱（现有，有数据时每行 40px） */
+.picks-card{ padding:14px; background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-card) }
+.picks__title{ font-size:15px; font-weight:600; color:var(--title) }
+.picks__empty{ margin:8px 0 0; font-size:12.5px; line-height:1.7; color:var(--ink-2) }
+.picks__list{ margin:6px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:2px }
+.picks__item{ display:flex; align-items:center; gap:8px }
+.picks__rank{ flex:0 0 auto; width:16px; font-size:11.5px; color:var(--ink-3) }
+.picks__pic{ flex:0 0 auto; width:40px; height:40px; overflow:hidden; background:var(--cream-2); border:1px solid var(--line); border-radius:12px }
+.picks__pic img{ width:100%; height:100%; object-fit:cover; display:block }
+.picks__name{ flex:1 1 auto; min-width:0; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.picks__why{ flex:0 0 auto; font-size:11.5px; color:var(--ink-3) }
+.picks__more-line{ margin:8px 0 0; font-size:11.5px; color:var(--ink-3) }
+
+/* 家庭月报（新） */
+.report{
+  padding:14px; background:linear-gradient(180deg,var(--cream-2),var(--paper));
+  border:1px solid var(--line); border-radius:var(--radius-card);
+}
+.report__title{ font-size:15px; font-weight:600; color:var(--title) }
+.report__grid{ display:flex; gap:6px; margin-top:12px }
+.report__cell{ flex:1 1 0; min-width:0; text-align:center }
+.report__num{ font-size:18px; font-weight:700; color:var(--brand) }
+.report__num small{ margin-left:1px; font-size:10.5px; font-weight:400; color:var(--ink-3) }
+.report__label{ margin-top:1px; font-size:11px; color:var(--ink-2) }
+.report__foot{ margin:12px 0 0; padding-top:10px; border-top:1px dashed var(--line); font-size:12px; color:var(--ink-2) }
+.report__foot b{ color:var(--body) }
+
+/* 工具行（现有） */
+.tools{ display:flex; gap:10px; margin-top:18px }
+.tool{
+  flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+  height:41px; font-size:13px; color:var(--ink);
+  background:var(--paper); border:1px solid var(--line); border-radius:999px;
+}
+
+/* ---------------- 抽屉：帮我决定（含场合胶囊） ---------------- */
+.dim{ position:absolute; inset:0; background:rgb(40 26 16 / 42%) }
+/*
+ * 抽屉面板的尺寸抄自真的 BottomSheet：`bodyStyle.padding = 18px 16px calc(20px + var(--safe-bottom))`。
+ * 两处刻意的差异：
+ * ① **不画那个"抓手"横条**——应用里没有这个元素，画了会让量出来的高度虚高 12px；
+ * ② 底部不替底栏留位（上一版这里写了 `--tabbar + 14px`，等于多算 52px）：
+ *    抽屉是覆盖层，它盖住底栏，不需要给它让路。
+ */
+.sheet{
+  position:absolute; left:0; right:0; bottom:0;
+  padding:18px var(--spacing-page) 20px;
+  background:var(--paper); border-radius:20px 20px 0 0;
+}
+.sheet__title{ margin:0 0 4px; font-size:17px; color:var(--title) }
+.sheet__lead{ margin:0 0 12px; font-size:12.5px; color:var(--ink-2) }
+.decide__card{ display:flex; gap:10px; padding:10px; background:var(--cream-2); border-radius:var(--radius-tile) }
+.decide__thumb{ flex:0 0 auto; width:84px; height:84px; overflow:hidden; border-radius:14px; background:var(--paper) }
+.decide__thumb img{ width:100%; height:100%; object-fit:cover; display:block }
+.decide__main{ flex:1 1 auto; min-width:0 }
+.decide__name{ font-size:15px; font-weight:600; color:var(--body) }
+.decide__reason{ margin:3px 0 0; font-size:12px; line-height:1.5; color:var(--ink-2) }
+.decide__chips{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px }
+.decide__chip{ padding:2px 8px; font-size:11px; border-radius:999px }
+.decide__chip.is-have{ color:#4b6a34; background:rgb(120 170 80 / 16%) }
+.decide__chip.is-missing{ color:#a8552a; background:rgb(224 123 57 / 14%) }
+.decide__occ{ margin-top:14px }
+.decide__occ-title{ font-size:12px; color:var(--ink-3) }
+.decide__occ-row{ display:flex; gap:8px; margin-top:7px; overflow-x:auto; padding-bottom:2px; scrollbar-width:none }
+.decide__occ-row::-webkit-scrollbar{ display:none }
+.occ{
+  flex:0 0 auto; height:32px; padding:0 12px; font:inherit; font-size:12.5px; cursor:pointer;
+  color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:999px;
+}
+.occ[aria-pressed=true]{ color:#fff; font-weight:600; background:var(--brand); border-color:var(--brand) }
+.decide__actions{ display:flex; gap:10px; margin-top:12px }
+.decide__take{
+  flex:1.4; height:44px; font:inherit; font-size:14px; font-weight:600; color:#fff;
+  background:var(--brand); border:1px solid var(--brand); border-radius:999px;
+}
+.decide__swap{
+  flex:1; height:44px; font:inherit; font-size:14px; color:var(--ink);
+  background:var(--paper); border:1px solid var(--line); border-radius:999px;
+}
+.today-ai-toggle{
+  display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%;
+  margin-top:14px; padding:11px 12px; font:inherit; font-size:12.5px; color:var(--ink);
+  background:var(--cream-2); border:1px solid var(--line); border-radius:14px;
+}
+.today-ai-toggle span:last-child{ color:var(--ink-3) }
+
+/* ---------------- 量测表 ---------------- */
+.pv-measure{ padding:10px 24px 24px }
+.pv-measure h2{ font-size:13px; margin:18px 0 8px }
+table{ border-collapse:collapse; font-size:12px; background:#fff }
+html[data-theme=dark] table{ background:#241a14 }
+th,td{ padding:6px 10px; text-align:left; border:1px solid #e2d6c3 }
+html[data-theme=dark] th,html[data-theme=dark] td{ border-color:#3a2c22 }
+td.num{ text-align:right; font-variant-numeric:tabular-nums }
+.pv-foot{ padding:0 24px 30px; font-size:11.5px; opacity:.75; max-width:900px }
+.pv-foot h3{ font-size:12.5px; margin:16px 0 6px }
+.pv-foot ul{ margin:0; padding-left:18px }
+.pv-foot li{ margin:3px 0 }
+
+/* 方案可见性：**只有被比较的部分变** */
+body[data-hide-seasonal] .blk-seasonal{ display:none }
+body[data-hide-report]   .blk-report{ display:none }
+/* 新家庭：家人最爱没有内容、月报不够数（两条都是真规则） */
+body[data-newbie='1'] .picks__list,
+body[data-newbie='1'] .picks__more-line{ display:none }
+body[data-newbie='1'] .picks__empty{ display:block }
+body:not([data-newbie='1']) .picks__empty{ display:none }
+body[data-newbie='1'] .blk-report{ display:none }
+</style>
+</head>
+<body data-theme="light" data-newbie="0" data-season="秋">
+
+<header class="pv-top">
+  <div>
+    <h1>发现页补内容 · 定稿</h1>
+    <p class="pv-lede">
+      左：定稿后的<strong>发现页</strong>（排列取 A）。右：点「帮我决定」之后<strong>抽屉里</strong>的样子
+      ——原来的四个场景词收在这里当一行「换个场合挑」，不占页面高度。
+      左上「三个块」可以逐个拿掉，看每块各自值不值那几十像素。数字都是真数据（小满一家 10 月）。
+    </p>
+  </div>
+  <div class="pv-group">
+    <b>页面上的三个块（可逐个拿掉）</b>
+    <div class="pv-row" id="blocks">
+      <button class="pv-chip" data-block="seasonal" aria-pressed="true">② 时令精选</button>
+      <button class="pv-chip" data-block="report" aria-pressed="true">A 家庭月报</button>
+    </div>
+  </div>
+  <div class="pv-group">
+    <b>这一家的状态</b>
+    <div class="pv-row" id="states">
+      <button class="pv-chip" data-state="old" aria-pressed="true">有历史（10 月做了 4 顿）</button>
+      <button class="pv-chip" data-state="new" aria-pressed="false">新家庭（还没开张）</button>
+    </div>
+  </div>
+  <div class="pv-group">
+    <b>季节（跟着日期走）</b>
+    <div class="pv-row" id="seasons">
+      <button class="pv-chip" data-season="秋" aria-pressed="true">10 月 → 秋（38 道）</button>
+      <button class="pv-chip" data-season="夏" aria-pressed="false">6 月 → 夏（81 道）</button>
+    </div>
+  </div>
+  <div class="pv-group">
+    <b>抽屉</b>
+    <div class="pv-row" id="occpick">
+      <button class="pv-chip" data-occ="" aria-pressed="true">没选场合（默认）</button>
+      <button class="pv-chip" data-occ="快手菜" aria-pressed="false">选了「不想费劲」</button>
+    </div>
+  </div>
+  <div class="pv-group">
+    <b>附加</b>
+    <div class="pv-row"><button class="pv-chip" id="theme">暗色</button></div>
+  </div>
+</header>
+
+<main class="pv-main">
+  <section class="pv-col" data-plan="page">
+    <h2>发现页（定稿）</h2>
+    <p class="pv-note">决策 → 应季的 → 你家的 → 玩一把 → 这个月的总结 → 工具。也可以说是"从今天往回读"。</p>
+    <div class="phone"><div class="app">
+      <div class="chrome" id="head1"></div>
+      <div class="scroll" id="page-scroll"></div>
+      <div class="ai-ball">🔍</div>
+      <nav class="tabbar" id="tab1"></nav>
+    </div></div>
+  </section>
+
+  <section class="pv-col" data-plan="drawer">
+    <h2>「帮我决定」抽屉（含场合胶囊）</h2>
+    <p class="pv-note">抽屉是覆盖层：页面上那三块的高度一分不变。这行胶囊就是原来的四个场景词——点一下换一道，理由也会跟着变。</p>
+    <div class="phone"><div class="app">
+      <div class="chrome" id="head2"></div>
+      <div class="scroll" id="drawer-scroll"></div>
+      <div class="ai-ball">🔍</div>
+      <nav class="tabbar" id="tab2"></nav>
+      <div class="dim"></div>
+      <div class="sheet" id="sheet"></div>
+    </div></div>
+  </section>
+</main>
+
+<section class="pv-measure">
+  <h2>量出来的尺寸（每块高度 · 首屏到哪 · 要不要滚）</h2>
+  <table id="mtab">
+    <thead>
+      <tr><th>页</th><th class="num">内容总高</th><th class="num">首屏能看到</th><th>需要滚动吗</th><th class="num">时令</th><th class="num">最爱</th><th class="num">月报</th><th class="num">工具行</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>抽屉那两个数</h2>
+  <table id="dtab">
+    <thead><tr><th>面板（贴底）</th><th class="num">高</th><th>放得下吗</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>三块 + 一行胶囊各自的一行约束</h2>
+  <table>
+    <thead><tr><th>块</th><th>尺寸约束</th><th>数据来源与口径</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>② 时令精选</td>
+        <td>标题行 24 + 横滑行 133 ≈ <b>157px</b>；卡 116 宽（图 84、名字 17、品类 14）、gap 10</td>
+        <td>按**季节标签**取（月份 → 季节，每个季节是 3~4 个标签的并集）；标题「秋日时令 · 38 道 ›」点进菜谱小书（带 tag 参数）</td>
+      </tr>
+      <tr>
+        <td>A 家庭月报</td>
+        <td>四个数一行 + 一句脚注 ≈ <b>150px</b></td>
+        <td>本月聚合：一起吃了 / 真的做了 / 试过的菜 / 拍的照片；<b>不足 3 顿整块不画</b>（见下「新家庭」那一档）</td>
+      </tr>
+      <tr>
+        <td>抽屉·场合胶囊</td>
+        <td>标题行 18 + 胶囊行 41 + 上边距 14 ≈ <b>73px</b>，加在抽屉里（<b>页面 0px</b>）</td>
+        <td>四个词按**标签精确命中**：快手菜 74 / 下饭菜 46 / 宴请 33 / 儿童 33；点了之后 `/discover/decide` 带 `occasion`</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="pv-foot">
+  <h3>四块的来历（为什么是它们）</h3>
+  <ul>
+    <li><b>② 时令精选</b>：全项目唯一带"时令"的是厨房页底部那张<strong>静态图片</strong>（字都烘焙在图里、四季不变、不可点）。所以这里给的是<strong>真入口</strong>：38 道秋菜、点得进详情。它回答的是"这个季节有什么"，与「摇一桌」（配这一餐）、「帮我决定」（挑一道）不是同一个问题。</li>
+    <li><b>A 家庭月报</b>：「我的」页只有你<strong>个人</strong>的打卡热力图与我的菜数，「家人最爱」是<strong>菜</strong>榜单——<strong>全家这个月过得怎么样</strong>没人讲。四个数全是库里现成的（本月餐次 + 状态 + 点过的菜 + 打卡），不需要新数据。</li>
+  </ul>
+
+  <h3>③ 场景入口去哪了：**收进「帮我决定」抽屉**（用户 2026-10-16 的决定）</h3>
+  <ul>
+    <li>用户当时问：「"今天想吃什么感觉的"和 ai 帮决定是不是重复了」——<strong>确实像</strong>。它俩都在回答"我想不出吃什么"，而那一行大字标题本来就是「今天吃什么？」；2026-10-13 已经有过一次同类合并（「帮我决定」与「AI 帮你想」两个"我替你决定"收进一个抽屉，见 D-061）。</li>
+    <li>但两者<strong>不是同一件事</strong>：抽屉里给的是<strong>一道</strong>（点「就它了」就进菜单），场景词给的是一<strong>批</strong>（要自己逛）。所以合并的方向不是删掉，而是<strong>把场合变成抽屉里的一个可选条件</strong>：默认不问场合，想收窄的时候点一下。</li>
+    <li>合并不只是少一块：`decide` 原先只读<strong>冰箱 / 口味 / 做过的菜</strong>，它<strong>不知道场合</strong>。这行胶囊给了它一个新维度——而因为是可选参数，默认那条路（毫秒级、纯规则、不依赖 AI）一个字没变。</li>
+    <li>代价写清：`/discover/decide` 加一个可选参数（`occasion`，精确标签过滤，约 10 行 + 测试）；抽屉里多一行胶囊（73px，页面高度 <b>0</b>）。</li>
+  </ul>
+
+  <h3>一个差错：**「早上吃什么」不能留**（这一版才发现的）</h3>
+  <ul>
+    <li>上一版那四个词里有「早上」，对应标签「早餐」83 道。但这一版的餐次**只有午饭与晚饭**（`MealSlot = LUNCH | DINNER`，见 `services/api/prisma/schema.prisma`）：用户在抽屉里点「早上」，`decide` 会挑出一道包子/粥，接着点「就它了」……它被加进了<strong>晚饭</strong>。这是硬错，不是口味问题。</li>
+    <li>换成了<strong>「做给孩子」</strong>（儿童 33 道）——同样是个真场合，也落在午饭/晚饭里。另外三个（不想费劲 74 / 干饭要香 46 / 来客人了 33）都成立。</li>
+    <li>数字都够（最少的 33 道）：<strong>不会有"点了是空的"</strong>。真一道都挑不出来时（比如冰箱与口味把这一类排空了）后端给一句话说明，不给一道编的。</li>
+  </ul>
+
+  <h3>季节与场合都按**标签精确取**，不靠搜索兜</h3>
+  <ul>
+    <li>给菜谱查询加一个 `tag` 参数（<strong>精确匹配标签数组</strong>，可逗号给多个＝"其中一个命中"，最多 5 个）。季节与场合都走它，不用 `q`：`q` 走的是 `searchText contains`（菜名 + 别名 + 标签 + 食材名拼一起），判据是"文本里出现过这两个字"。</li>
+    <li><b>诚实说一句：这两者眼下返回的是同一批菜。</b>2026-10-16 把四个季节逐个 id 比过——春 21 / 夏 81 / 秋 38 / 冬 50，搜索与标签并集<strong>一个不差</strong>。所以这一条不是"现在有 bug 要修"，而是"接线要接在稳定判据上"：库里哪天出现一道名字带"夏"的凉糕却没打季节标签，搜索就会把它算进「夏日时令」那个数字里。</li>
+    <li><b>真正的差别在"几个标签"上，而且很大：</b>只取最正的那个标签 vs 并集 —— 春 20→21、夏 <strong>51→81</strong>、秋 35→38、冬 47→50。夏天少掉 30 道不是小数。库里同一个季节有两套叫法（「夏季」+「夏季菜谱」+「夏季养生」+「夏季饮食」），所以 `tag` 必须支持多个标签（并集，不是交集）。</li>
+    <li>反过来也说明搜索不够用：那 3 道打了「秋季养生」的菜（猪肉萝卜灌汤包、红枣发糕、花生红枣焖猪手）<strong>名字里一个"秋"字都没有</strong>——搜索永远找不到它们。</li>
+  </ul>
+
+  <h3>「翻牌子」去哪了：**用户看完预览后定「不要翻牌子了」**（2026-10-16）</h3>
+  <ul>
+    <li>它是这一批里唯一**凭好玩**才成立的块：翻菜收着，收下的进「家人最爱」。
+      形态（按钮版 / 滑动版）当时都做出来了，用户看过之后决定不做——<strong>那一整天的工作里这是唯一被砍掉的一块</strong>。</li>
+    <li>所以这一份预览里**没有它**：页面高度按两块算（时令 157 + 家人最爱 + 月报 156）。
+      接口与组件都没写进代码，只有这份记录与 D-108 里留着它的来龙去脉。</li>
+    <li>顺带说清它对「家人最爱」的影响：那一块在**新家庭**是空态（用户定的「没有最爱就是没有」）。
+      翻牌子原本是给新家庭"玩着玩着就有了信号"的那条路，砍掉之后新家庭就靠时令与月报慢慢长——
+      这是用户明确选择的结果，不是遗漏。</li>
+  </ul>
+
+  <h3>「新家庭」那一档（切右上角那个开关看）</h3>
+  <ul>
+    <li><b>家人最爱</b>：只留那句空态（你 2026-10-16 定的「没有最爱就是没有」）——<strong>不塞推荐填坑</strong>；</li>
+    <li><b>家庭月报</b>：本月不足 3 顿时<strong>整块不画</strong>（1 顿就报"一起吃了 1 顿"没有意义，还显得这一家冷清）；</li>
+    <li><b>时令精选照常都在</b>——它<strong>不依赖历史</strong>，新家庭打开也有东西可看；等有过几顿饭，月报自己就长出来了（≥3 顿才画）。</li>
+  </ul>
+
+  <h3>刻意不做的</h3>
+  <ul>
+    <li><b>不加回「本周菜单」</b>（2026-10-16 刚删，理由没变：同一份安排的第三份只读副本）；</li>
+    <li><b>不做"开头菜"</b>（你 2026-10-16 定：「没有最爱就是没有」）——新家庭那块就是一句空态，不塞推荐填坑；</li>
+    <li><b>不做天气推荐</b>：现在没接任何天气源，为一个模块引一个外部依赖不划算；时令用日期就能算，先做它；</li>
+    <li><b>月报不给谁打分</b>：不写"谁做得最多"，家庭里这种事容易变成比较；只写全家一起的数；</li>
+    <li><b>不给「早餐」单独开一档</b>：要开就得先有早餐这个餐次（`MealSlot` 只有两个值），那是另一件事，不塞进这一次。</li>
+  </ul>
+</section>
+
+<script>
+/* =====================================================================
+ * 数据：全部是真的（2026-10-16 从库里取的）
+ * ===================================================================== */
+var CDN = 'http://127.0.0.1:9000/cook-media/';
+
+var IMG = {
+  autumn: [
+    { n:'三色补血汤', k:'recipes/8553edc6835a7baee932fb3889ebc0f0.jpg', c:'主食' },
+    { n:'五彩鲜贝', k:'recipes/def0d5fa6741d9613b06ac10bd7c7124.jpg', c:'荤菜' },
+    { n:'健脾补肾·山药栗子粥', k:'recipes/9c7a06b26b7cda5a525f3b24d6299f3d.jpg', c:'主食' },
+    { n:'冰糖山楂羹', k:'recipes/504259f09e72ff24a723229bc4398a0a.jpg', c:'汤' },
+    { n:'南瓜玉米羹', k:'recipes/2a0a30b99e015f750217737c20211ee6.jpg', c:'汤' },
+    { n:'嫩南瓜猪肉包', k:'recipes/96e0d64c668d8e5d4b2a7d7b4c61dc1f.jpg', c:'主食' }
+  ],
+  summer: [
+    { n:'冬瓜排骨汤', k:'recipes/dac6a4872c364de955041fc9186fecab.jpg', c:'汤' },
+    { n:'凉拌黄瓜片', k:'recipes/ebfeec14221506fa917b4a77009f0b23.jpg', c:'素菜' },
+    { n:'凉拌金针菇', k:'recipes/00c85415a8b5fc26b6151a7466a05c5c.jpg', c:'素菜' },
+    { n:'上海凉面', k:'recipes/27baa8abf654b06bab9c73097e1191b9.jpg', c:'主食' },
+    { n:'凉拌海带丝', k:'recipes/8a2415cdb0287561f2125492633c8d79.jpg', c:'素菜' },
+    { n:'凉拌土豆丝', k:'recipes/6270700399a5651370ba92ceddda5dcc.jpg', c:'素菜' }
+  ],
+  picks: [
+    { n:'蒜蓉粉丝蒸虾', k:'recipes/12216ea53947fe4d0f444cbeb75e1b21.jpg', why:'做过 1 次' },
+    { n:'桂圆银耳羹', k:'recipes/00964786eb158aab0cf9840625a10d6d.jpg', why:'做过 1 次' },
+    { n:'红烧排骨', k:'recipes/f1c1ce61b00084f98061e5752daf379c.jpg', why:'做过 1 次' },
+    { n:'三丝杏鲍菇', k:'recipes/be89a93beca06f56e6df5add313be275.jpg', why:'做过 1 次' }
+  ]
+};
+
+var SEASON = {
+  '秋': { title:'秋日时令', note:'天凉了，这些正当时', count:38,
+          tags:['秋季','秋季菜谱','秋季养生'], list:IMG.autumn,
+          more:'/recipes?tag=%E7%A7%8B%E5%AD%A3,%E7%A7%8B%E5%AD%A3%E8%8F%9C%E8%B0%B1,%E7%A7%8B%E5%AD%A3%E5%85%BB%E7%94%9F' },
+  '夏': { title:'夏日时令', note:'天热，吃点清爽的', count:81,
+          tags:['夏季','夏季菜谱','夏季养生','夏季饮食'], list:IMG.summer,
+          more:'/recipes?tag=%E5%A4%8F%E5%AD%A3,%E5%A4%8F%E5%AD%A3%E8%8F%9C%E8%B0%B1,%E5%A4%8F%E5%AD%A3%E5%85%BB%E7%94%9F,%E5%A4%8F%E5%AD%A3%E9%A5%AE%E9%A3%9F' }
+};
+
+/* 场合词：点一下就是给 decide 加一个标签条件。默认不选。 */
+var OCCASIONS = [
+  { label:'不想费劲', tag:'快手菜', n:74,
+    dish:{ n:'酸辣土豆丝', k:'recipes/2e7ebf39cd806de388643c27a008c66c.jpg', c:'素菜 · 家常' },
+    reason:'按你说的「不想费劲」挑的：这道 1 步就下锅' },
+  { label:'干饭要香', tag:'下饭菜', n:46,
+    dish:{ n:'剁椒豆腐', k:'recipes/5756b399138c5eeb37f5dfefcd4195c4.jpg', c:'素菜 · 湘菜' },
+    reason:'按你说的「干饭要香」挑的：这道最下饭' },
+  { label:'来客人了', tag:'宴请', n:33,
+    dish:{ n:'宫保虾仁', k:'recipes/38672ae55e5c814488b27606c2badf7c.jpg', c:'荤菜 · 川菜' },
+    reason:'按你说的「来客人了」挑的：端上桌有面子' },
+  { label:'做给孩子', tag:'儿童', n:33,
+    dish:{ n:'蒜香娃娃菜', k:'recipes/1e32cb079830c69e85ea6e8b263629cb.jpg', c:'素菜 · 家常' },
+    reason:'按你说的「做给孩子」挑的：清淡不辣' }
+];
+
+/* 默认那道（没选场合时）：与上一版预览一致 */
+var DEFAULT_PICK = {
+  dish:{ n:'蒜蓉粉丝蒸虾', k:'recipes/12216ea53947fe4d0f444cbeb75e1b21.jpg', c:'荤菜 · 家常' },
+  reason:'冰箱里的 虾、粉丝 正好能做这道',
+  have:['虾','粉丝'], missing:[]
+};
+
+var REPORT = {
+  meals:10, done:4, kinds:10, photos:6,
+  line:'最常做的是 <b>红烧排骨</b>，10 月 16 号那顿你还拍了一张。'
+};
+
+function img(k){ return CDN + k }
+
+/* 取不到图就退化成色块：本机 MinIO 没起的时候不至于整页难看 */
+function pic(k, cls){
+  return '<span class="'+cls+'"><img src="'+img(k)+'" alt="" loading="lazy" '+
+    'onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),'+
+    '{textContent:\'🍽\',style:\'display:grid;place-items:center;width:100%;height:100%;color:#a8785a\'}))"></span>';
+}
+
+/* ---------------- 各块的 HTML ---------------- */
+function blkHead(){
+  return '<div class="page-head">'+
+    '<div class="art" aria-hidden="true">🍜</div>'+
+    '<div class="ptitle">发现</div>'+
+    '<div class="psub">今天不知道吃什么，交给它</div>'+
+  '</div>';
+}
+
+function blkTabbar(){
+  return '<span><i>🏠</i>厨房</span><span><i>📋</i>订单</span>'+
+         '<span class="is-on"><i>✨</i>发现</span><span><i>🧊</i>冰箱</span><span><i>👤</i>我的</span>';
+}
+
+function blkToday(){
+  return '<section class="today">'+
+    '<div class="today__head"><span class="today__en">WHAT TO EAT TODAY</span><span class="today__title">今天吃什么？</span></div>'+
+    '<div class="today__row">'+
+      '<button class="today__btn">🎲 摇一桌</button>'+
+      '<button class="today__btn">✨ 帮我决定</button>'+
+    '</div>'+
+    '<div class="today__ask"><span>下厨上的问题想问问人？</span><b>点这里问 AI →</b></div>'+
+  '</section>';
+}
+
+function blkSeasonal(){
+  var s = SEASON[document.body.dataset.season] || SEASON['秋'];
+  return '<section class="sec blk-seasonal">'+
+    '<div class="sec__head">'+
+      '<span><span class="sec__title">'+s.title+'</span><span class="sec__sub">'+s.note+'</span></span>'+
+      '<a class="sec__more" href="'+s.more+'">'+s.count+' 道 ›</a>'+
+    '</div>'+
+    '<div class="season">'+ s.list.map(function(d){
+      return '<figure class="season__card" style="margin:0">'+
+        pic(d.k, 'season__pic')+
+        '<figcaption class="season__name" title="'+d.n+'">'+d.n+'</figcaption>'+
+        '<div class="season__meta">'+d.c+'</div>'+
+      '</figure>';
+    }).join('') +'</div>'+
+  '</section>';
+}
+
+function blkPicks(){
+  var rows = IMG.picks.map(function(p, i){
+    return '<li class="picks__item">'+
+      '<span class="picks__rank">'+(i+1)+'</span>'+
+      pic(p.k, 'picks__pic')+
+      '<span class="picks__name">'+p.n+'</span>'+
+      '<span class="picks__why">'+p.why+'</span>'+
+    '</li>';
+  }).join('');
+  return '<section class="sec picks-card">'+
+    '<div class="picks__title">家人最爱</div>'+
+    '<p class="picks__empty">还没有信号：做过的菜和收藏的菜都会出现在这里。先点一道、做完它，或者翻菜谱时收几道。</p>'+
+    '<ul class="picks__list">'+rows+'</ul>'+
+    '<p class="picks__more-line">还有 2 道做过或收过的菜，做过的会慢慢往上排。</p>'+
+  '</section>';
+}
+
+function blkReport(){
+  var r = REPORT;
+  return '<section class="sec report blk-report">'+
+    '<div class="report__title">小满一家 · 十月</div>'+
+    '<div class="report__grid">'+
+      '<div class="report__cell"><div class="report__num">'+r.meals+'<small>顿</small></div><div class="report__label">一起吃了</div></div>'+
+      '<div class="report__cell"><div class="report__num">'+r.done+'<small>顿</small></div><div class="report__label">真的做了</div></div>'+
+      '<div class="report__cell"><div class="report__num">'+r.kinds+'<small>种</small></div><div class="report__label">试过的菜</div></div>'+
+      '<div class="report__cell"><div class="report__num">'+r.photos+'<small>张</small></div><div class="report__label">拍的照片</div></div>'+
+    '</div>'+
+    '<p class="report__foot">'+r.line+'</p>'+
+  '</section>';
+}
+
+function blkTools(){
+  return '<div class="tools">'+
+    '<span class="tool">🧩 常用组合</span>'+
+    '<span class="tool">🗓 备菜计划</span>'+
+  '</div>';
+}
+
+/* 定稿的排列（A 回顾在前） */
+function renderPage(){
+  document.getElementById('page-scroll').innerHTML =
+    blkToday() + blkSeasonal() + blkPicks() + blkReport() + blkTools();
+  document.getElementById('head1').innerHTML = blkHead();
+  document.getElementById('tab1').innerHTML = blkTabbar();
+}
+
+/* ---------------- 抽屉 ---------------- */
+var occ = '';                 // 当前选的场合（'' = 没选）
+var seenDishes = {};          // 换一道用：不许换回同一道
+
+function drawerPick(){
+  if (!occ) return DEFAULT_PICK;
+  var o = OCCASIONS.filter(function(x){ return x.tag === occ })[0];
+  return { dish:o.dish, reason:o.reason, have:[], missing:[] };
+}
+
+function renderDrawer(){
+  var pick = drawerPick();
+  var pills = OCCASIONS.map(function(o){
+    return '<button class="occ" data-occ="'+o.tag+'" aria-pressed="'+(o.tag===occ)+'">'+o.label+'</button>';
+  }).join('');
+  var chips = '';
+  if (pick.have.length) chips += '<span class="decide__chip is-have">用上了 '+pick.have.join('、')+'</span>';
+  if (pick.missing.length) chips += '<span class="decide__chip is-missing">还差 '+pick.missing.join('、')+'</span>';
+
+  document.getElementById('sheet').innerHTML =
+    '<div class="sheet__title">今天吃什么</div>'+
+    '<p class="sheet__lead">'+(occ ? '照你说的「'+OCCASIONS.filter(function(x){return x.tag===occ})[0].label+'」挑的，也看了冰箱与口味。'
+                                     : '按你家冰箱、口味和平时爱吃的，替你挑一道。')+'</p>'+
+    '<div class="decide__card">'+
+      '<span class="decide__thumb"><img src="'+img(pick.dish.k)+'" alt=""></span>'+
+      '<div class="decide__main">'+
+        '<div class="decide__name">'+pick.dish.n+'</div>'+
+        '<div class="decide__reason">'+pick.reason+'</div>'+
+        (chips ? '<div class="decide__chips">'+chips+'</div>' : '')+
+      '</div>'+
+    '</div>'+
+    '<div class="decide__occ">'+
+      '<div class="decide__occ-title">换个场合挑：</div>'+
+      '<div class="decide__occ-row">'+pills+'</div>'+
+    '</div>'+
+    '<div class="decide__actions">'+
+      '<button class="decide__take">就它了</button>'+
+      '<button class="decide__swap">换一道 ↻</button>'+
+    '</div>'+
+    '<button class="today-ai-toggle"><span>都不合意？说说想吃什么，让 AI 挑几道</span><span>⌄</span></button>';
+}
+
+function wireDrawer(){
+  // 场合胶囊：**切了就重问一次**（换成那颗标签下的第一道），再点一下取消（回默认那道）
+  [].forEach.call(document.querySelectorAll('#sheet .occ'), function(btn){
+    btn.addEventListener('click', function(){
+      occ = occ === btn.dataset.occ ? '' : btn.dataset.occ;
+      syncOccChips();
+      renderDrawer();
+      measure();
+    });
+  });
+  // 换一道：同一场合下换一张牌（这里演示成换到该标签的第二道；真接口走 exclude）
+  var swap = document.querySelector('#sheet .decide__swap');
+  if (swap) swap.addEventListener('click', function(){
+    if (!occ) { occ = OCCASIONS[0].tag; syncOccChips(); }
+    else { var i = OCCASIONS.map(function(o){return o.tag}).indexOf(occ); occ = OCCASIONS[(i+1)%OCCASIONS.length].tag; }
+    renderDrawer();
+  });
+}
+
+function syncOccChips(){
+  [].forEach.call(document.querySelectorAll('#occpick .pv-chip'), function(c){
+    c.setAttribute('aria-pressed', String((c.dataset.occ || '') === occ));
+  });
+}
+
+/* ---------------- 量测 ---------------- */
+var ZH = { 'blk-seasonal':'时令精选',
+           'blk-report':'家庭月报', 'picks-card':'家人最爱', today:'今天吃什么', tools:'工具行' };
+
+/**
+ * 一个直接子节点叫什么（量测表里说人话用）。
+ * 没有这一层，"首屏能看到"那格会打印 `sec blk-seasonal` 这种类名——给实现方看的东西
+ * 得先说人话。
+ */
+function nameOfBlock(el){
+  var cls = ' ' + el.className + ' ';
+  for (var k in ZH) { if (cls.indexOf(' ' + k + ' ') >= 0) return ZH[k]; }
+  return el.className || el.tagName;
+}
+
+/*
+ * 量测只用 getBoundingClientRect 比矩形，**不用 offsetTop**：
+ * `.scroll` 本身不是定位元素，它的子节点 offsetParent 会落到 `.phone`，
+ * offsetTop 里于是混进了页头那一段高度，"首屏到哪"会算多半屏（第一版就是这么错的）。
+ */
+function measure(){
+  var out = {};
+  var col = document.querySelector('.pv-col[data-plan="page"]');
+  var scroller = col.querySelector('.scroll');
+  var box = scroller.getBoundingClientRect();
+  var h = function(sel){
+    var el = col.querySelector(sel);
+    return el ? Math.round(el.getBoundingClientRect().height) : null;
+  };
+  var total = Math.round(scroller.scrollHeight);
+  var view = Math.round(scroller.clientHeight);
+  var lastVisible = null;
+  [].forEach.call(scroller.children, function(el){
+    var r = el.getBoundingClientRect();
+    if (r.bottom <= box.bottom + 1) lastVisible = nameOfBlock(el);
+  });
+  out.page = {
+    total: total, view: view, fold: lastVisible,
+    needScroll: total > view ? ('要滚 ' + (total - view) + 'px，约 ' + Math.round((total - view) / 844 * 10) / 10 + ' 屏') : '不用滚',
+    seasonal: h('.blk-seasonal'), picks: h('.picks-card'),
+    report: h('.blk-report'), tools: h('.tools')
+  };
+  var sheet = document.getElementById('sheet');
+  out.drawer = { sheet: Math.round(sheet.getBoundingClientRect().height) };
+
+  document.querySelector('#mtab tbody').innerHTML =
+    '<tr><td>发现页（定稿）</td>'+
+      '<td class="num">'+out.page.total+'</td>'+
+      '<td class="num">'+(out.page.fold || '—')+' 之前</td>'+
+      '<td>'+out.page.needScroll+'（可视 '+out.page.view+'）</td>'+
+      '<td class="num">'+(out.page.seasonal == null ? '—（已拿掉）' : out.page.seasonal)+'</td>'+
+      '<td class="num">'+(out.page.picks == null ? '—（已拿掉）' : out.page.picks)+'</td>'+
+      '<td class="num">'+(out.page.report == null ? '—（已拿掉）' : out.page.report)+'</td>'+
+      '<td class="num">'+(out.page.tools == null ? '—（已拿掉）' : out.page.tools)+'</td></tr>';
+
+  var fits = out.drawer.sheet + 20 <= 844;
+  document.querySelector('#dtab tbody').innerHTML =
+    '<tr><td>「帮我决定」抽屉（含场合胶囊）</td><td class="num">'+out.drawer.sheet+'</td>'+
+    '<td>'+(fits ? '放得下（844 − 面板 = '+(844 - out.drawer.sheet)+'px 留给上面的页面）'
+                 : '放不下：超出 '+(out.drawer.sheet + 20 - 844)+'px')+'</td></tr>';
+}
+
+/* ---------------- 开关 ---------------- */
+document.getElementById('blocks').addEventListener('click', function(e){
+  var b = e.target.closest('.pv-chip'); if (!b) return;
+  var on = b.getAttribute('aria-pressed') === 'true';
+  b.setAttribute('aria-pressed', String(!on));
+  document.body.toggleAttribute('data-hide-' + b.dataset.block, on);
+  measure();
+});
+document.getElementById('states').addEventListener('click', function(e){
+  var b = e.target.closest('.pv-chip'); if (!b) return;
+  [].forEach.call(this.querySelectorAll('.pv-chip'), function(x){ x.setAttribute('aria-pressed', String(x === b)) });
+  document.body.dataset.newbie = b.dataset.state === 'new' ? '1' : '0';
+  setTimeout(measure, 0);
+});
+document.getElementById('seasons').addEventListener('click', function(e){
+  var b = e.target.closest('.pv-chip'); if (!b) return;
+  [].forEach.call(this.querySelectorAll('.pv-chip'), function(x){ x.setAttribute('aria-pressed', String(x === b)) });
+  document.body.dataset.season = b.dataset.season;
+  renderPage(); measure();
+});
+document.getElementById('occpick').addEventListener('click', function(e){
+  var b = e.target.closest('.pv-chip'); if (!b) return;
+  occ = b.dataset.occ || '';
+  syncOccChips(); renderDrawer(); wireDrawer(); measure();
+});
+document.getElementById('theme').addEventListener('click', function(){
+  var dark = document.documentElement.dataset.theme === 'dark';
+  document.documentElement.dataset.theme = dark ? 'light' : 'dark';
+  this.setAttribute('aria-pressed', String(!dark));
+});
+
+renderPage();
+renderDrawer();
+wireDrawer();
+measure();
+</script>
+</body>
+</html>

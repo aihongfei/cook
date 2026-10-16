@@ -18,11 +18,19 @@ export default function RecipeListPage() {
   const q = params.get('q') || ''
   const category = params.get('category') ?? preferences.category
   const cuisine = params.get('cuisine') ?? preferences.cuisine
+  /*
+   * 标签筛选（`?tag=秋季,秋季菜谱,秋季养生`）：发现页「时令精选」点进来时带的。
+   *
+   * 它**不持久化到本地存储**（与搜索词同一条理由：品类/菜系是"我平时爱看什么"，
+   * 而标签是一次性的入口——进了时令精选，翻两天后打开菜谱小书还只看见秋菜是坏的）。
+   */
+  const tag = params.get('tag') || ''
+  const tagLabels = tag ? tag.split(',').filter(Boolean) : []
   const [input, setInput] = useState(q)
   const [composing, setComposing] = useState(false)
   const filters = useFilterOptions()
 
-  // URL 入口优先；只持久化品类与菜系，搜索词不会进入本地存储。
+  // URL 入口优先；只持久化品类与菜系，搜索词与标签不会进入本地存储。
   useEffect(() => {
     if (params.has('category')) preferences.setCategory(params.get('category') || '')
     if (params.has('cuisine')) preferences.setCuisine(params.get('cuisine') || '')
@@ -30,12 +38,13 @@ export default function RecipeListPage() {
 
   useEffect(() => { setInput(q) }, [q])
 
-  const updateSearch = (next: { q?: string; category?: string; cuisine?: string }, replace = false) => {
-    const values = { q, category, cuisine, ...next }
+  const updateSearch = (next: { q?: string; category?: string; cuisine?: string; tag?: string }, replace = false) => {
+    const values = { q, category, cuisine, tag, ...next }
     const updated = new URLSearchParams()
     if (values.q.trim()) updated.set('q', values.q.trim())
     if (values.category) updated.set('category', values.category)
     if (values.cuisine) updated.set('cuisine', values.cuisine)
+    if (values.tag) updated.set('tag', values.tag)
     setParams(updated, { replace })
   }
 
@@ -115,6 +124,27 @@ export default function RecipeListPage() {
           */}
           <section className="recipes-filters" aria-label="菜谱筛选">
             <div className="recipes-filters__heading"><span>按口味翻一翻</span><button type="button" onClick={reset}>清除搜索与筛选</button></div>
+            {/*
+              标签筛选生效中就**明说**，并给一个"去掉"。
+              不做这一行的话，用户从「时令精选」点进来只会看到"共 38 道"，而界面上
+              没有任何东西解释为什么少了这么多——他会以为菜谱库只剩 38 道了。
+              用的是与品类/菜系同一套胶囊外形，只是它是**可关的**（一个 ×）。
+            */}
+            {tagLabels.length > 0 && (
+              <div className="recipes-filters__row">
+                <span className="recipes-filters__label">标签</span>
+                <div className="recipes-filters__track">
+                  <button
+                    type="button"
+                    className="recipes-tag-chip"
+                    onClick={() => updateSearch({ tag: '' })}
+                    aria-label={`去掉标签筛选：${tagLabels.join('、')}`}
+                  >
+                    {tagLabels.join('、')} <span aria-hidden>×</span>
+                  </button>
+                </div>
+              </div>
+            )}
             {filters.isPending && <RecipeStatus title="分类加载中…" loading />}
             {filters.isError && <RecipeStatus title="筛选分类加载失败" onRetry={() => { void filters.refetch() }}>{recipeErrorMessage(filters.error)}</RecipeStatus>}
             {filters.data && <>
@@ -158,7 +188,7 @@ export default function RecipeListPage() {
           activeKey={category}
           onChange={(key) => { preferences.setCategory(key); updateSearch({ category: key }) }}
           fill
-          renderPanel={(key) => <CategoryPanel q={q} cuisine={cuisine} category={key} />}
+          renderPanel={(key) => <CategoryPanel q={q} cuisine={cuisine} tag={tag} category={key} />}
         />
       </div>
     </Page>
@@ -176,8 +206,8 @@ export default function RecipeListPage() {
  * 页被挪进 `.swipe-pager__panel` 之后，`closest('.tab-layout__body')` 还是同一个容器
  * （邻居页被 `overflow-x: clip` 剪在屏外，视口判定里不算"相交"，所以它在屏外时不会误触发）。
  */
-function CategoryPanel({ q, cuisine, category }: { q: string; cuisine: string; category: string }) {
-  const recipes = useRecipes({ q, category, cuisine })
+function CategoryPanel({ q, cuisine, tag, category }: { q: string; cuisine: string; tag: string; category: string }) {
+  const recipes = useRecipes({ q, category, cuisine, tag })
   const sentinel = useRef<HTMLDivElement>(null)
   const items = recipes.data?.pages.flatMap((page) => page.items) || []
   const total = recipes.data?.pages[0]?.total || 0

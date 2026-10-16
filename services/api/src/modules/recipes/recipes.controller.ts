@@ -42,6 +42,7 @@ export class RecipesController {
   @ApiQuery({ name: 'q', required: false, type: String })
   @ApiQuery({ name: 'category', required: false, type: String })
   @ApiQuery({ name: 'cuisine', required: false, type: String })
+  @ApiQuery({ name: 'tag', required: false, type: String, description: '按标签精确筛（可逗号给多个＝命中其一，如 秋季,秋季菜谱）' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: '1–10000，默认 1' })
   @ApiQuery({ name: 'pageSize', required: false, type: Number, description: '1–100，默认 12' })
   @ApiQuery({ name: 'mine', required: false, type: String, description: '只看自己家上传的（F1-12）' })

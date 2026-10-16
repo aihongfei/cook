@@ -43,6 +43,10 @@ export interface DecideResult {
   canSwap: boolean
   /** `null` = 拿不出菜（空库、或口味档案排掉了全部），此时 `reason` 是原因 */
   recipe: DecideDish | null
+  /** 这一次是按哪个场合挑的（`null` = 没要求）。2026-10-16 加的「换个场合挑」 */
+  occasion?: string | null
+  /** 那个场合的三个字（"来客人了"）——后端给，前端不查表 */
+  occasionLabel?: string | null
 }
 
 export async function fetchDecide(exclude: string[] = [], signal?: AbortSignal): Promise<DecideResult> {
@@ -51,6 +55,28 @@ export async function fetchDecide(exclude: string[] = [], signal?: AbortSignal):
     signal,
   })
   return data
+}
+
+/**
+ * 「换个场合挑」（2026-10-16）：带着一个场合标签**重问一次**「帮我决定」。
+ *
+ * 与 `useDecide` 同一个接口，但**不复用它的 mutation**：那个的结果存在
+ * `stores/today-session` 里，为的是"点菜名进详情再返回时那道菜原样还在"（用户 2026-10-13
+ * 的原话"保持原样"）。而这一条是抽屉里的一个小工具——点一下「来客人了」就是想换一道，
+ * 结果只属于当前这一次点击，不该写进那个 store（写进去会污染"返回时原样"的语义）。
+ */
+export function useDecideForOccasion() {
+  return useMutation({
+    mutationFn: async ({ occasion, exclude }: { occasion: string; exclude: string[] }) => {
+      const { data } = await apiClient.get<DecideResult>('/discover/decide', {
+        params: {
+          occasion,
+          exclude: exclude.length ? exclude.join(',') : undefined,
+        },
+      })
+      return data
+    },
+  })
 }
 
 /**

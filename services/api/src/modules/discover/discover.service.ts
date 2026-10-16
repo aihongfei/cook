@@ -31,6 +31,7 @@ import {
   fillWithExtras,
   parseRecommendCount,
   pickRecommendations,
+  sample,
   scoreCandidates,
   type RecommendScore,
 } from './recommend.rules'
@@ -46,6 +47,19 @@ import {
   spreadSummary,
   type SpreadCandidate,
 } from './spread.rules'
+import {
+  OCCASIONS,
+  SEASON_NOTE,
+  SEASON_TAGS,
+  SEASON_TITLE,
+  SEASONAL_PREVIEW,
+  occasionLabel as occasionLabelOf,
+  occasionReason,
+  monthlyReport,
+  parseOccasion,
+  seasonOf,
+  topDishOf,
+} from './discover-page.rules'
 
 /**
  * 家人最爱 / 家人常点（M5 / F5-02）。口径见 D-038。
@@ -156,7 +170,8 @@ export class DiscoverService {
    * - **不调 AI**：纯规则，毫秒级。这条出口的意义是"立刻给我一个答案"，
    *   让用户等十几秒（那是「AI 帮你想」）就违背了它的用途。
    */
-  async decide(userId: string, rawExclude?: unknown) {
+  async decide(userId: string, rawExclude?: unknown, rawOccasion?: unknown) {
+    const occasion = parseOccasion(rawOccasion)
     const membership = await this.prisma.familyMember.findUnique({
       where: { userId },
       include: { family: true },
@@ -182,7 +197,7 @@ export class DiscoverService {
       this.cookedRows(familyId, scope === 'mine' ? userId : null),
       this.favoriteRows(familyId, scope === 'mine' ? userId : null),
       this.prisma.recipe.findMany({
-        select: { id: true, name: true, image: true, imageKey: true, category: true, cuisine: true, calories: true, caloriesEstimated: true, spiciness: true, ingredients: true },
+        select: { id: true, name: true, image: true, imageKey: true, category: true, cuisine: true, calories: true, caloriesEstimated: true, spiciness: true, ingredients: true, tags: true },
       }),
     ])
 
@@ -208,6 +223,13 @@ export class DiscoverService {
 
     const candidates: DecideCandidate[] = []
     for (const recipe of recipes) {
+      /*
+       * 场合是一道**硬筛**（不是加分）：用户点了「来客人了」，就不会接受一道快手小炒。
+       * 放在口味之前——它是这一轮候选的入口条件，先按它收窄再看口味更省事。
+       * 标签为 null 的菜（16 道自建）一律不命中：场合是用户明确提的要求，
+       * "没标标签"不等于"适合这个场合"。
+       */
+      if (occasion && !((recipe.tags as string[] | null) ?? []).includes(occasion)) continue
       const ingredients = readIngredientNames(recipe.ingredients)
       // 口味优先于一切：有人过敏的菜根本不该成为"这个家的主意"（F5-03 同一个判据）
       if (
@@ -250,8 +272,16 @@ export class DiscoverService {
 
     return {
       scope,
-      /** 一句话说清为什么是这道（后端拼，前端只照搬）——与采购清单那句同一条规矩 */
-      reason: picked ? decideReason(picked) : null,
+      /** 这一次是按哪个场合挑的（`null` = 没要求，走默认那一路） */
+      occasion: occasion,
+      occasionLabel: occasion ? occasionLabelOf(occasion) : null,
+      /**
+       * 一句话说清为什么是这道（后端拼，前端只照搬）——与采购清单那句同一条规矩。
+       *
+       * 有场合时把"按你说的 X 挑的"**拼在前面**而不是替掉原来的理由：
+       * 用户刚点了一个词，他要看见那个词起作用了；而冰箱与家人信号那几句仍是真事。
+       */
+      reason: picked ? (occasion ? occasionReason(occasion, decideReason(picked)) : decideReason(picked)) : null,
       fridgeEmpty: fridgeRows.length === 0,
       /** 这一轮还能不能继续换（前端据此决定「换一道」是否可点） */
       canSwap: left.length > 1,
@@ -677,6 +707,96 @@ export class DiscoverService {
     }
   }
 
+  /**
+   * 「时令精选」（发现页那一块，2026-10-16 新增）：**这个季节有什么**。
+   *
+   * 与「摇一桌」（配这一餐）、「帮我决定」（挑一道）问的不是同一件事：
+   * 这一块给的是"天凉了，这些正当时"——一批可以逛的菜，点进去看做法。
+   *
+   * 三件事刻意的：
+   *
+   * - **季节由月份算**（`seasonOf`，纯函数、单测直接验）：不接受调用方传季节。
+   *   传进来的话就会有人做出"十二月看夏菜"的入口，而这一块的全部意思就是"跟着时令走"；
+   * - **按标签精确取**（`SEASON_TAGS` 的并集，不是 `q` 搜索）：搜「秋季」会多出名字里
+   *   带"秋"的 3 道，而返回里那个 `count` 是要印在界面上的（「秋日时令 · 38 道」）；
+   * - **菜谱全表扫再按标签过滤**：标签是 JSON 列，Prisma 的 `array_contains` 在 MySQL 上
+   *   第一版能过（见 builtin-recipe.provider 的 list），但这里还要**同时算那个 count**
+   *   ——计数与列表必须是同一次筛选出来的（分两次查必然出现"写着 38 道、点进去 35 道"）。
+   */
+  async seasonal(userId: string) {
+    const membership = await this.prisma.familyMember.findUnique({
+      where: { userId },
+      include: { family: true },
+    })
+    if (!membership) throw new NotFoundException('先加入家庭，才有这一季的菜')
+    const { familyId } = membership
+    const role = membership.role as FamilyRole
+    const scope = visibleToMember(membership.family.shared, role)
+
+    const now = new Date()
+    const season = seasonOf(now.getMonth() + 1)
+    const tags = SEASON_TAGS[season] ?? []
+
+    /*
+     * 可见性：季节菜是**公共菜谱库**的内容（不是"你家的"），所以这里与 `/recipes` 同一口径
+     * ——全局库 + 自己家的 + 我自己的。少了中间那条，家庭自己上传的应季菜就看不到。
+     */
+    const recipes = await this.prisma.recipe.findMany({
+      where: {
+        OR: [
+          { familyId: null, createdById: null },
+          { familyId: null, createdById: userId },
+          ...(familyId ? [{ familyId }] : []),
+        ],
+      },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      select: { id: true, name: true, image: true, imageKey: true, category: true, cuisine: true, tags: true },
+    })
+
+    const seasonal = recipes.filter((recipe) => {
+      const rowTags = (recipe.tags as string[] | null) ?? []
+      return tags.some((tag) => rowTags.includes(tag))
+    })
+
+    return {
+      scope,
+      /** 哪一季（春/夏/秋/冬） */
+      season,
+      title: SEASON_TITLE[season] ?? '时令精选',
+      note: SEASON_NOTE[season] ?? '',
+      /** 这一季一共几道（与下面 items 同一次筛选的结果） */
+      count: seasonal.length,
+      /** 点进菜谱小书要用的查询（`/recipes?tag=...`）——前端不自己拼标签名 */
+      tagQuery: tags.join(','),
+      /** 只给一屏：这一块是"看几道应季的"，不是菜谱列表的另一个入口 */
+      items: seasonal.slice(0, SEASONAL_PREVIEW).map((recipe) => ({
+        id: recipe.id,
+        name: recipe.name,
+        image: publicImageUrl(recipe.imageKey, recipe.image),
+        category: recipe.category,
+        cuisine: recipe.cuisine,
+      })),
+    }
+  }
+
+  /**
+   * 「换个场合挑」的那几个词（发现页抽屉里一行胶囊，2026-10-16 定）。
+   *
+   * 为什么要走接口而不是前端写死：**每个词后面的道数是真的**（74/46/33/33），
+   * 而那个数字要印在胶囊旁边。写死的话，库里进了一批菜之后界面还在说 74 道。
+   * 只算一次全表（与 seasonal 同一手法），四个数一起给。
+   */
+  async occasions() {
+    const recipes = await this.prisma.recipe.findMany({ select: { tags: true } })
+    return {
+      items: OCCASIONS.map((occasion) => ({
+        label: occasion.label,
+        tag: occasion.tag,
+        count: recipes.filter((recipe) => ((recipe.tags as string[] | null) ?? []).includes(occasion.tag)).length,
+      })),
+    }
+  }
+
   /** 「做过」的行（F5-02 家人最爱与 F5-05 帮我决定共用：只认 DONE、按餐去重） */
   private async cookedRows(familyId: string, onlyUserId: string | null): Promise<CookedRow[]> {
     const rows = await this.prisma.orderItem.findMany({
@@ -709,6 +829,92 @@ export class DiscoverService {
       select: { recipeId: true, userId: true },
     })
   }
+
+  /**
+   * 「家庭月报」（发现页那一块，2026-10-16 新增）：**全家这个月过得怎么样**。
+   *
+   * 与「我的」页的个人打卡热力图、与「家人最爱」的菜榜单都不是一回事：
+   * 那两个一个只算我、一个只排菜，而"我们一起过了个怎样的十月"没人讲。
+   * 口径与四个数的取法见 `discover-page.rules`（那里是判据的唯一来源，
+   * 包括"不足 3 顿整块不画"与"不给假的第一名"）。
+   */
+  async monthlyReport(userId: string) {
+    const membership = await this.prisma.familyMember.findUnique({
+      where: { userId },
+      include: { family: true },
+    })
+    if (!membership) throw new NotFoundException('先加入家庭，才有这个月的总结')
+    const { familyId } = membership
+    const role = membership.role as FamilyRole
+    const scope = visibleToMember(membership.family.shared, role)
+
+    const now = new Date()
+    // 本月第一天与下月第一天：用本地日历月，与热力图按"服务器本地时区的日历日"归一同一口径
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+
+    const [meals, photos] = await Promise.all([
+      this.prisma.mealOrder.findMany({
+        where: {
+          familyId,
+          mealDate: { gte: monthStart, lt: monthEnd },
+          ...(scope === 'mine' ? { items: { some: { userId } } } : {}),
+        },
+        select: {
+          mealDate: true,
+          status: true,
+          items: { select: { recipeName: true } },
+        },
+      }),
+      this.prisma.checkIn.count({
+        where: {
+          familyId,
+          ...(scope === 'mine' ? { userId } : {}),
+          checkDate: { gte: monthStart, lt: monthEnd },
+        },
+      }),
+    ])
+
+    const done = meals.filter((meal) => meal.status === 'DONE')
+    /*
+     * "试过几种菜"按**已做好的餐**里出现过的菜名去重——
+     * 安排了但没做的不算"试过"（与「家人最爱」只认 DONE 同一条线）。
+     * 按菜名而不是 recipeId：自由菜品没有 recipeId，而两道同名菜在做菜这件事上是同一道菜。
+     */
+    const kinds = new Set<string>()
+    const counts = new Map<string, { count: number; lastOn: string }>()
+    for (const meal of done) {
+      const on = monthDayLabel(meal.mealDate)
+      for (const item of meal.items) {
+        kinds.add(item.recipeName)
+        const row = counts.get(item.recipeName)
+        // 同一个月里同名菜算一次以上：次数用于排"最常做的"，日期留**最近**那次
+        if (row) counts.set(item.recipeName, { count: row.count + 1, lastOn: on })
+        else counts.set(item.recipeName, { count: 1, lastOn: on })
+      }
+    }
+    const top = topDishOf(
+      [...counts.entries()].map(([name, row]) => ({ name, count: row.count, lastOn: row.lastOn })),
+    )
+
+    return {
+      scope,
+      /** 这是哪个月（`YYYY-MM`）：界面标题用它，也让调用方能判断自己拿的是不是当月 */
+      month: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
+      /**
+       * `null` = 这个月还不够 3 顿，**整块不画**（不是错误）。
+       * 与「家人最爱」的空态同一条线：没有就说没有，不塞一个填坑的假总结。
+       */
+      report: monthlyReport({
+        meals: meals.length,
+        done: done.length,
+        kinds: kinds.size,
+        photos,
+        topDish: top?.name ?? null,
+        topDishOn: top?.on ?? null,
+      }),
+    }
+  }
 }
 
 /** 最近 `days` 天的日期键（含今天）：用来判断"最近刚做过" */
@@ -716,6 +922,16 @@ function recentDayKeys(days: number, now: Date): string[] {
   return Array.from({ length: days }, (_, index) =>
     dateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - index)),
   )
+}
+
+/**
+ * `mealDate`（库里按 UTC 零点存的日期列）→ 脚注里那个 `M/D`。
+ *
+ * **必须用 UTC 读**：写进去时就归一成了 UTC 零点（见 orders.rules 的 `dateOnly`），
+ * 用本地时区读会整体差一天——那是"10/16 做的"变成"10/15"那种错。
+ */
+function monthDayLabel(mealDate: Date): string {
+  return `${mealDate.getUTCMonth() + 1}/${mealDate.getUTCDate()}`
 }
 
 /**

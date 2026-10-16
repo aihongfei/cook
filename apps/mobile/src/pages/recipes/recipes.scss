@@ -201,6 +201,25 @@
     padding: 5px 11px;
   }
 }
+
+/*
+ * 「标签」那一枚（发现页的「时令精选」点进来时才是这一行）：
+ * 与品类/菜系同外形（.chip），但**可关**——所以它是个 button 而不是 Chip，
+ * 文字里带一个 ×。用户从时令精选进来只会看到"共 38 道"，没有这一行就没有任何东西
+ * 解释为什么少了这么多（他会以为菜谱库只剩 38 道）。
+ */
+.recipes-tag-chip {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: #6b3a17;
+  background: color-mix(in srgb, var(--color-brand) 14%, var(--color-paper));
+  border: 1px solid var(--color-brand);
+  border-radius: 999px;
+}
 .recipes-count { padding: 18px 0 12px; font-size: 13px; color: var(--color-ink-3); }
 .recipes-grid {
   display: grid;

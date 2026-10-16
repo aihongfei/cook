@@ -81,6 +81,16 @@ function mockApi(overrides: Record<string, unknown> = {}) {
     if (url === '/orders/options') return Promise.resolve({ data: { meals: [], statuses: [], dayOptions: [{ value: '2026-10-15', label: '今天' }] } } as never)
     if (url === '/ai/status') return Promise.resolve({ data: { configured: true, model: 'm' } } as never)
     if (url === '/recipes') return Promise.resolve({ data: { items: [], total: 0, page: 1, pageSize: 12 } } as never)
+    /*
+     * 2026-10-16 加的几块（D-108）。上一条用例只关心「今天吃什么」那一块，
+     * 但页面会把三块新东西一起画出来——不给它们数据就会走 error 分支，
+     * 于是每一条用例都在渲染三条"暂时打不开"，噪声大且掩盖真问题。
+     * 这里给**空但合法**的响应（新家庭那一档正是这个样子）。
+     */
+    if (url === '/discover/seasonal') return Promise.resolve({ data: { season: '秋', title: '秋日时令', note: '', count: 0, tagQuery: '秋季', items: [] } } as never)
+    if (url === '/discover/flip') return Promise.resolve({ data: { limit: 12, remaining: 0, items: [] } } as never)
+    if (url === '/discover/report') return Promise.resolve({ data: { scope: 'family', month: '2026-10', report: null } } as never)
+    if (url === '/discover/occasions') return Promise.resolve({ data: { items: [] } } as never)
     throw new Error(`未预期的请求：${url}`)
   })
 }
