@@ -5527,3 +5527,67 @@ node services/api/scripts/verify-patrol-http.cjs            # 33/33 —— 巡�
 `DECISIONS.md` **D-097**、`RISKS.md` **R-079**、
 `services/api/scripts/verify-notifications-change.cjs`、
 `services/api/src/modules/notifications/notifications.rules.ts`（区域与开关的映射只此一份）。
+
+## R-090 验「状态机按钮"该显示哪几个"」怎么验（D-098 / R-80 配套，✅ 已验证，2026-10-16）
+
+### 一、什么时候用这个
+
+改了**状态机的迁移表**、**权限**（`ROLE_CAPABILITIES`）、或 `nextActionsFor` 的算法中的任何一项。
+典型症状是"某张卡上多了一颗/少了一颗按钮"——**接口 200、单测全绿也可能错**，
+因为"允许的迁移"与"该显示的按钮"是两件事（见 R-80）。
+
+### 二、三层证据，缺一层都会漏
+
+```bash
+# ① 规则层（宿主机源码，秒级）：不变式 + 逐角色逐状态
+pnpm --dir services/api test            # 找 orders.rules.test.ts 里那两条
+
+# ② 真实请求（要先把新代码装进容器！）
+docker compose up -d --build api
+node services/api/scripts/verify-orders-http.cjs    # 断言 nextActions 的具体取值
+
+# ③ 界面层（浏览器，360×844）：动作条上**实际渲染**出哪几颗
+```
+
+### 三、那个必须记住的坑：容器里跑的是构建产物
+
+`services/api/Dockerfile` 是 `COPY dist` 的多阶段构建——**改了源码不重建容器，
+接口验的就是旧代码**。本次第一遍就撞上了：`tsc` 绿、单测绿、接口红，
+一度以为改错了；`docker compose up -d --build api` 之后 145/145。
+
+**判据**：`tsc`/单测（宿主机源码）与真实请求（容器 dist）**结果不一致**时，
+先怀疑环境差别，别怀疑自己的改动。
+
+### 四、界面那一层怎么读（本项目里工具点击不稳，见 R-070 五）
+
+不靠点击，靠**读动作条上的按钮文案**——那就是用户看到的东西：
+
+```js
+// 页内求值：逐张卡列出流转按钮
+Array.from(document.querySelectorAll('.order-card')).map((card) => {
+  const bar = card.querySelector('.order-card__actions')
+  return { status: card.innerText.split('\n')[0], buttons: bar ? Array.from(bar.querySelectorAll('button')).map((b) => b.innerText.trim()) : [] }
+})
+```
+
+要验"点下去真的变"时，页内 `btn.click()` 足以触发 React 处理函数（本项目已验证有效）；
+`locator.click()` 在本应用所有页面都超时（可操作性检查过不去），**那是工具的限制，不是 bug 证据**。
+
+### 五、这一批的期望值（照抄即可）
+
+| 谁的卡 | 状态 | 动作条应当是 |
+| --- | --- | --- |
+| 掌勺人/帮厨 | 待确认 | `选好了` · `取消这餐` |
+| 掌勺人/帮厨 | 已安排 | `开始做` · `取消这餐` |
+| 任何角色 | 准备中 | `做好了` |
+| 吃货（EATER） | 待确认 / 已安排 / 准备中 | **只有** `做好了` |
+| 任何角色 | 已做好 / 已取消 | 空（终态） |
+
+**判据是"前进按钮 ≤ 1 颗"**（前进 = 排除 `取消这餐`），不是"必须恰好是某个组合"——
+将来给某一步加台阶时，这一列该跟着改，而那条不变式会提醒你回来改。
+
+### 六、相关
+
+`DECISIONS.md` **D-098**、`RISKS.md` **R-80**、
+`services/api/src/modules/orders/orders.rules.ts`（`ALLOWED_TRANSITIONS` / `FLOW_NEXT`）、
+`services/api/scripts/verify-orders-http.cjs`；容器那条坑另见本文件开头的「注意（容器代码是构建产物）」。

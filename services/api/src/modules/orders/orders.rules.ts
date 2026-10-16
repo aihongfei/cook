@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common'
 import { MealSlot, OrderStatus } from '@prisma/client'
-import { CAPABILITIES, FamilyRole, can } from '../family/family.roles'
+import { CAPABILITIES, Capability, FamilyRole, can } from '../family/family.roles'
 
 /**
  * 点单的纯规则（M3 / F3-01~F3-05，口径见 D-022）。
@@ -51,8 +51,26 @@ export const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   CANCELED: [],
 }
 
+/**
+ * 正向那条路的**下一级台阶**（只用于界面：一次只出一颗前进按钮）。
+ *
+ * `ALLOWED_TRANSITIONS` 回答的是"**允许**迁到哪几个状态"（校验用），
+ * 这一张回答的是"界面上那颗前进按钮该是哪个"（显示用）——两件事，所以两张表。
+ * 上一版拿前一张当后一张用，于是 `PENDING/PLANNED` 上「开始做」与「做好了」
+ * 并排出现（用户 2026-10-16：「开始做 做好了怎么同时出现了，这不是流程吗」）。
+ *
+ * 终态（`DONE`/`CANCELED`）为 `null`：流程已经走完了，没有下一级台阶。
+ */
+const FLOW_NEXT: Record<OrderStatus, OrderStatus | null> = {
+  PENDING: 'PLANNED',
+  PLANNED: 'COOKING',
+  COOKING: 'DONE',
+  DONE: null,
+  CANCELED: null,
+}
+
 /** 迁到某个目标状态需要哪个能力（复用 M2 的 6 个 key，不新增） */
-export const TRANSITION_CAPABILITY: Record<OrderStatus, string> = {
+export const TRANSITION_CAPABILITY: Record<OrderStatus, Capability> = {
   PENDING: CAPABILITIES.MENU_MANAGE,
   PLANNED: CAPABILITIES.MENU_MANAGE,
   COOKING: CAPABILITIES.MENU_MANAGE,
@@ -198,9 +216,44 @@ export function nextActionsFor(
   role: FamilyRole,
   status: OrderStatus,
 ): { status: OrderStatus; label: string; needsConfirm: boolean }[] {
-  return ALLOWED_TRANSITIONS[status]
-    .filter(next => can(role, TRANSITION_CAPABILITY[next] as never))
-    .map(next => ({ status: next, label: ACTION_LABEL[next], needsConfirm: NEEDS_CONFIRM.includes(next) }))
+  const actionOf = (next: OrderStatus) => ({
+    status: next,
+    label: ACTION_LABEL[next],
+    needsConfirm: NEEDS_CONFIRM.includes(next),
+  })
+
+  const actions: ReturnType<typeof actionOf>[] = []
+
+  /*
+   * 前进按钮**只有一颗**：正向那条路的一级台阶（见 `FLOW_NEXT`）。
+   * 用户 2026-10-16 报「开始做 做好了怎么同时出现了，这不是流程吗」——
+   * 上一版是照着"允许的迁移"整排画的，而 `PENDING/PLANNED` 上**允许的**有两颗
+   * （`DONE` 那条捷径是为了让吃货点得到它，见下面 else 分支），于是并排显示。
+   */
+  const step = FLOW_NEXT[status]
+  if (step && can(role, TRANSITION_CAPABILITY[step])) {
+    actions.push(actionOf(step))
+  } else if (can(role, TRANSITION_CAPABILITY.DONE) && ALLOWED_TRANSITIONS[status].includes('DONE')) {
+    /*
+     * 推不动这一级台阶的人（吃货没有 `menu.manage`）→ 把这颗「做好了」给他。
+     *
+     * 这是 `PENDING/PLANNED → DONE` 那条捷径**唯一**的用途：没有它，吃货在
+     * "待确认/已安排"的卡上一颗按钮都没有，等于永远点不到「做好了」
+     * ——正是 2026-10-15 用户报的「做好了点击不了」（D-086 一）。
+     * 终态进不来这个分支：`ALLOWED_TRANSITIONS[DONE/CANCELED]` 里没有 `DONE`。
+     */
+    actions.push(actionOf('DONE'))
+  }
+
+  /*
+   * 「取消这餐」不是流程里的一步（它是"不做了"，通向终态），所以**不占那颗前进按钮的名额**，
+   * 单独判断、单独排在后面——能取消的才看得到（吃货没有 `menu.manage`，看不到）。
+   */
+  if (ALLOWED_TRANSITIONS[status].includes('CANCELED') && can(role, TRANSITION_CAPABILITY.CANCELED)) {
+    actions.push(actionOf('CANCELED'))
+  }
+
+  return actions
 }
 
 /**

@@ -337,10 +337,10 @@ async function main() {
 
   const planned = await callWithRetry('POST', `/orders/meals/${mealKey}/status`, { token: mama.token, body: { status: 'PLANNED' } })
   check(
-    '掌勺人推「选好了」→ 已安排 200，下一步是「开始做 / 做好了 / 取消」',
+    '掌勺人推「选好了」→ 已安排 200，前进按钮**只有「开始做」这一级台阶**（另加「取消这餐」）',
     planned.status === 200
       && planned.body?.status === 'PLANNED'
-      && (planned.body?.nextActions ?? []).map(a => a.status).sort().join(',') === 'CANCELED,COOKING,DONE',
+      && (planned.body?.nextActions ?? []).map(a => a.status).sort().join(',') === 'CANCELED,COOKING',
     `${planned.status} status=${planned.body?.status} next=${JSON.stringify((planned.body?.nextActions ?? []).map(a => a.status))}`,
   )
 

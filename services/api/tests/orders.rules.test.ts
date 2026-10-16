@@ -88,16 +88,36 @@ test('每个状态都有中文标签与动作文案（界面直接用，不再�
 })
 
 test('流转权限按目标状态算，且复用 M2 的能力键（不新增）', () => {
-  // 掌勺人/帮厨：能推 待确认→已安排→准备中，能确认做好，能取消
+  /*
+   * 掌勺人/帮厨：**前进按钮一次只出一颗**——正向那条路一步一个台阶
+   * （待确认 →「选好了」、已安排 →「开始做」、准备中 →「做好了」），另加「取消这餐」。
+   *
+   * 用户 2026-10-16 报「开始做 做好了怎么同时出现了，这不是流程吗」：
+   * 2026-10-15 为了让吃货点得到「做好了」，给 `PENDING/PLANNED` 开了直通 `DONE` 的路
+   * （D-086 一，修「做好了点击不了」）；界面当时照着"**允许的**迁移"整排画出来，
+   * 于是同一张卡上并排出现两颗前进按钮。**允许的不等于该显示的**（D-098）。
+   */
   for (const role of ['OWNER', 'COOK'] as const) {
-    const pending = nextActionsFor(role, 'PENDING').map(action => action.status)
-    assert.deepEqual(pending, ['PLANNED', 'DONE', 'CANCELED'], `${role} 在待确认阶段应能安排、做好或取消`)
+    assert.deepEqual(
+      nextActionsFor(role, 'PENDING').map(a => a.status),
+      ['PLANNED', 'CANCELED'],
+      `${role} 在待确认阶段只有「选好了」这一级台阶`,
+    )
+    assert.deepEqual(
+      nextActionsFor(role, 'PLANNED').map(a => a.status),
+      ['COOKING', 'CANCELED'],
+      `${role} 在已安排阶段只有「开始做」这一级台阶`,
+    )
     assert.deepEqual(nextActionsFor(role, 'COOKING').map(a => a.status), ['DONE'], `${role} 应能确认做好`)
   }
   /*
    * 吃货：**任何非终态都能标"做好了"**（2026-10-15 用户要求"任何人都可以点击做好"，
    * 见 D-075；当天用户又报「做好了点击不了」——因为那一步原来只能从「准备中」进，
    * 而"选好了""开始做"都是 menu.manage，吃货一步都推不动，等于永远到不了）。
+   *
+   * "一次只出一颗前进按钮"落到吃货身上就是这一颗：**他推不动流程的台阶时，
+   * 把那颗「做好了」给他**——否则他在"待确认/已安排"的卡上一颗按钮都没有，
+   * 等于把 2026-10-15 修好的东西又改坏了（D-098 二）。
    * 其余动作仍旧推不动：安排、取消、开始做都是掌勺人/帮厨的事。
    *
    * 写法刻意是**逐个状态列出来**，而不是"非终态都行"：将来给 EATER 多放开一步时
@@ -112,6 +132,23 @@ test('流转权限按目标状态算，且复用 M2 的能力键（不新增）'
   // 能力点确实来自 M2 那张表
   assert.equal(CAPABILITIES.MENU_MANAGE, 'menu.manage')
   assert.equal(CAPABILITIES.MENU_CONFIRM, 'menu.confirm')
+})
+
+test('一次只出一颗前进按钮（用户 2026-10-16 的那一条）', () => {
+  /*
+   * 判据写成**对"全体角色 × 全体状态"的不变式**，而不是只钉住出问题的那一格：
+   * "并排两颗前进按钮"是一类错，不是一处错——将来谁再给某一步开一条捷径，
+   * 只要没有一并想清楚"界面上那一颗该是哪个"，这条就会红。
+   */
+  for (const role of ['OWNER', 'COOK', 'EATER'] as const) {
+    for (const status of ORDER_STATUSES) {
+      const forward = nextActionsFor(role, status).filter(a => a.status !== 'CANCELED')
+      assert.ok(
+        forward.length <= 1,
+        `${role} 在 ${status} 出现了 ${forward.length} 颗前进按钮：${forward.map(a => a.label).join('、')}`,
+      )
+    }
+  }
 })
 
 test('会影响别人的动作标了 needsConfirm（前端据此弹二次确认）', () => {
