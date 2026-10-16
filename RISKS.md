@@ -961,3 +961,13 @@ Capacitor 处理带 `capture` 的 file input 时**先用它判有没有相机**�
 
 `DECISIONS.md` **D-091 四**、`DECISIONS.md` D-077（同一判断在换页动画上的先例）、
 `RUNBOOK.md` **R-084**、`apps/mobile/src/lib/scroll-memory.ts`、`apps/mobile/src/layouts/KeepAlivePages.tsx`。
+
+## R-73 米家接入没有面向自建 App 的官方通道；官方 HA 集成许可证**明文禁止**用于 App，只能"绕经自建 HA" 🟡（2026-10-16 调研，待用户决定）
+
+- **背景**：用户问"能不能把米家里的设备显示在我的软件里"。完整调研（三条路径对照 + 难度评估 + 设备边界）见 `docs/context/RESEARCH.md` **八**。
+- **红线（硬约束）**：官方集成 `XiaoMi/ha_xiaomi_home` 的许可证原文"本许可证未授权您将授权作品用于任何其他用途，包括但不限于**开发应用程序（APP）**、Web 服务以及其他形式的软件等"；其 LegalNotice 把"在非 Home Assistant 平台上使用小米云接口"列为侵权。**不许把它的代码/接口直接接入本项目 App。**
+- **唯一官方干净路径**：用户家里自建 Home Assistant（官方集成跑在 HA 里）→ 本项目只读 HA 自己的 REST API（`GET /api/states` 等，长期访问令牌）。代价：家里常驻一台机器 + App 与 HA 的网络可达性（在家直连；在外经后端中转，需内网穿透）。
+- **不推荐路径**：社区逆向库（python-miio / micloud / hass-xiaomi-miot；Node `miio` 包 2018 年已死）——依赖小米私有云接口，随时可能失效、账号有风险；本地模式还要求查询方与设备同局域网，与"后端在公网"的架构不合。
+- **现状**：仓库里目前没有任何智能家居代码或依赖；**要不要做、走哪条路，等用户单独决定**（先落调研、决定权在用户，与推送同类处理）。
+
+- **相关**：`docs/context/RESEARCH.md` 八、`NOW.md`「待你决定」。
