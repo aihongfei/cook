@@ -14,7 +14,8 @@ import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import SwipePager from '@/components/ui/SwipePager'
 import { toast } from '@/components/ui/toast'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import DishCard from '@/pages/kitchen/components/DishCard'
 import RecipeStatus from './components/RecipeStatus'
 import FavoritesList from './components/FavoritesList'
@@ -85,7 +86,7 @@ interface Pick {
 
 export default function MyRecipesPage() {
   const location = useLocation()
-  const back = readBackLink(location.state, '/mine')
+  const back = useBackLink(location.state, '/mine')
   const [params, setParams] = useSearchParams()
   // 认不出的 tab 值一律落回第一个：URL 是不可信输入（用户可能手改、旧链接可能带着别的值）
   const raw = params.get('tab')
@@ -164,7 +165,7 @@ export default function MyRecipesPage() {
     <Page
       fixed={(
         <div className="pscreen my-recipes">
-          <Link className="page-back" to={back.to}>← {back.label}</Link>
+          <BackLink to={back.to} label={back.label} />
           <PageHeader title="我的菜谱" subtitle="我做过、收藏和写下的菜" art="recipes" />
           {/*
             这里只要**tab 条**（不给 `renderPanel`）：能滑的那一组内容在下面那个

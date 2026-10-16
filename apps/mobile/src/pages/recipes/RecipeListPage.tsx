@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { useFavoriteStatus, useToggleFavorite } from '@/api/favorites'
 import { recipeErrorMessage, useRecipeFilters as useFilterOptions, useRecipes } from '@/api/recipes'
 import Chips from '@/components/ui/Chips'
+import BackLink from '@/components/ui/BackLink'
 import SwipePager from '@/components/ui/SwipePager'
 import CornerArt from '@/components/ui/CornerArt'
 import Page from '@/components/ui/Page'
@@ -80,7 +81,7 @@ export default function RecipeListPage() {
         <div className="recipes-page recipes-page--fixed">
           <header className="recipes-heading">
             <CornerArt name="recipes" />
-            <Link to="/kitchen" className="page-back">← 厨房</Link>
+            <BackLink to="/kitchen" label="厨房" />
             <h1>菜谱小书</h1>
             <p>一菜一味，把日子煮得暖暖的</p>
           </header>

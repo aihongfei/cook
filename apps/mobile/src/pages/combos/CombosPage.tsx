@@ -8,7 +8,8 @@ import EmptyState from '@/components/ui/EmptyState'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import { toast } from '@/components/ui/toast'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
 import ComboAddSheet from './components/ComboAddSheet'
 import '../shared.scss'
@@ -33,7 +34,7 @@ export default function CombosPage() {
   const family = useFamily()
   const combos = useCombos({ enabled: Boolean(family.data) })
   const remove = useDeleteCombo()
-  const back = readBackLink(location.state, '/discover')
+  const back = useBackLink(location.state, '/discover')
 
   // 正在一键加入的那一组（抽屉关着时是 null）
   const [adding, setAdding] = useState<Combo | null>(null)
@@ -55,7 +56,7 @@ export default function CombosPage() {
   return (
     <Page>
       <div className="pscreen combos-page">
-        <Link className="page-back" to={back.to}>← {back.label}</Link>
+        <BackLink to={back.to} label={back.label} />
         <PageHeader title="常用组合" subtitle="常一起点的那几组菜，一键加进某一餐" art="recipes" />
 
         {!family.isPending && !family.data ? (

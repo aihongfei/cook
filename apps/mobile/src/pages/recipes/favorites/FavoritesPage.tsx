@@ -1,7 +1,8 @@
-import { Link, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import FavoritesList from '../components/FavoritesList'
 import '../../shared.scss'
 import './favorites.scss'
@@ -15,12 +16,12 @@ import './favorites.scss'
  */
 export default function FavoritesPage() {
   const location = useLocation()
-  const back = readBackLink(location.state, '/mine')
+  const back = useBackLink(location.state, '/mine')
 
   return (
     <Page>
       <div className="pscreen favorites-page">
-        <Link className="page-back" to={back.to}>← {back.label}</Link>
+        <BackLink to={back.to} label={back.label} />
         <PageHeader title="我收藏的菜" subtitle="想做的时候，来这儿找" art="mine" />
         <FavoritesList from={location.pathname} />
       </div>

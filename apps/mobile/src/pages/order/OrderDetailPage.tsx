@@ -13,7 +13,8 @@ import PageHeader from '@/components/ui/PageHeader'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
 import { STATUS_TONE } from '@/components/ui/status-tone'
 import { toast } from '@/components/ui/toast'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import '@/pages/shared.scss'
 import './order-detail.scss'
 
@@ -68,7 +69,7 @@ export default function OrderDetailPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const family = useFamily()
-  const back = readBackLink(location.state, '/order')
+  const back = useBackLink(location.state, '/order')
 
   const meal = useMeal(mealKey)
   const updateStatus = useUpdateMealStatus()
@@ -185,9 +186,7 @@ export default function OrderDetailPage() {
   return (
     <Page>
       <div className="pscreen order-detail">
-        <Link className="page-back" to={back.to}>
-          ← {back.label}
-        </Link>
+        <BackLink to={back.to} label={back.label} />
 
         <PageHeader title="这一餐" subtitle="谁点的、谁定的、谁做的，都在这儿" art="order" />
 

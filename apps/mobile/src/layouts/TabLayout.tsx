@@ -10,6 +10,7 @@ import { tabOf } from '@/pages/back-link'
 import { targetOf } from '@/lib/local-notify'
 import { emitTabRetap } from '@/lib/tab-retap'
 import { pageKeyOf, createScrollMemory } from '@/lib/scroll-memory'
+import { setScrollReader } from '@/lib/back-transition'
 import KeepAlivePages from './KeepAlivePages'
 import { usePageTurn } from './use-page-turn'
 import './TabLayout.scss'
@@ -57,8 +58,19 @@ export default function TabLayout() {
   const pageKey = pageKeyOf(location)
   const bodyRef = useRef<HTMLElement>(null)
   const assistantOpen = useAiAssistantSession((state) => state.open)
-  /** 滚动位置的记忆（见下面两个 effect） */
+  /*
+   * 滚动位置的记忆（见下面两个 effect）。
+   *
+   * 它同时**借给返回动画**（`lib/back-transition` 的 `setScrollReader`）：
+   * 返回那一趟要把下层摆回它上次停的地方，而"上次停在哪儿"只有这张表知道
+   * （表活在 ref 里、没有第二个出口，所以这里主动接上去；卸载时拔掉）。
+   */
   const memoryRef = useRef(createScrollMemory())
+
+  useEffect(() => {
+    setScrollReader(memoryRef.current.read)
+    return () => setScrollReader(null)
+  }, [])
 
   /*
    * 换页时把滚动位置摆回**这一页上次停的地方**。
@@ -196,6 +208,17 @@ export default function TabLayout() {
             <Link
               key={path}
               to={path}
+              /*
+               * **replace**：底栏点多少次都不在历史里堆记录（2026-10-16 / D-105）。
+               *
+               * 用户报的：「连续点击菜单，然后返回都能一直返」——原来每点一个 Tab 压一条历史，
+               * 返回键就一条条退回去。五个 Tab 是**平级的五个岛**，点它们是"换岛"不是"往下走"，
+               * 不该留下可以退回去的脚印（与本项目页内 tab 用 replace 是同一条规矩，D-076）。
+               *
+               * 于是"从详情直接点去别的 Tab"也不再让那条详情留在历史里——
+               * 用户报的第二件事正是它（「点击进入详情再点击其他菜单还能返回去详情」）。
+               */
+              replace
               aria-current={active ? 'page' : undefined}
               className={`tab-bar__item${active ? ' is-active' : ''}`}
               /*

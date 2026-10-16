@@ -7,7 +7,8 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Page from '@/components/ui/Page'
 import { toast } from '@/components/ui/toast'
 import OrderDishSheet from '@/pages/order/components/OrderDishSheet'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import { readPlanTarget } from '@/pages/order/plan-target'
 import RecipeImage from './components/RecipeImage'
 import RecipeOriginBadge from './components/RecipeOriginBadge'
@@ -29,7 +30,7 @@ export default function RecipeDetailPage() {
   }
   // 返回目标由共享的 back-link 判定（**别再自己列白名单**：发现页「摇一道」带过来的
   // '/discover' 就曾因为这里只认 /kitchen 与 /recipes 而被静默丢掉，返回按钮指向了菜谱小书）
-  const back = readBackLink(location.state, '/recipes')
+  const back = useBackLink(location.state, '/recipes')
   // 本周菜单「去安排」带来的目标（F4-02）：只要经过菜谱小书，它就会跟着路由 state 一路到这里。
   // 路由 state 是不可信输入，用 readPlanTarget 读（见该文件）；读不出来就是普通的"想吃这道"。
   const planTarget = readPlanTarget(location.state)
@@ -64,9 +65,7 @@ export default function RecipeDetailPage() {
   return (
     <Page>
       <div className="recipes-page recipe-detail">
-        <Link className="page-back" to={back.to}>
-          ← {back.label}
-        </Link>
+        <BackLink to={back.to} label={back.label} />
         {query.isPending && <RecipeStatus title="正在翻开这道菜谱…" loading />}
         {query.isError && !recipe && (
           <RecipeStatus

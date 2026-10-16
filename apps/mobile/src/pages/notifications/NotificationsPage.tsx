@@ -10,7 +10,8 @@ import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import { toast } from '@/components/ui/toast'
 import { permissionState, type NotifyPermission } from '@/lib/local-notify'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
 import '../shared.scss'
 import './notifications.scss'
@@ -60,7 +61,7 @@ const KIND_STYLE: Record<NotificationKind, { icon: string; tone: string }> = {
 export default function NotificationsPage() {
   const location = useLocation()
   const navigate = useNavigate()
-  const back = readBackLink(location.state, '/mine')
+  const back = useBackLink(location.state, '/mine')
   const board = useNotifications()
   const prefs = useUpdateNotificationPrefs()
   const markRead = useMarkRead()
@@ -110,7 +111,7 @@ export default function NotificationsPage() {
   return (
     <Page>
       <div className="pscreen notifications">
-        <Link className="page-back" to={back.to}>← {back.label}</Link>
+        <BackLink to={back.to} label={back.label} />
         <PageHeader title="家里的消息" subtitle="菜单、饭好了、订单、冰箱、打卡、家人、菜谱" art="recipes" />
 
         {board.isPending && <RecipeStatus title="正在看看家里有什么事…" loading />}

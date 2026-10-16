@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigationType } from 'react-router-dom'
+import { isBackTransitionActive } from '@/lib/back-transition'
 import { pageTurn, type PageTurn } from './page-turn'
 
 /** 换页动画时长（与 TabLayout.scss 里的三条 `animation` 一致） */
@@ -8,7 +9,8 @@ export const PAGE_TURN_MS = 240
 interface Applied {
   /** 这一趟动画属于**哪个页面**（pathname，不含查询串） */
   page: string
-  turn: PageTurn
+  /** 这一趟该播什么；`null` = **不播**（这一趟由返回动画负责，见下） */
+  turn: PageTurn | null
   /** 动画已经收工：不再挂类（见下面那段"保命的一条"） */
   retired: boolean
 }
@@ -37,7 +39,13 @@ interface Applied {
  *   → 一路淡到 1。看上去就是"闪一下"；
  * - **动画类只挂一小会儿，到点摘掉**（见下面那段注释——这是保命的一条），
  *   收工状态跟着**页面**走：同一个页面上改查询串不会把已收工的动画重新挂回来；
- * - **首次进入应用仍然播那条淡入**（与换页前一致），不做特殊化。
+ * - **首次进入应用仍然播那条淡入**（与换页前一致），不做特殊化；
+ * - **返回那一趟不归它管**（2026-10-16，D-106）：那一次有**两层**要动（离开的滑走、
+ *   要回的跟进），由 `lib/back-transition` 统一负责。这条路上再让新页自己从左边滑一次
+ *   就是两层各滑各的。判据是**导航发生的那一刻**去问 `isBackTransitionActive()`：
+ *   返回动画的起点（`startBackNavigation`）就在同一次事件里、**排在任何一次导航之前**，
+ *   所以那一刻问一定问得到。**只在这一刻问**（不进依赖表）也是刻意的：
+ *   这个问题只在"哪一页变成了当前页"时有意义，之后动画自己收工。
  */
 export function usePageTurn(): string {
   const location = useLocation()
@@ -50,16 +58,23 @@ export function usePageTurn(): string {
 
   if (applied.page !== page) {
     const prior = previous.current
+    /*
+     * 这一趟是不是"返回"？是的话**不挂动画类**（`retired: true` 直接标成收工）——
+     * 位移由返回动画的两层给（见 `KeepAlivePages` 的 `--back-leave` / `--back-enter`）。
+     */
+    const byBackTransition = isBackTransitionActive()
     setApplied({
       page,
       // 没有上一页（首次渲染）时把 from 传成 to：`pageTurn` 里 from === to 直接给 fade
-      turn: pageTurn({
-        from: prior?.path ?? current,
-        to: current,
-        fromState: prior?.state,
-        navigationType,
-      }),
-      retired: false,
+      turn: byBackTransition
+        ? null
+        : pageTurn({
+            from: prior?.path ?? current,
+            to: current,
+            fromState: prior?.state,
+            navigationType,
+          }),
+      retired: byBackTransition,
     })
   }
 
@@ -93,5 +108,7 @@ export function usePageTurn(): string {
   if (applied.page !== page) return ''
   // 这一页的动画已经收工（或正在收工）：不挂类 = 基础样式 = 一定看得见
   if (applied.retired) return ''
+  // 这一趟交给返回动画了（`turn === null`）：什么都不挂（见上面那条说明）
+  if (applied.turn === null) return ''
   return `tab-layout__page--${applied.turn}`
 }

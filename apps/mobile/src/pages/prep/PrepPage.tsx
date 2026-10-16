@@ -1,7 +1,8 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useFamily } from '@/api/family'
 import { usePlanBoard, type MealProgressRow, type PlanDay } from '@/api/orders'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import { STATUS_TONE } from '@/components/ui/status-tone'
@@ -72,7 +73,7 @@ export default function PrepPage() {
   const family = useFamily()
   // 7 天：与后端点菜窗口（ORDER_DAY_SPAN）是同一个数，见上面那段说明
   const board = usePlanBoard({ days: 7, enabled: Boolean(family.data) })
-  const back = readBackLink(location.state, '/discover')
+  const back = useBackLink(location.state, '/discover')
 
   const days = board.data?.days ?? []
   const emptyMeals = days.reduce(
@@ -83,7 +84,7 @@ export default function PrepPage() {
   return (
     <Page>
       <div className="pscreen prep-page">
-        <Link className="page-back" to={back.to}>← {back.label}</Link>
+        <BackLink to={back.to} label={back.label} />
         <PageHeader title="备菜计划" subtitle="接下来一周的安排，缺哪天就直接加菜" art="order" />
 
         {!family.isPending && !family.data ? (

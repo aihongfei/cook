@@ -126,9 +126,88 @@
   display: none;
 }
 
+/*
+ * 返回的**两层**（用户 2026-10-16：「需要返回那种从底层页面上方划过的那种效果，
+ * 就和原生那种似的」；D-106）。
+ *
+ * - **上层**＝要离开的那一页（`.tab-layout__page--back-leave`）：从 0 滑到 100%（向右划走）；
+ * - **下层**＝要回去的那一页（`.tab-layout__page--back-enter`）：从 -14% 轻轻跟进到 0。
+ *
+ * 三条刻意的：
+ *
+ * ① **进度只有一个来源**：文档根上的 `--back-progress`
+ * （拖动时由 `lib/back-gesture` 每帧直接写，不进 React——见 `back-transition` 文件头）。
+ * 两层都从它算自己的位移：上层 `p × 100%`，下层 `(1 − p) × −14%`。
+ * 松手后由 `[data-back-phase='animating']` 把 p 定成 1，`transition` 从**当前算出来的值**
+ * 平滑走过去——所以拖到一半松手是接着走，不是从头再来。
+ *
+ * ② **两层都 `fixed`、各带自己的滚动**：它们都不再受主体滚动位置影响，
+ * 于是整趟动画里主体的 `scrollTop` 一动不动（不是"不用管"，见 `KeepAlivePages` 里
+ * 那个占位块：两层都拿走之后主体里没有流内内容，浏览器会把 `scrollTop` 夹成 0）。
+ *
+ * ③ **只盖内容区**：`top/bottom` 卡在状态栏与 Tab 栏之间——底栏与 AI 球不参与这一趟
+ * （它们是"房子"，不是"房间里的纸"；盖住底栏反而会让人以为底栏跟着走了）。
+ *
+ * 上层 `pointer-events: none`：这两百多毫秒里那层是**画面**不是界面，
+ * 手落在屏幕上该点到的是下面那一页。
+ */
+.tab-layout__page--back-leave,
+.tab-layout__page--back-enter {
+  position: fixed;
+  top: var(--safe-top);
+  bottom: calc(var(--spacing-tabbar) + var(--safe-bottom));
+  right: 0;
+  left: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* 自己铺一层纸底：两层都已经脱离外壳那一层背景，不铺的话滑开时会透出下面的内容 */
+  background: var(--color-cream);
+  background-image: var(--paper-grain);
+  background-size: var(--paper-grain-size);
+  will-change: transform;
+}
+
+.tab-layout__page--back-leave {
+  z-index: 3;
+  transform: translateX(calc(var(--back-progress, 0) * 100%));
+  /* 左边那道淡影：滑开时压在下面那一页上，两层才"有厚度"（纯色平移会像硬切） */
+  box-shadow: -10px 0 24px rgb(60 35 20 / 16%);
+  pointer-events: none;
+}
+
+.tab-layout__page--back-enter {
+  z-index: 2;
+  transform: translateX(calc((1 - var(--back-progress, 0)) * -14%));
+}
+
+/*
+ * 松手（或按钮返回）：把进度收到 1，让浏览器从当前位置过渡过去。
+ * `transition` 与目标值同一帧生效也照样播——过渡看的是"改动前后两次计算值"的差，
+ * 不需要提前一帧就位（这是与 `@keyframes` 不同的地方，也是这一版能"接着走"的原因）。
+ */
+.tab-layout__page--back-leave[data-back-phase='animating'],
+.tab-layout__page--back-enter[data-back-phase='animating'] {
+  --back-progress: 1;
+  transition: transform 0.24s ease-out;
+}
+
+/*
+ * 两层都 `fixed` 期间顶住主体的可滚高度（见 `KeepAlivePages` 里那段说明：
+ * 不顶住的话浏览器会把 `scrollTop` 夹成 0，滚动记忆就记错了）。
+ */
+.tab-layout__page-spacer {
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tab-layout__page {
     animation: none;
+  }
+
+  /* 不想要动效的人：直接到位（两层的终值仍然正确，只是不播过程） */
+  .tab-layout__page--back-leave,
+  .tab-layout__page--back-enter {
+    transition: none;
   }
 }
 

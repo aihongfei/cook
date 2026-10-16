@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toast'
 import { installAndroidBack } from '@/lib/android-back'
+import { setBackNavigator } from '@/lib/back-go'
 import { installNoImageDrag } from '@/lib/no-image-drag'
 import { LocalNotifySync } from '@/lib/local-notify-sync'
 import { PatrolSync } from '@/lib/patrol-sync'
@@ -15,9 +16,16 @@ import '@/styles/index.scss'
 /*
  * 安卓系统返回键（F14-01 / R-13 ①）：WebView 不接管的话，返回键在二级页上毫无反应
  * （模拟器实测：在 /taste 按返回，页面纹丝不动）。装一次、全局生效——
- * 弹层优先关、再回退、到根才退出 App。浏览器里这个函数直接返回空卸载器，没有副作用。
+ * 弹层优先关、再回上一层、到首页才退出 App。浏览器里这个函数直接返回空卸载器，没有副作用。
  */
 installAndroidBack()
+
+/*
+ * 「退回去」接到真实路由上（D-105）：页面上的「← 返回」与系统返回键都调
+ * `lib/back-go` 的 `goBack`，而它需要路由的 `navigate`。接线放在最外层（这里）——
+ * 路由对象 import 页面、页面又要用 `goBack`，直接互相 import 会绕成环。
+ */
+setBackNavigator((to, options) => void router.navigate(to, options))
 
 /*
  * 图片不能拖（用户 2026-10-16）：与上一条同一类——装一次、全局生效。

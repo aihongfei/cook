@@ -6089,3 +6089,76 @@ toast 是 `「X」没删掉：<后端原话>`（不是笼统的"删除失败"）
 
 `RISKS.md` R-85（这一套的两个静默失败）、`lib/long-press.ts` 文件头、
 `RUNBOOK.md` **R-093**（栏距/间距怎么量）、`D-103` / `D-104`。
+
+## R-096 验「返回」怎么验：三件事各验各的（D-105 / D-106 配套，✅ 已验证，2026-10-16）
+
+### 一、什么时候用这个
+
+改了**返回键、底栏导航、页面的返回箭头、两层的返回动画**中任何一处。用户报的措辞
+通常很短——「返回能一直返」「返回又回到详情了」「返回没有原生那种划过去的效果」——
+而这一族错**都不报错、页面照常跳**，只是去了不该去的地方。
+
+### 二、三层证据，缺一层就有一类错验不到
+
+```bash
+# ① 判据层（"该去哪"是纯函数）
+pnpm --dir apps/mobile test src/lib/back-policy.test.ts src/lib/back-target.test.tsx
+
+# ② 接线层（三件事是否同一次点击里一起发生）
+pnpm --dir apps/mobile test src/lib/back-go.test.ts src/lib/back-transition.test.ts src/lib/android-back.test.ts
+
+# ③ 真实层（浏览器 + 模拟器，见下面第三、四节）
+```
+
+### 三、浏览器里怎么量（**这个 IAB 里两项都会被冻结**）
+
+`history.state.idx` 是**主判据**：它由 react-router 维护，`replace` 不涨、`push` 涨 1。
+
+```js
+const idx = () => ({ idx: window.history.state?.idx ?? null, href: location.pathname });
+// ① 连点五个底栏 Tab：idx 必须**不动**（改前会 +5）
+// ② 厨房 → 一个菜谱详情：idx +1；再点底栏「冰箱」：idx **仍不动**（改前 +1）
+// ③ tab.back()（等于浏览器后退）：应当落回**厨房**，不是刚才那个详情
+```
+
+**坑（与 R-092 同族，这次又多一条）**：这个 IAB 标签页里
+**rAF 不回调、元素的 `scroll` 事件不派发、CSS 过渡/动画也不推进**
+（`transitionend` 一条都不派发，computed style 停在起点）。
+所以：
+
+- "滚动位置有没有保住"必须 shim rAF 并手补 `scroll` 事件（照 R-092 那两段）；
+- **"两层的动画看起来对不对"在浏览器里验不了**——能验的只有类名、终值、终值与公式。
+  终值这样量（把过渡临时关掉读终值）：
+
+```js
+const el = [...document.querySelectorAll('.tab-layout__page')].find((e) => e.className.includes('back-leave'));
+el.style.transition = 'none';
+getComputedStyle(el).transform          // 期望 matrix(1,0,0,1,360,0)（360 是容器宽）
+```
+
+- 动效本身**只能在模拟器上目视**（第四节第 ④ 条）。
+
+### 四、模拟器上逐条验（真正的判据）
+
+```bash
+pnpm --dir apps/mobile exec cap sync android
+cd apps/mobile/android && ./gradlew :app:assembleDebug && adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+| # | 操作 | 判据 |
+| --- | --- | --- |
+| ① | 进「冰箱」页 → 按返回 | 落**厨房**；再按 → 回到桌面（`dumpsys activity activities \| grep -m1 ResumedActivity` 不是本应用） |
+| ② | 连点五个底栏 Tab → 按返回 | **最多两下**退出（改前要按六下） |
+| ③ | 进某一餐详情 → 点底栏「订单」→ 按返回 | **不回详情** |
+| ④ | 在二级页上从屏幕左缘拖 | 页面**跟手**右移、下层露出来；松手落位（Android 14+；13 及以下退化成一趟 0.24s 动画） |
+| ⑤ | 通知中心 → 某一餐 → 某道菜的菜谱 → 连按两次返回 | 回到**通知中心**（中间那一站的箭头文案不许变成"返回点菜单"） |
+
+`adb shell input keyevent KEYCODE_BACK` 只能验**松手**那一条路径；
+**跟手拖动必须在模拟器上手动从屏幕左缘拖**（`input swipe` 从 x=0 起手也能触发预测式返回），
+证据用 `adb logcat | grep BackGesture` 的进度序列 + 录屏。
+
+### 五、相关
+
+`DECISIONS.md` **D-105 / D-106**、`RISKS.md` **R-86**、`RISKS.md` R-61 / R-64 / R-65（"活着但看不见"那一族）、
+`apps/mobile/src/lib/back-policy.ts`、`back-target.ts`、`back-go.ts`、`back-transition.ts`、
+`apps/mobile/src/components/ui/BackLink.tsx`、`RUNBOOK.md` **R-092**（滚动位置的测法）。

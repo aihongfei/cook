@@ -17,7 +17,8 @@ import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import { toast } from '@/components/ui/toast'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import '@/pages/shared.scss'
 import './shopping.scss'
 
@@ -105,7 +106,7 @@ export default function ShoppingPage() {
   const family = useFamily()
   const location = useLocation()
   // 没有来源时退「发现」：采购清单是从那儿的备菜计划/本周菜单推出来的（入口也在那儿）
-  const back = readBackLink(location.state, '/discover')
+  const back = useBackLink(location.state, '/discover')
   const list = useShoppingList({ enabled: Boolean(family.data) })
   /** 「家里有」那一组默认收起来：它不该占着"要买什么"的位置 */
   const [coveredOpen, setCoveredOpen] = useState(false)
@@ -190,7 +191,7 @@ export default function ShoppingPage() {
   return (
     <Page>
       <div className="pscreen shopping-page">
-        <Link className="page-back" to={back.to}>← {back.label}</Link>
+        <BackLink to={back.to} label={back.label} />
         <PageHeader title="采购清单" subtitle="按菜单算的，买菜不用再想一遍" art="order" />
 
         {!family.isPending && !family.data ? (

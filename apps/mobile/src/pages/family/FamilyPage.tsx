@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import {
   CAPABILITY,
@@ -17,7 +17,8 @@ import {
 } from '@/api/family'
 import { useMe } from '@/api/auth'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import { toast } from '@/components/ui/toast'
@@ -67,12 +68,8 @@ export default function FamilyPage() {
   const data = family.data
   const memberLimit = options.data?.memberLimit ?? data?.memberLimit ?? 10
   // 家庭页不在底部 Tab 里，没有返回入口用户就只能改地址栏回去，所以按来源给一个
-  const backLink = readBackLink(location.state, '/mine')
-  const back = (
-    <Link className="page-back" to={backLink.to}>
-      ← {backLink.label}
-    </Link>
-  )
+  const backLink = useBackLink(location.state, '/mine')
+  const back = <BackLink to={backLink.to} label={backLink.label} />
 
   useEffect(() => {
     if (!token) navigate('/login', { replace: true })

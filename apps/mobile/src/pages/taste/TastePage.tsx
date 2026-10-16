@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import {
   useTasteFamily,
@@ -7,7 +7,8 @@ import {
   useUpdateTaste,
   type TasteProfile,
 } from '@/api/taste'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import BottomSheet from '@/components/ui/BottomSheet'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
@@ -42,7 +43,7 @@ import './taste.scss'
  */
 export default function TastePage() {
   const location = useLocation()
-  const backLink = readBackLink(location.state, '/mine')
+  const backLink = useBackLink(location.state, '/mine')
   const family = useTasteFamily()
   const options = useTasteOptions()
   const update = useUpdateTaste()
@@ -69,9 +70,7 @@ export default function TastePage() {
         用户当场看出「顶部返回和下面 tip 的间距和其他页都不一致」，就是这一处。
       */}
       <div className="pscreen">
-        <Link className="page-back" to={backLink.to}>
-          ← {backLink.label}
-        </Link>
+        <BackLink to={backLink.to} label={backLink.label} />
 
         <PageHeader
           title="口味与忌口"

@@ -6,7 +6,8 @@ import { useFamily } from '@/api/family'
 import CheckInPhoto from '@/components/ui/CheckInPhoto'
 import EmptyState from '@/components/ui/EmptyState'
 import SwipePager from '@/components/ui/SwipePager'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
@@ -38,7 +39,7 @@ export default function CheckInPage() {
   }
 
   // 没带来源（直接输地址/刷新丢了 state）时按主要入口「我的」兜底
-  const back = readBackLink(location.state, '/mine')
+  const back = useBackLink(location.state, '/mine')
 
   return (
     /*
@@ -50,7 +51,7 @@ export default function CheckInPage() {
     <Page
       fixed={(
         <div className="pscreen">
-          <Link className="page-back" to={back.to}>← {back.label}</Link>
+          <BackLink to={back.to} label={back.label} />
           <PageHeader title="家庭打卡墙" subtitle="做好一道菜就拍一张，攒着看特别有成就感" art="checkins" />
 
           {/*

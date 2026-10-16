@@ -3,7 +3,8 @@ import { Link, useLocation } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { useFamily } from '@/api/family'
 import { useDeleteMealRecord, useOrderHistory, type HistoryDay, type MealProgressRow } from '@/api/orders'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
@@ -87,7 +88,7 @@ export default function HistoryPage() {
   const location = useLocation()
   const family = useFamily()
   const history = useOrderHistory({ enabled: Boolean(family.data) })
-  const back = readBackLink(location.state, '/mine')
+  const back = useBackLink(location.state, '/mine')
   /*
    * 待删的那一餐（用户 2026-10-15：「点单历史里面要有」删整条）。
    * 状态留在页面这一层而不是每一格：一次只可能删一条，弹窗也只有一个。
@@ -111,7 +112,7 @@ export default function HistoryPage() {
   return (
     <Page>
       <div className="pscreen history-page">
-        <Link className="page-back" to={back.to}>← {back.label}</Link>
+        <BackLink to={back.to} label={back.label} />
         <PageHeader title="点单历史" subtitle="翻翻看这阵子家里都吃过什么" art="order" />
 
         {!family.isPending && !family.data ? (

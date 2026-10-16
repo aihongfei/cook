@@ -4,7 +4,8 @@ import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import RecipeImage from '@/pages/recipes/components/RecipeImage'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import '@/pages/shared.scss'
 import './fridge.scss'
 
@@ -60,7 +61,7 @@ function Row({ dish, from }: { dish: CookableDish; from: string }) {
 
 export default function CookablePage() {
   const location = useLocation()
-  const back = readBackLink(location.state, '/fridge')
+  const back = useBackLink(location.state, '/fridge')
   const [params, setParams] = useSearchParams()
 
   /** 挑好的那几样（从冰箱页带过来的）；空 = 用整个冰箱（与接口同一口径） */
@@ -94,7 +95,7 @@ export default function CookablePage() {
   return (
     <Page>
       <div className="pscreen">
-        <Link className="page-back" to={back.to}>← {back.label}</Link>
+        <BackLink to={back.to} label={back.label} />
         <PageHeader
           title="能做点什么"
           subtitle={picked.length > 0 ? '按你挑的那几样算' : '冰箱里这些东西能做出来的菜'}

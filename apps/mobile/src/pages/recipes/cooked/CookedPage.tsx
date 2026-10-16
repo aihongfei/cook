@@ -1,7 +1,8 @@
-import { Link, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
-import { readBackLink } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
 import CookedList from './CookedList'
 import '@/pages/shared.scss'
 import './cooked.scss'
@@ -15,12 +16,12 @@ import './cooked.scss'
  */
 export default function CookedPage() {
   const location = useLocation()
-  const back = readBackLink(location.state, '/mine')
+  const back = useBackLink(location.state, '/mine')
 
   return (
     <Page>
       <div className="pscreen cooked-page">
-        <Link className="page-back" to={back.to}>← {back.label}</Link>
+        <BackLink to={back.to} label={back.label} />
         <PageHeader title="我做过" subtitle="我点的菜，做好了的都在这儿" art="mine" />
         <CookedList from={location.pathname} />
       </div>

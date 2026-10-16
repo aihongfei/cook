@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { shrinkImage } from '@/api/checkins'
 import {
@@ -18,7 +18,9 @@ import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import PhotoSourceButtons from '@/components/ui/PhotoSourceButtons'
 import { toast } from '@/components/ui/toast'
-import { readBackLink, readCarry } from '@/pages/back-link'
+import BackLink from '@/components/ui/BackLink'
+import { useBackLink } from '@/lib/back-target'
+import { readCarry } from '@/pages/back-link'
 import RecipeImage from './components/RecipeImage'
 import RecipeStatus from './components/RecipeStatus'
 import SuggestField from './components/SuggestField'
@@ -187,7 +189,7 @@ export default function RecipeFormPage() {
   const location = useLocation()
   const isEdit = Boolean(id)
   // 兜底是**这道菜的详情**（编辑页的上一层就是它）；id 要转义，路由参数是外部输入
-  const back = readBackLink(location.state, isEdit ? `/recipes/${encodeURIComponent(id)}` : '/recipes/mine')
+  const back = useBackLink(location.state, isEdit ? `/recipes/${encodeURIComponent(id)}` : '/recipes/mine')
   /*
    * 编辑页夹在中间：它的返回目标是菜谱详情，而**详情页自己还有来源**。
    * 那份来源从详情带过来（见 RecipeDetailPage 的编辑入口），这里原样收着，
@@ -206,7 +208,7 @@ export default function RecipeFormPage() {
   return (
     <Page>
       <div className="pscreen recipe-form-page">
-        <Link className="page-back" to={back.to} state={carry}>← {back.label}</Link>
+        <BackLink to={back.to} label={back.label} state={carry} />
         <PageHeader
           title={isEdit ? '改这道菜谱' : '写一道菜谱'}
           subtitle={isEdit ? '改完还是你们家的菜' : '自己家的味道，记下来就不会丢'}
