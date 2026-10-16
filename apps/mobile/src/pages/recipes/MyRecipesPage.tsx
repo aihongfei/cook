@@ -169,18 +169,29 @@ function OwnRecipesList() {
       */}
       {recipes.data && <p className="my-recipes__summary">共 {total} 道</p>}
 
+      {/*
+        加载/出错块套一层 `my-recipes__status`，与另外两支同形
+        （`.cooked__status` / `.favorites__status` 都是 `padding: 14px 0` 的壳）。
+        不套的话这一块比那两支高 14px——实测：这里顶端 208，那两支 222。
+      */}
       {recipes.isPending && (
-        <RecipeStatus title="正在找你自己传的菜…" loading>马上就好</RecipeStatus>
+        <div className="my-recipes__status">
+          <RecipeStatus title="正在找你自己传的菜…" loading>马上就好</RecipeStatus>
+        </div>
       )}
       {recipes.isError && !recipes.data && (
-        <RecipeStatus title="你的菜谱暂时打不开" onRetry={() => { void recipes.refetch() }}>
-          {recipeErrorMessage(recipes.error)}
-        </RecipeStatus>
+        <div className="my-recipes__status">
+          <RecipeStatus title="你的菜谱暂时打不开" onRetry={() => { void recipes.refetch() }}>
+            {recipeErrorMessage(recipes.error)}
+          </RecipeStatus>
+        </div>
       )}
       {recipes.isRefetchError && recipes.data && (
-        <RecipeStatus title="更新失败，暂时保留上次内容" onRetry={() => { void recipes.refetch() }}>
-          {recipeErrorMessage(recipes.error)}
-        </RecipeStatus>
+        <div className="my-recipes__status">
+          <RecipeStatus title="更新失败，暂时保留上次内容" onRetry={() => { void recipes.refetch() }}>
+            {recipeErrorMessage(recipes.error)}
+          </RecipeStatus>
+        </div>
       )}
 
       {/* 空态要给**下一步**而不只是"没有东西"：这一页的价值就是往里加第一道菜 */}
@@ -197,7 +208,12 @@ function OwnRecipesList() {
         </div>
       )}
 
-      <div className="recipes-grid">
+      {/*
+        网格带 `my-recipes__grid` 钩子（2026-10-16）：横向栏距挂在它身上。
+        **不能**靠 `.my-recipes .recipes-grid` —— `.my-recipes` 在固定页头里、
+        网格在页体里，两者是兄弟，那种后代选择器永远匹配不到（实测卡片贴着屏幕边）。
+      */}
+      <div className="recipes-grid my-recipes__grid">
         {items.map((dish) => (
           <DishCard
             key={dish.id}

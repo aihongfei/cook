@@ -2,8 +2,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError, type AxiosRequestConfig } from 'axios'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import type { RecipeSummary } from '@/api/recipes'
 import { useToasts } from '@/components/ui/toast'
@@ -433,4 +435,54 @@ it('不是自己传的那些不画「编辑 / 删除」（公共菜谱只能看�
   expect(await screen.findByText('我收的菜')).toBeTruthy()
   expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
   expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
+})
+
+// ---------------------------------------------------------------------------
+// 「原创的」的横向栏距（用户 2026-10-16：「这块左右没有空白间隔，和做过的、收藏的不一致」）
+// ---------------------------------------------------------------------------
+
+/**
+ * 实测（360 宽）：做过的 / 收藏的网格 `left: 16, width: 328`，而**原创的**是 `left: 0, width: 360`
+ * ——卡片贴着屏幕边。
+ *
+ * 根因是**选择器打空靶**（R-78 那一族，只不过这里是 CSS 不是 mock）：栏距写在
+ * `.my-recipes .recipes-grid` 上，而「页头不动、只滚主体」这一刀（D-091）把 `.my-recipes`
+ * 挪进了**固定页头**、网格留在**页体**里——两者成了兄弟，那条后代选择器永远匹配不到。
+ * 同一条规则里的 `.my-recipes .recipe-status` 与宽屏那条 `max-width: 760px` 一起失效。
+ *
+ * 守两条：① 真正的元素上挂着**能在 DOM 里匹配到**的钩子类；
+ * ② 样式里不再出现 `.my-recipes 后代` 这种形状的选择器（它在这页结构上**必然**打空靶）。
+ * jsdom 算不了布局，所以守规则（与 recipes.test.tsx 里那两条同一手法）。
+ */
+describe('「原创的」的横向栏距', () => {
+  const css = () =>
+    readFileSync(join(__dirname, 'recipes.scss'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+
+  it('网格自带钩子类，且样式里那条规则真的带着栏距变量', async () => {
+    mockGet([own])
+    mount()
+    fireEvent.click(await screen.findByText('原创的'))
+
+    // ① DOM：网格上要有能被样式命中的钩子（不能靠 `.my-recipes` 后代——那个类不在这一层）
+    const grid = await waitFor(() => {
+      const el = document.querySelector('.my-recipes__grid')
+      expect(el, '「原创的」的网格没挂 my-recipes__grid 钩子').toBeTruthy()
+      return el as HTMLElement
+    })
+    expect(grid.className).toContain('recipes-grid')
+
+    // ② 样式：那条规则要用全站的栏距变量（写死 16px 会在调整栏距时悄悄掉队）
+    const rule = css().match(/\.my-recipes__grid\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+    expect(rule, '没读到 .my-recipes__grid 的规则').toBeTruthy()
+    expect(rule, '网格要自带左右栏距，否则卡片贴着屏幕边（与另外两支不一致）')
+      .toMatch(/margin[^;]*var\(--spacing-page\)/)
+  })
+
+  it('样式里不再有 `.my-recipes 后代` 形状的选择器（那个类在固定页头里，永远匹配不到页体）', () => {
+    // 这一条是**这一族 bug 的总闸**：`.my-recipes` 现在只包着页头那几样，
+    // 任何"它后面的后代"都落在页体里，写出来必然是死规则。
+    const dead = css().match(/\.my-recipes\s+\.([\w-]+)/g) ?? []
+    expect(dead, `这些选择器在 DOM 里匹配不到（.my-recipes 在固定页头、内容在页体）：${dead.join('、')}`)
+      .toEqual([])
+  })
 })

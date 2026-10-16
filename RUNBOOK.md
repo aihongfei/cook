@@ -5783,3 +5783,62 @@ await new Promise((r) => setTimeout(r, 600))   // 等 rAF 节流那次保存落�
 `DECISIONS.md` **D-100**、`RISKS.md` **R-82**、`apps/mobile/src/pages/back-link.ts`、
 `apps/mobile/src/lib/scroll-memory.ts`（`pageKeyOf` 含查询串、`pageIdentityOf` 不含——两个键回答两个问题）、
 `apps/mobile/src/layouts/TabLayout.tsx`（滚动记忆的两个 `useLayoutEffect`）。
+
+## R-093 验「某一页的栏距/间距与同页其它 tab 是否一致」怎么验（D-101 / R-83 配套，✅ 已验证，2026-10-16）
+
+### 一、什么时候用这个
+
+改过**页面结构**（拆容器、把内容挪出某一层）、或用户报的是**对照式**的一句话
+——「这块和别处不一致」「左右没有间隔」这种。这类反馈的共同点：**错的只有一处**
+（对的那份就在旁边），所以：
+
+> **先把对的那一份量出来，再照着它逐项比对，不要自己发明第三种形状。**
+
+本次是「我的菜谱」三个 tab：做过的 / 收藏的对、只有原创的错（`left 0 / width 360`，
+另外两个是 `16 / 328`）。
+
+### 二、第一件事：确认那条规则**还匹配得到**
+
+CSS 的打空靶（R-83）不报错、样式表里还看得见，所以**先问 DOM**，别先读 scss：
+
+```js
+document.querySelector('.my-recipes .recipes-grid')          // 本次：null → 死规则
+document.querySelector('.my-recipes').parentElement.className // "page__fixed"
+```
+
+`null` 就是死规则。**结构一拆（固定页头 + 页体），原来那种"祖先 + 后代"的写法就必然失效**
+——`.my-recipes` 在页头、网格在页体，两者是兄弟。
+
+### 三、逐项比对的四项（照抄这四条，别只量宽度）
+
+360 宽，三个 tab 各跑一遍：
+
+| 量什么 | 怎么读 | 本次期望 |
+| --- | --- | --- |
+| 网格的 `left / width` | `getBoundingClientRect()` | `16 / 328` |
+| 两张卡的 `left / right` | 同上 | `16–174` 与 `186–344` |
+| 「计数到网格」的间距 | `grid.top - summary.bottom` | `12` |
+| **加载块的落点** | 抓 `.recipe-status` 的 `top` | `222` |
+
+**第 4 项最容易漏**：它只在请求还没回来的那一瞬间存在。抓它的办法是进页面后
+**每 40ms 轮询一次**（`for` 循环 + `await waitForTimeout(40)`），第一帧命中就记下来。
+本次就是这么发现"原创的"那块比另外两支**高 14px**（少了 `padding: 14px 0` 那层壳）。
+
+### 四、宽屏也要看一眼（≥560px）
+
+同一条死规则里往往还盖着**只在宽屏生效**的那条（本次是 `max-width: 760px; margin-inline: auto`）
+——在手机上测一百遍也不会露。跑一遍 1280 宽，读 `getComputedStyle(grid).maxWidth`。
+
+### 五、先把守卫写成"不变式"
+
+本次那条更有价值的断言不是"栏距等于 16px"，而是：
+
+> **样式里不再有 `.容器类 后代` 形状的选择器**
+
+因为容器已经只包页头了，写它的后代**必然是**死规则——这是一族的总闸，比钉住一格管用。
+（与 R-78 那条"换掉共享组件后回头搜谁 mock 了它"同一个形状：**结构变了，回头搜引用**。）
+
+### 六、相关
+
+`DECISIONS.md` **D-101**、`RISKS.md` **R-83 / R-78**、
+`apps/mobile/src/pages/recipes/recipes.scss`、`apps/mobile/src/pages/recipes/MyRecipesPage.test.tsx`。

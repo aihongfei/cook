@@ -3992,3 +3992,65 @@ Android 的 OkHttp 自带 `newWebSocket()`（前台服务要用它），而 SSE 
   `TabLayout` 的"记位置"正好走 `rAF` 节流——于是**任何靠滚动去测位置都会得到假的 0**。
   改法：调用 `scrollTo`/`scrollTop` 后**手动 `dispatchEvent(new Event('scroll'))`** 再读。
   这一条只影响自动化测量，**与真机无关**。
+
+## D-101 「原创的」的横向栏距：钩子必须挂**能匹配到**的元素上（用户 2026-10-16 报「这块左右没有空白间隔，和做过的、收藏的不一致」，✅ 已实现）
+
+### 一、用户报的与实测数字
+
+用户原话：「这块左右没有空白间隔，和做过的、收藏的不一致」（附「我的菜谱 → 原创的」截图）。
+
+先把三个 tab 量了一遍（360 宽，判据是网格的 `left/width`）：
+
+| tab | 网格 | 改前 | 改后 |
+| --- | --- | --- | --- |
+| 做过的 | `.cooked__grid` | `left 16 / width 328` | 不变 |
+| 收藏的 | `.favorites__grid` | `left 16 / width 328` | 不变 |
+| **原创的** | `.recipes-grid` | **`left 0 / width 360`** | **`left 16 / width 328`** |
+
+### 二、根因：一条**写着、但永远匹配不到**的规则
+
+栏距写在 `.my-recipes .recipes-grid` 上（后代选择器）。而「页头不动、只滚主体」那一刀（D-091）
+把这页拆成了两块：
+
+- `.my-recipes` → 跟着**固定页头**（返回键 / 标题 / tab 条 / 「＋ 新建菜谱」）走；
+- `.recipes-grid` → 留在**页体**（`SwipePager` 的页）里。
+
+两者成了**兄弟**，后代选择器**一次都匹配不到**。浏览器里直接问过 DOM：
+
+```
+gridIsInsideMyRecipes: false
+gridParentChain: [recipes-grid, swipe-pager__panel, …, page__body, page, tab-layout__page]
+myRecipesParent: page__fixed
+```
+
+同一条规则里另外两项也一起失效：`.my-recipes .recipe-status`（加载/出错块的 14px 壳）
+与宽屏那条 `max-width: 760px; margin-inline: auto`（那个只在 ≥560px 才看得见，
+所以更难发现）。
+
+**这是 R-78「测试/mock 打空靶」的 CSS 版**：规则在文件里看得见、样式表里也在，
+只是**没有任何元素会命中它**——不报错、不告警。
+
+### 三、修法：钩子挂在自己身上，形状与另外两支逐项对齐
+
+- 网格加**自己的**类 `my-recipes__grid`，规则改 `.my-recipes__grid { margin: 0 var(--spacing-page) }`
+  ——与 `.cooked__grid` / `.favorites__grid` **同一形状**（栏距在自己身上）；
+- 加载块加壳 `my-recipes__status { padding: 14px 0 }`，与 `.cooked__status` / `.favorites__status` 同形。
+  **壳里不加横向栏距**：那两支也没有（块本身的 16px 由 `.recipe-status` 自带），
+  实测三支的 `padding-left` 都是 16px、卡片都通栏；
+- 宽屏那条 `max-width: 760px` 跟着换成 `.my-recipes__grid`；
+- **顺手对齐一个 4px**：改前网格写的是 `margin: 16px … 0`，而另外两支是 `margin: 0 …`
+  加上计数自己那 `12px`——于是"计数到网格"在三个 tab 里是 `16 / 12 / 12`。
+  现在统一走计数那一份（`0` + `12`），三项都是 12。
+
+### 四、验收（2026-10-16）
+
+- **先红后绿**：`MyRecipesPage.test.tsx` 新增 2 条并先红——① 「网格自带钩子类 + 规则里带栏距变量」
+  （改前红：`「原创的」的网格没挂 my-recipes__grid 钩子`）；② 「样式里不再有 `.my-recipes 后代`
+  形状的选择器」（改前一把抓出三条死规则：`.my-recipes .recipes-grid`、`.my-recipes .recipe-status`、
+  宽屏那条）。第二条是**这一族的总闸**：`.my-recipes` 现在只包页头，写它的后代必然是死规则；
+- 前端 **808/808**（71 文件）、`tsc -b` 0 错、lint 18 warnings / 0 errors；
+- **浏览器实测（360 宽）三个 tab 逐项相等**：网格 `left 16 / width 328`、
+  卡片 `→ 16–174 与 186–344`（列间距 12、右留白 16）、「计数到网格」都是 12；
+  **加载块落点**也都是 `top 222`（改前「原创的」是 208——比另外两支高 14px，那一层壳缺失）；
+- **顺带排查了同形状的其它规则**：全站只有 `.recipes-page .page-back` 还是后代选择器，
+  已在浏览器里确认它仍匹配得到（那一页的两块都还带 `.recipes-page`），不是死规则。

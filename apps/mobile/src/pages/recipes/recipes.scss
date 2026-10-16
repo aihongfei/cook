@@ -444,24 +444,33 @@
 }
 
 /*
- * 这一页的横向栏距要补在这里：页头、返回键、「新建菜谱」那一行各自带了 `padding/margin`，
- * 而**网格与状态块是页面级的块，自己不带**——不在 `.recipes-page` 里（那页有容器 padding），
- * 本页用的 `.pscreen` 只有上边距。结果就是卡片左右贴着屏幕边缘（用户 2026-10-13：
- * 「左右因为没有间隔，都需要优化」）。补在网格这一层，卡片的尺寸与别页保持一致。
+ * 这一页的横向栏距挂在这里：页头、返回键、「新建菜谱」那一行各自带了 `padding/margin`，
+ * 而**网格是页面级的块，自己不带**——本页用的 `.pscreen` 只有上边距。
+ * 不补的话卡片左右贴着屏幕边缘（用户 2026-10-13：「左右因为没有间隔，都需要优化」）。
  *
- * 上边距同理：网格紧跟在「新建菜谱」那一行后面时是贴着的（用户 2026-10-13 第二次反馈）。
+ * ⚠️ 钩子挂在**网格自己**身上，不写 `.my-recipes .recipes-grid`（2026-10-16 修）。
+ * `.my-recipes` 现在只包着**固定页头**那几样（「页头不动、只滚主体」那一刀 D-091 把它挪进去了），
+ * 而网格在**页体**里——两者是兄弟，后代选择器**永远匹配不到**：规则写着、DOM 上身没有。
+ * 实测就是这么露的：360 宽下做过的/收藏的网格是 `left:16 width:328`，这里是 `left:0 width:360`
+ * （用户 2026-10-16：「这块左右没有空白间隔，和做过的、收藏的不一致」）。
+ *
+ * 形状与另外两支**逐项一致**（`.cooked__grid` / `.favorites__grid`）：只有左右栏距、没有上边距
+ * ——网格上方那点间距由 `.my-recipes__summary` 自己的 `margin-bottom: 12px` 给（改前这里多写
+ * 了 `16px`，于是同一页三个 tab 的"计数到网格"能差 4px：16 vs 12）。
  */
-.my-recipes .recipes-grid,
-.my-recipes .recipe-status {
-  margin: 16px var(--spacing-page) 0;
+.my-recipes__grid {
+  margin: 0 var(--spacing-page);
 }
 
-@media (min-width: 560px) {
-  /* 宽屏下两列卡片会被拉得很宽，限制一下单张卡的宽度（与别页的 760px 容器同口径） */
-  .my-recipes .recipes-grid {
-    max-width: 760px;
-    margin-inline: auto;
-  }
+/*
+ * 这一支的加载/出错块也要一层壳，与 `.cooked__status` / `.favorites__status` 同形。
+ *
+ * ⚠️ **不加左右栏距**：那两支的壳都只有 `padding: 14px 0`，块本身的 16px 由 `.recipe-status`
+ * 自带（实测三支的 `padding-left` 都是 16px、卡片都是通栏）。这里若再补一份横向 margin，
+ * 反而变成"这一支比那两支缩进一格"——正是用户这次报的那种不一致。
+ */
+.my-recipes__status {
+  padding: 14px 0;
 }
 
 .my-recipes__empty {
