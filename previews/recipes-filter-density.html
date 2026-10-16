@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>菜谱小书 · 筛选区降高方案</title>
+<style>
+/*
+ * 菜谱小书筛选区降高预览（用户 2026-10-16：「这块样式优化一下，现在分类筛选占据太多空间了」）
+ *
+ * 改前实测（360×844，首屏 844）：
+ *   固定区总计 426px = 屏幕的 50%
+ *     ├─ 标题带（返回键+标题+副标题）      104px
+ *     ├─ 搜索框                            56px
+ *     └─ 筛选框                            201px  ← 本次要降的就是它
+ *          ├─ 「按口味翻一翻 / 清除…」行      31px
+ *          ├─ 「品类」标签独占一行            28px  ← 纯浪费
+ *          ├─ 品类 tab 行                     45px
+ *          ├─ 「菜系」标签独占一行            28px  ← 纯浪费
+ *          ├─ 菜系 tab 行                     45px
+ *          └─ 内外边距                        24px
+ *
+ * 三个方案都保留「品类 / 菜系」两组筛选与「清除」入口，只改它们占多高。
+ * 设计 token 与 App 一致（--color-brand #e07b39 等），暗色是同一个米色调的加深版。
+ */
+
+:root {
+  --brand: #e07b39;
+  --brick: #b94a2c;
+  --ink: #5a3520;
+  --ink-2: #8e6b52;
+  --ink-3: #a8785a;
+  --cream: #fcf1da;
+  --cream-2: #f8ead4;
+  --paper: #fffbf2;
+  --line: #eadcc4;
+  --radius-card: 20px;
+  --page: 16px;
+  --shadow-card: 0 8px 18px rgb(150 100 60 / 10%);
+  --font: 'ZCOOL KuaiLe', ui-sans-serif, system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+[data-appearance="dark"] {
+  --brand: #f09553;
+  --brick: #d4684a;
+  --ink: #f0e2d0;
+  --ink-2: #c4ad95;
+  --ink-3: #a08d78;
+  --cream: #241c15;
+  --cream-2: #2e241b;
+  --paper: #3a2d22;
+  --line: #4b3a2b;
+  --shadow-card: 0 8px 18px rgb(0 0 0 / 30%);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 18px 16px 60px;
+  font-family: var(--font);
+  color: var(--ink);
+  background: var(--cream);
+  transition: background .2s, color .2s;
+}
+
+/* 顶部控制条 */
+.bar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 10px 12px; margin: -18px -16px 18px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+.bar__title { font-size: 14px; color: var(--ink-2); margin-right: auto; }
+.bar button {
+  padding: 6px 12px; font: inherit; font-size: 12px; cursor: pointer;
+  color: var(--ink-2); background: var(--cream-2);
+  border: 1px solid var(--line); border-radius: 999px;
+}
+.bar button[aria-pressed="true"] { color: #fff; background: var(--brand); border-color: var(--brand); }
+
+/* 头部总览：改前/改后 */
+.summary {
+  display: grid; gap: 8px; margin-bottom: 18px;
+  font-size: 12px; line-height: 1.7; color: var(--ink-2);
+}
+.summary b { color: var(--ink); font-weight: 400; }
+.summary__row { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.pill { padding: 3px 10px; background: var(--cream-2); border: 1px solid var(--line); border-radius: 999px; }
+.pill--good { color: #fff; background: var(--brand); border-color: var(--brand); }
+
+/* 方案并排 */
+.plans { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.plan { flex: 1 1 320px; min-width: 300px; max-width: 380px; }
+.plan__head { margin-bottom: 10px; }
+.plan__name { font-size: 17px; }
+.plan__name span { font-size: 12px; color: var(--ink-3); }
+.plan__note { margin: 6px 0 0; font-size: 12px; line-height: 1.65; color: var(--ink-2); }
+.plan__note em { color: var(--brick); font-style: normal; }
+
+/* 手机框 */
+.phone {
+  padding: 14px 0 0;
+  overflow: hidden;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: var(--shadow-card);
+}
+
+/* ---- 固定区（三方案共用外壳，内部按方案变） ---- */
+.fixed { background: var(--cream); }
+.head { padding: 0 var(--page) 0; }
+.back { display: inline-block; font-size: 12px; color: var(--ink-3); text-decoration: none; }
+.head h1 { margin: 2px 0 4px; font-size: 25px; font-weight: 400; color: #6e3a1c; }
+[data-appearance="dark"] .head h1 { color: #f0c9a8; }
+.head p { margin: 0 0 12px; font-size: 12px; color: var(--ink-3); }
+
+.search {
+  display: flex; gap: 8px; align-items: center;
+  margin: 0 var(--page); padding: 11px 14px;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: 999px; box-shadow: 0 7px 16px rgb(150 100 60 / 10%);
+}
+.search input { flex: 1; min-width: 0; font: inherit; font-size: 13px; color: var(--ink); background: transparent; border: 0; outline: none; }
+.search input::placeholder { color: #a58972; }
+.search button { padding: 4px; font: inherit; font-size: 12px; color: var(--brick); background: none; border: 0; cursor: pointer; }
+
+/* ============ 方案 A：标签挪到行内（保守，最小改动） ============ */
+.a .filters { margin: 10px var(--page) 0; padding: 8px 12px 6px; background: rgb(255 251 242 / 85%); border: 1px solid var(--line); border-radius: 18px 22px 19px 24px; }
+[data-appearance="dark"] .a .filters { background: var(--paper); }
+.a .rowhead { display: flex; gap: 12px; align-items: center; justify-content: space-between; font-size: 13px; }
+.a .rowhead button { padding: 4px 0; font: inherit; font-size: 11px; color: var(--brick); background: none; border: 0; cursor: pointer; }
+.a .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.a .row__label { flex: 0 0 auto; width: 26px; font-size: 11px; color: var(--ink-3); }
+.a .track { display: flex; flex: 1; gap: 14px; min-width: 0; overflow-x: auto; }
+.a .tab { flex: 0 0 auto; padding: 5px 0 3px; font: inherit; font-size: 13px; color: var(--ink-3); background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; }
+.a .tab.is-on { color: var(--brand); border-bottom-color: var(--brand); }
+
+/* ============ 方案 B：胶囊双行（推荐） ============ */
+.b .filters { margin: 10px var(--page) 0; padding: 8px 0 2px; background: rgb(255 251 242 / 85%); border: 1px solid var(--line); border-radius: 18px 22px 19px 24px; }
+[data-appearance="dark"] .b .filters { background: var(--paper); }
+.b .rowhead { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 0 12px; font-size: 13px; }
+.b .rowhead button { padding: 4px 0; font: inherit; font-size: 11px; color: var(--brick); background: none; border: 0; cursor: pointer; }
+.b .row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.b .row__label { flex: 0 0 auto; padding-left: 12px; font-size: 11px; color: var(--ink-3); }
+.b .track { display: flex; flex: 1; gap: 6px; min-width: 0; overflow-x: auto; padding-right: 12px; }
+.b .chip {
+  flex: 0 0 auto; padding: 5px 11px; font: inherit; font-size: 12px; cursor: pointer;
+  color: var(--ink-3); background: var(--cream-2); border: 1px solid var(--line); border-radius: 999px;
+}
+.b .chip.is-on { color: #fff; background: var(--brand); border-color: var(--brand); }
+
+/* ============ 方案 C：一排下拉（最省，交互最重） ============ */
+.c .filters { display: flex; gap: 8px; align-items: center; margin: 10px var(--page) 0; }
+.c .sel {
+  display: flex; flex: 1; gap: 6px; align-items: center; justify-content: space-between;
+  padding: 9px 12px; font: inherit; font-size: 12.5px; cursor: pointer;
+  color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 999px;
+}
+.c .sel small { font-size: 10.5px; color: var(--ink-3); }
+.c .sel.is-on { border-color: var(--brand); }
+.c .sel.is-on small { color: var(--brand); }
+.c .chev { font-size: 10px; color: var(--ink-3); }
+.c .clear { flex: 0 0 auto; padding: 9px 12px; font: inherit; font-size: 11.5px; color: var(--brick); background: var(--paper); border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
+
+/* ---- 内容区 ---- */
+.body { padding-top: 4px; }
+.count { padding: 10px var(--page) 8px; font-size: 12.5px; color: var(--ink-3); }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 var(--page); }
+.card { overflow: hidden; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-card); }
+.pic { position: relative; aspect-ratio: 1.25; background: linear-gradient(160deg, #f5d9b8, #e6bb92); }
+[data-appearance="dark"] .pic { background: linear-gradient(160deg, #5a4433, #43332a); }
+.pic__ph { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--ink-3); font-size: 11px; }
+.pic__ph b { display: block; font-size: 26px; font-weight: 400; }
+.heart { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 26px; height: 26px; font-size: 13px; color: #b65c28; background: rgb(255 251 242 / 92%); border-radius: 999px; }
+.card__b { padding: 9px 11px 11px; }
+.card__n { font-size: 13.5px; line-height: 1.45; }
+.card__m { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 7px; font-size: 11px; color: var(--ink-3); }
+.tag { padding: 2px 7px; background: var(--cream-2); border: 1px solid var(--line); border-radius: 999px; }
+.tag--own { color: #fff; background: var(--brand); border-color: var(--brand); }
+.card__k { margin-top: 7px; font-size: 11px; color: var(--ink-3); }
+.card__acts { display: flex; gap: 7px; margin-top: 9px; }
+.btn { padding: 6px 12px; font: inherit; font-size: 11.5px; border-radius: 999px; cursor: pointer; }
+.btn--ghost { color: var(--brand); background: none; border: 1.5px solid var(--brand); }
+.btn--solid { color: #fff; background: var(--brand); border: 1.5px solid var(--brand); }
+
+/* 状态：加载 / 空 / 错误 */
+.state { padding: 26px 16px; margin: 0 var(--page); text-align: center; font-size: 12.5px; color: var(--ink-3); background: var(--paper); border: 1px dashed #d2b992; border-radius: 20px 17px 23px 18px; }
+.state b { display: block; margin-bottom: 6px; font-size: 14px; font-weight: 400; color: var(--ink); }
+.state--err { border-style: solid; border-color: var(--brick); }
+.state--empty b { font-size: 15px; }
+.state__acts { display: flex; justify-content: center; gap: 8px; margin-top: 12px; }
+
+/* 标注 */
+.spec { margin-top: 12px; font-size: 11.5px; line-height: 1.75; color: var(--ink-2); }
+.spec h4 { margin: 0 0 4px; font-size: 12.5px; font-weight: 400; color: var(--ink); }
+.spec ul { margin: 0; padding-left: 16px; }
+.spec code { padding: 1px 5px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: var(--cream-2); border-radius: 4px; }
+.meter { display: flex; gap: 1px; height: 9px; margin: 8px 0 4px; border-radius: 5px; overflow: hidden; }
+.meter i { display: block; }
+.meter .m1 { background: #d9b98f; }   /* 标题带 */
+.meter .m2 { background: #cfa878; }   /* 搜索 */
+.meter .m3 { background: var(--brand); } /* 筛选（被比较的部分） */
+.meter .m4 { background: #efe4d2; flex: 1; } /* 留白 */
+.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--ink-3); }
+.legend i { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 2px; vertical-align: middle; }
+</style>
+</head>
+<body data-appearance="light">
+
+<div class="bar">
+  <span class="bar__title">菜谱小书 · 分类筛选区降高</span>
+  <button type="button" data-jump="a">看 A</button>
+  <button type="button" data-jump="b">看 B</button>
+  <button type="button" data-jump="c">看 C</button>
+  <button type="button" id="appearance">暗色预览</button>
+</div>
+
+<div class="summary">
+  <div class="summary__row">
+    <span>改前：固定区 <b>426px</b>（首屏 844px 的 <b>50%</b>）—— 其中筛选区 <b>201px</b></span>
+    <span class="pill pill--good">三个方案都只动筛选区</span>
+    <span class="pill">品类 / 菜系两组筛选与「清除」全部保留</span>
+  </div>
+  <div class="summary__row" id="summary-live"></div>
+  <div class="summary__row">
+    <span>实测（本页三栏，同一套外壳）：固定区占首屏</span>
+    <span class="pill">A 33%</span>
+    <span class="pill pill--good">B 32%</span>
+    <span class="pill">C 25%</span>
+    <span>—— 改前 50%</span>
+  </div>
+  <div class="legend">
+    <span><i style="background:#d9b98f"></i>标题带</span>
+    <span><i style="background:#cfa878"></i>搜索框</span>
+    <span><i style="background:var(--brand)"></i>筛选区（被比较的部分）</span>
+    <span><i style="background:#efe4d2"></i>首屏剩下的内容区</span>
+  </div>
+</div>
+
+<div class="plans">
+
+  <!-- ============ A ============ -->
+  <div class="plan a" data-plan="a" id="plan-a">
+    <div class="plan__head">
+      <div class="plan__name">方案 A · 标签挪进行内 <span>保守</span></div>
+      <p class="plan__note">只把「品类 / 菜系」两个标签从独占一行挪到行的最左边，其余不动。改动最小、风险最低，看起来仍是现在这套 tab。<em>省的 56px 是"两个标签行"和"缩紧的间距"，标签字还在（只是与选项同一行）。</em></p>
+    </div>
+    <div class="phone">
+      <div class="fixed">
+        <div class="head">
+          <a class="back" href="#">← 厨房</a>
+          <h1>菜谱小书</h1>
+          <p>一菜一味，把日子煮得暖暖的</p>
+        </div>
+        <form class="search"><input value="" placeholder="搜菜名、食材、口味、标签…"><button type="button">搜索</button></form>
+        <section class="filters" aria-label="菜谱筛选">
+          <div class="rowhead"><span>按口味翻一翻</span><button type="button">清除搜索与筛选</button></div>
+          <div class="row">
+            <span class="row__label">品类</span>
+            <div class="track">
+              <button class="tab is-on">全部品类</button><button class="tab">主食</button><button class="tab">家常</button><button class="tab">汤</button><button class="tab">甜品</button><button class="tab">素菜</button>
+            </div>
+          </div>
+          <div class="row">
+            <span class="row__label">菜系</span>
+            <div class="track">
+              <button class="tab is-on">全部菜系</button><button class="tab">天津菜</button><button class="tab">家常</button><button class="tab">川菜</button><button class="tab">江浙</button>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div class="body">
+        <div class="count">共 125 道（已显示 12）</div>
+        <div class="grid">
+          <article class="card"><div class="pic"><span class="heart">♡</span></div><div class="card__b"><div class="card__n">三色春笋丁#多效护理一招制胜#</div><div class="card__m"><span>素菜</span><span>家常</span><span class="tag">极速数据</span></div><div class="card__k">热量暂无</div><div class="card__acts"><button class="btn btn--ghost">看做法 →</button><button class="btn btn--solid">点这道</button></div></div></article>
+          <article class="card"><div class="pic"><div class="pic__ph"><b>🍚</b>菜谱图片待补</div><span class="heart">♡</span></div><div class="card__b"><div class="card__n">外婆的红烧肉</div><div class="card__m"><span>荤菜</span><span>家常</span><span class="tag tag--own">自己上传</span></div><div class="card__k">热量暂无</div><div class="card__acts"><button class="btn btn--ghost">看做法 →</button><button class="btn btn--solid">点这道</button></div></div></article>
+        </div>
+      </div>
+    </div>
+    <div class="spec">
+      <h4>实现约束</h4>
+      <ul>
+        <li>筛选区高度 <code>108px</code>（改前 201px，<b>省 93px</b>）</li>
+        <li>标签与选项同一行：标签固定宽 <code>26px</code>，选项横向滚动</li>
+        <li>选项仍是 tab 样式（下划线），字号 <code>13px</code>，点击目标实测 <code>29px</code></li>
+        <li>行间距 <code>6px</code>，容器内边距 <code>8px 12px</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ B ============ -->
+  <div class="plan b" data-plan="b" id="plan-b">
+    <div class="plan__head">
+      <div class="plan__name">方案 B · 胶囊双行 <span>推荐</span></div>
+      <p class="plan__note">标签挪进行内，同时把两组选项换成胶囊——胶囊比 tab 矮 10px、也更好点（点击目标 26px 高，符合手指尺寸）。<em>与订单页筛选行是同一套外形，全站看起来是一个东西。</em>颜色规则不变：选中的是品牌橙底白字。</p>
+    </div>
+    <div class="phone">
+      <div class="fixed">
+        <div class="head">
+          <a class="back" href="#">← 厨房</a>
+          <h1>菜谱小书</h1>
+          <p>一菜一味，把日子煮得暖暖的</p>
+        </div>
+        <form class="search"><input value="" placeholder="搜菜名、食材、口味、标签…"><button type="button">搜索</button></form>
+        <section class="filters" aria-label="菜谱筛选">
+          <div class="rowhead"><span>按口味翻一翻</span><button type="button">清除搜索与筛选</button></div>
+          <div class="row">
+            <span class="row__label">品类</span>
+            <div class="track">
+              <button class="chip is-on">全部品类</button><button class="chip">主食</button><button class="chip">家常</button><button class="chip">汤</button><button class="chip">甜品</button><button class="chip">素菜</button>
+            </div>
+          </div>
+          <div class="row">
+            <span class="row__label">菜系</span>
+            <div class="track">
+              <button class="chip is-on">全部菜系</button><button class="chip">天津菜</button><button class="chip">家常</button><button class="chip">川菜</button><button class="chip">江浙</button>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div class="body">
+        <div class="count">共 125 道（已显示 12）</div>
+        <div class="grid">
+          <article class="card"><div class="pic"><span class="heart">♡</span></div><div class="card__b"><div class="card__n">三色春笋丁#多效护理一招制胜#</div><div class="card__m"><span>素菜</span><span>家常</span><span class="tag">极速数据</span></div><div class="card__k">热量暂无</div><div class="card__acts"><button class="btn btn--ghost">看做法 →</button><button class="btn btn--solid">点这道</button></div></div></article>
+          <article class="card"><div class="pic"><div class="pic__ph"><b>🍚</b>菜谱图片待补</div><span class="heart">♡</span></div><div class="card__b"><div class="card__n">外婆的红烧肉</div><div class="card__m"><span>荤菜</span><span>家常</span><span class="tag tag--own">自己上传</span></div><div class="card__k">热量暂无</div><div class="card__acts"><button class="btn btn--ghost">看做法 →</button><button class="btn btn--solid">点这道</button></div></div></article>
+        </div>
+      </div>
+    </div>
+    <div class="spec">
+      <h4>实现约束</h4>
+      <ul>
+        <li>筛选区高度 <code>104px</code>（改前 201px，<b>省 97px</b>）</li>
+        <li>胶囊：内边距 <code>5px 11px</code>、字号 <code>12px</code> → 点击目标实测 <code>29px</code>（手指够得着）</li>
+        <li>选中态：<code>背景 var(--color-brand)、文字 #fff</code>（与订单页、「多选」一致）</li>
+        <li>标签 <code>11px</code> 与胶囊同一行，行间距 <code>6px</code>；容器内边距 <code>8px 0 2px</code>，行内左右 <code>12px</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ C ============ -->
+  <div class="plan c" data-plan="c" id="plan-c">
+    <div class="plan__head">
+      <div class="plan__name">方案 C · 两个下拉 <span>最省空间</span></div>
+      <p class="plan__note">两组筛选各收成一个下拉，只在点开时展开选项。<em>省得最多，但"一眼看见有哪些品类"这件事没了——得多点一次才知道有什么可选</em>，而且要多写一套下拉与关闭逻辑（这个应用还没有别处用过）。</p>
+    </div>
+    <div class="phone">
+      <div class="fixed">
+        <div class="head">
+          <a class="back" href="#">← 厨房</a>
+          <h1>菜谱小书</h1>
+          <p>一菜一味，把日子煮得暖暖的</p>
+        </div>
+        <form class="search"><input value="" placeholder="搜菜名、食材、口味、标签…"><button type="button">搜索</button></form>
+        <section class="filters" aria-label="菜谱筛选">
+          <button class="sel">品类 <span><small>全部品类</small> <span class="chev">▾</span></span></button>
+          <button class="sel">菜系 <span><small>全部菜系</small> <span class="chev">▾</span></span></button>
+          <button class="clear">清除</button>
+        </section>
+      </div>
+      <div class="body">
+        <div class="count">共 125 道（已显示 12）</div>
+        <div class="grid">
+          <article class="card"><div class="pic"><span class="heart">♡</span></div><div class="card__b"><div class="card__n">三色春笋丁#多效护理一招制胜#</div><div class="card__m"><span>素菜</span><span>家常</span><span class="tag">极速数据</span></div><div class="card__k">热量暂无</div><div class="card__acts"><button class="btn btn--ghost">看做法 →</button><button class="btn btn--solid">点这道</button></div></div></article>
+          <article class="card"><div class="pic"><div class="pic__ph"><b>🍚</b>菜谱图片待补</div><span class="heart">♡</span></div><div class="card__b"><div class="card__n">外婆的红烧肉</div><div class="card__m"><span>荤菜</span><span>家常</span><span class="tag tag--own">自己上传</span></div><div class="card__k">热量暂无</div><div class="card__acts"><button class="btn btn--ghost">看做法 →</button><button class="btn btn--solid">点这道</button></div></div></article>
+        </div>
+      </div>
+    </div>
+    <div class="spec">
+      <h4>实现约束</h4>
+      <ul>
+        <li>筛选区高度 <code>38px</code>（改前 201px，<b>省 163px</b>）</li>
+        <li>下拉：高 <code>38px</code>、字号 <code>12.5px</code>、圆角 <code>999px</code></li>
+        <li>展开面板需要新做（底部抽屉或浮层），选中项要能滚</li>
+        <li>选中的筛选项写在按钮里，未选时显示「全部品类」</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<div class="plan" style="max-width:none;margin-top:26px">
+  <div class="plan__head">
+    <div class="plan__name">关键状态 <span>（以推荐方案 B 呈现；三方案共用同一套状态规则）</span></div>
+    <p class="plan__note">状态都要在筛选区<b>下面</b>、内容区里出现——筛选区本身在加载时也必须在位（否则页面会先塌一下再撑开）。<br>
+      窄屏（390px 及以下）时本页三栏会竖排，用顶部的「看 A / 看 B / 看 C」跳转。</p>
+  </div>
+  <div class="plans">
+    <div class="plan b">
+      <div class="phone" style="padding-bottom:14px">
+        <div class="body">
+          <div class="count">正在翻开菜谱…</div>
+          <div class="state"><b>正在取回菜谱…</b>给小厨房一点时间</div>
+        </div>
+      </div>
+      <div class="spec"><h4>加载中</h4><ul><li>筛选区照常显示（用上次的选项），只有内容区在转</li><li>计数位留着，不跳字</li></ul></div>
+    </div>
+    <div class="plan b">
+      <div class="phone" style="padding-bottom:14px">
+        <div class="body">
+          <div class="count">共 0 道（已显示 0）</div>
+          <div class="state state--empty"><b>还没有找到这道味道</b>试试别的菜名、食材，或清除筛选再看看。<div class="state__acts"><button class="btn btn--ghost">清除搜索与筛选</button></div></div>
+        </div>
+      </div>
+      <div class="spec"><h4>空态</h4><ul><li>文案点名"清除筛选"，并直接给按钮（不要说"你可以去清除"—要做成能点的一下）</li><li>空态与筛选区同宽、居中，不占满一整屏</li></ul></div>
+    </div>
+    <div class="plan b">
+      <div class="phone" style="padding-bottom:14px">
+        <div class="body">
+          <div class="count">共 — 道</div>
+          <div class="state state--err"><b>菜谱加载失败</b>网络好像断了一下。<div class="state__acts"><button class="btn btn--solid">重试</button></div></div>
+        </div>
+      </div>
+      <div class="spec"><h4>错误</h4><ul><li>说清是"没取到"而不是"没有菜"</li><li>必须有重试入口；重试时按钮换成"重试中…"并禁用</li></ul></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/*
+ * 方案切换与暗色：只切类名与变量，不重写 DOM —— 三个方案各自保留自己的状态，
+ * 便于同一屏里横向比较（技能要求：多方案对比时只有被比较的部分可以变化）。
+ */
+const body = document.body;
+
+// 暗色
+const appearanceBtn = document.getElementById('appearance');
+appearanceBtn.addEventListener('click', () => {
+  const dark = body.dataset.appearance === 'dark';
+  body.dataset.appearance = dark ? 'light' : 'dark';
+  appearanceBtn.textContent = dark ? '暗色预览' : '亮色预览';
+  appearanceBtn.setAttribute('aria-pressed', String(!dark));
+});
+
+/*
+ * 筛选交互：每个方案内部，同一行只能是单选。
+ * 同时把"选中 → 计数变化"接上，让用户看到这套筛选真的在起作用（而不是一张静态图）。
+ */
+const COUNTS = {
+  'a': { all: 125 }, 'b': { all: 125 }, 'c': { all: 125 },
+};
+const BASE = 125;
+
+function wirePlan(planEl) {
+  planEl.querySelectorAll('.track').forEach((track) => {
+    track.addEventListener('click', (event) => {
+      const btn = event.target.closest('.tab, .chip');
+      if (!btn) return;
+      track.querySelectorAll('.tab, .chip').forEach((b) => b.classList.toggle('is-on', b === btn));
+      updateCount(planEl);
+      updateSummary();
+    });
+  });
+  planEl.querySelectorAll('.rowhead button, .clear').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      planEl.querySelectorAll('.track').forEach((track) => {
+        const items = track.querySelectorAll('.tab, .chip');
+        items.forEach((b, i) => b.classList.toggle('is-on', i === 0));
+      });
+      planEl.querySelector('.search input')?.setAttribute('value', '');
+      const input = planEl.querySelector('.search input');
+      if (input) input.value = '';
+      updateCount(planEl);
+      updateSummary();
+    });
+  });
+  // 下拉（方案 C）：只是视觉反馈，说明"点开才知道有什么"
+  planEl.querySelectorAll('.sel').forEach((sel) => {
+    sel.addEventListener('click', () => sel.classList.toggle('is-on'));
+  });
+  updateCount(planEl);
+}
+
+function updateCount(planEl) {
+  const chosen = [...planEl.querySelectorAll('.track')].filter((t) =>
+    t.querySelector('.chip.is-on, .tab.is-on'));
+  const narrowed = chosen.some((t) => {
+    const on = t.querySelector('.is-on');
+    return on && !/^全部/.test(on.textContent);
+  });
+  const n = narrowed ? 18 : BASE;
+  const count = planEl.querySelector('.count');
+  if (count) count.textContent = `共 ${n} 道（已显示 ${Math.min(12, n)}）`;
+}
+
+/* 顶部的"当前对比"实时数字：让选择与空间占用直接挂钩 */
+function filtersHeight(planEl) {
+  return Math.round(planEl.querySelector('.filters').getBoundingClientRect().height);
+}
+function updateSummary() {
+  const el = document.getElementById('summary-live');
+  if (!el) return;
+  el.innerHTML = ['a', 'b', 'c'].map((k) => {
+    const p = document.querySelector(`[data-plan="${k}"]`);
+    const h = filtersHeight(p);
+    const total = Math.round(p.querySelector('.page__fixed')?.getBoundingClientRect().height ?? 0) || (104 + 56 + h + 20);
+    const pct = Math.round(((104 + 56 + h) / 844) * 100);
+    return `<span class="pill${k === 'b' ? ' pill--good' : ''}">${{a:'A',b:'B',c:'C'}[k]}：筛选区 ${h}px · 固定区占首屏 ${pct}%</span>`;
+  }).join('');
+}
+
+/*
+ * 跳到某个方案：**不用平滑滚动**。
+ * 这个项目有一条纪律：终态不能依赖动画跑完（WebView 节流或系统关动效时动画可能压根不执行，
+ * 见 TabLayout.scss 那段）。预览工具上更明显——平滑滚动在后台标签里可能一直不落地，
+ * 点了"看 C"却停在原地比没有这个按钮更糟。直接跳，一定到。
+ */
+document.querySelectorAll('[data-jump]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.getElementById('plan-' + btn.dataset.jump)?.scrollIntoView({ block: 'start' });
+  });
+});
+
+document.querySelectorAll('.plan[data-plan]').forEach(wirePlan);
+updateSummary();
+window.addEventListener('resize', updateSummary);
+</script>
+</body>
+</html>

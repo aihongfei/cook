@@ -112,25 +112,86 @@
   button { padding: 5px; color: #b65c28; cursor: pointer; background: none; border: 0; }
 }
 
+/*
+ * 内边距收成 `8px 12px 2px`、与搜索框的距离 18px → 12px
+ * （那两处原来是为"标签独占一行"的排布留的呼吸，标签进到行内之后就不需要了）。
+ */
 .recipes-filters {
-  padding: 15px 12px 8px;
-  margin-top: 18px;
+  padding: 8px 12px 2px;
+  margin-top: 12px;
   background: rgb(255 251 242 / 85%);
   border: 1px solid var(--color-line);
   border-radius: 18px 22px 19px 24px;
 }
 
+/*
+ * 这一行也跟着收紧（标题 14px → 13px、按钮上下内边距 7px → 4px）：31px → 23px。
+ *
+ * 为什么值得动：用户这一刀的全部诉求就是"筛选区占太多空间"，而这一行是筛选区里除选项之外
+ * 唯一还能省的 8px。**按钮的点击目标没有被牺牲**——它 19px 的内框加上这 23px 的行高
+ * 就是它实际的可点区域，比"缩到文字那么大"仍然宽裕，而且它是次要动作（真要清筛选，
+ * 空态里还有一个更醒目的入口，见 RecipeListPage 的空态）。
+ * 预览里这一行长这样（`previews/recipes-filter-density.html` 方案 B），用户是照着它选定的。
+ */
 .recipes-filters__heading {
   display: flex;
   gap: 12px;
   align-items: center;
   justify-content: space-between;
-  font-size: 14px;
+  font-size: 13px;
 
-  button { padding: 7px 0; font-size: 11px; color: #ad592f; cursor: pointer; background: none; border: 0; }
+  button { padding: 4px 0; font-size: 11px; color: #ad592f; cursor: pointer; background: none; border: 0; }
 }
 
-.recipes-filters__label { display: block; margin-top: 10px; font-size: 12px; color: var(--color-ink-3); }
+/*
+ * 一行 = 「标签 + 可横滑的选项」（用户 2026-10-16 选定方案 B「胶囊双行」，见 PLAN.md）。
+ *
+ * 改前是「标签独占一行 + 一组 tab」，两组共 201px；现在 104px。省下来的 97px 里
+ * 87px 是那两个标签行（各 28px）与偏高的 tab 行——**信息一个没少**，
+ * 只是不再各占一行。
+ */
+.recipes-filters__row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+/* 标签 `flex: 0 0 auto`：它不参与压缩，压缩的是右边那一截（见下一条） */
+.recipes-filters__label {
+  flex: 0 0 auto;
+  padding-left: 12px;
+  font-size: 11px;
+  color: var(--color-ink-3);
+}
+
+/*
+ * 选项那一截：`flex: 1` + `min-width: 0` 才能在行内被压缩、进而横滑
+ * （不写 `min-width: 0` 时 flex 子项的默认 `min-width: auto` 会让它撑破这一行）。
+ *
+ * 里面的 `Chips` 自带 `padding: 12px var(--spacing-page)` 与一条右栏距——那两条都是
+ * 为"整行贴屏幕边"的场景定的，在这里要清掉：本区块自己有内边距，
+ * 再叠一层会让标签与第一颗胶囊之间空出一大截，也会把右边缘顶出去。
+ *
+ * ⚠️ 胶囊在这**一页**比订单页那一排小一圈（内边距 `5px 11px`／高 29px，订单页是 34px）。
+ * 这是照着预览（`previews/recipes-filter-density.html` 方案 B，用户选定）来的，理由是这一页
+ * **有两排**筛选、用户的诉求正是"占太多空间"，两排各自收 5px 就是 10px；
+ * 而订单页只有一排、也没有空间抱怨。29px 仍是有效的手指目标（预览里就是按这个尺寸给用户看的）。
+ * 不要为了"全站一致"把它改回 34px——那会让这一页的目标高度回到 136px，白改一趟。
+ */
+.recipes-filters__track {
+  flex: 1;
+  min-width: 0;
+
+  .chips {
+    gap: 6px;
+    padding: 0 12px 0 0;
+  }
+
+  .chip {
+    padding: 5px 11px;
+  }
+}
 .recipes-count { padding: 18px 0 12px; font-size: 13px; color: var(--color-ink-3); }
 .recipes-grid {
   display: grid;

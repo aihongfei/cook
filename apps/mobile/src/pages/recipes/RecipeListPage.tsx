@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useFavoriteStatus, useToggleFavorite } from '@/api/favorites'
 import { recipeErrorMessage, useRecipeFilters as useFilterOptions, useRecipes } from '@/api/recipes'
-import FilterTabs from '@/components/ui/FilterTabs'
+import Chips from '@/components/ui/Chips'
 import SwipePager from '@/components/ui/SwipePager'
 import CornerArt from '@/components/ui/CornerArt'
 import Page from '@/components/ui/Page'
@@ -100,23 +100,49 @@ export default function RecipeListPage() {
             />
             <button type="submit">搜索</button>
           </form>
+          {/*
+            分类筛选区（用户 2026-10-16 选定方案 B「胶囊双行」，见 PLAN.md 与
+            `previews/recipes-filter-density.html`）。
+
+            改前它占 201px，其中 87px 是纯浪费：「品类」「菜系」两个标签各独占一行（各 28px），
+            加上偏高的 tab 行。选定的做法是**标签挪进行内 + 选项换成胶囊** → 104px（省 97px），
+            固定区占首屏从 50% 降到 32%。
+
+            为什么换成胶囊（不只是变矮）：它比 tab 矮，但**点击目标仍然有 29px**（手指够得着），
+            而且与订单页那一排筛选是同一套外形——全站看起来是一个东西。
+            颜色规则不变：选中的是品牌橙底白字（与订单页、「多选」一致）。
+          */}
           <section className="recipes-filters" aria-label="菜谱筛选">
             <div className="recipes-filters__heading"><span>按口味翻一翻</span><button type="button" onClick={reset}>清除搜索与筛选</button></div>
             {filters.isPending && <RecipeStatus title="分类加载中…" loading />}
             {filters.isError && <RecipeStatus title="筛选分类加载失败" onRetry={() => { void filters.refetch() }}>{recipeErrorMessage(filters.error)}</RecipeStatus>}
             {filters.data && <>
-              <span className="recipes-filters__label">品类</span>
-              <FilterTabs
-                items={categoryTabs}
-                activeKey={category}
-                onChange={(key) => { preferences.setCategory(key); updateSearch({ category: key }) }}
-              />
-              <span className="recipes-filters__label">菜系</span>
-              <FilterTabs
-                items={[{ key: '', title: '全部菜系' }, ...Array.from(new Set([...filters.data.cuisines, ...(cuisine ? [cuisine] : [])])).map((key) => ({ key, title: key }))]}
-                activeKey={cuisine}
-                onChange={(key) => { preferences.setCuisine(key); updateSearch({ cuisine: key }) }}
-              />
+              {/*
+                标签与选项**同一行**：`recipes-filters__row` 是个 flex 行，
+                标签 `flex: 0 0 auto`、选项那一截可横滑（选项多了自己滚，不把行撑破）。
+                标签写的是「品类」「菜系」——比"全部品类 / 全部菜系"短，因为「全部」那个选项
+                自己就在右边第一颗胶囊上，不必在标签里再说一遍。
+              */}
+              <div className="recipes-filters__row">
+                <span className="recipes-filters__label">品类</span>
+                <div className="recipes-filters__track">
+                  <Chips
+                    items={categoryTabs.map((tab) => ({ id: tab.key, label: tab.title }))}
+                    value={category}
+                    onChange={(key) => { preferences.setCategory(key); updateSearch({ category: key }) }}
+                  />
+                </div>
+              </div>
+              <div className="recipes-filters__row">
+                <span className="recipes-filters__label">菜系</span>
+                <div className="recipes-filters__track">
+                  <Chips
+                    items={[{ key: '', title: '全部菜系' }, ...Array.from(new Set([...filters.data.cuisines, ...(cuisine ? [cuisine] : [])])).map((key) => ({ key, title: key }))].map((tab) => ({ id: tab.key, label: tab.title }))}
+                    value={cuisine}
+                    onChange={(key) => { preferences.setCuisine(key); updateSearch({ cuisine: key }) }}
+                  />
+                </div>
+              </div>
             </>}
           </section>
         </div>

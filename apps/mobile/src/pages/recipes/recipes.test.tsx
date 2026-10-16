@@ -13,9 +13,16 @@ import { useRecipeFilters } from '@/stores/recipe-filters'
 import RecipeListPage from './RecipeListPage'
 import RecipeDetailPage from './RecipeDetailPage'
 
-vi.mock('@/components/ui/FilterTabs', () => ({
-  default: ({ items, activeKey, onChange }: { items: { key: string; title: string }[]; activeKey: string; onChange: (key: string) => void }) =>
-    <div>{items.map((item) => <button key={item.key} aria-pressed={activeKey === item.key} onClick={() => onChange(item.key)}>{item.title}</button>)}</div>,
+/*
+ * ⚠️ 这里原来 mock 的是 `FilterTabs`——而分类筛选区在 2026-10-16 换成了 `Chips`
+ * （用户选定方案 B「胶囊双行」，见 PLAN.md / D-096），那个 mock 就成了**空转**：
+ * 页面根本不 import 它，于是测试里跑的是真的 `Chips`，而 mock 只是让
+ * "筛选按钮"这件事看起来被覆盖了。这类"mock 打空靶"最危险的地方是**它不报错**。
+ * 现在改 mock 真正的那个组件，并保留同样可点的按钮语义（`aria-pressed` 表示选中）。
+ */
+vi.mock('@/components/ui/Chips', () => ({
+  default: ({ items, value, onChange }: { items: { id: string; label: string }[]; value: string; onChange: (id: string) => void }) =>
+    <div data-testid="chips">{items.map((item) => <button key={item.id} type="button" aria-pressed={value === item.id} onClick={() => onChange(item.id)}>{item.label}</button>)}</div>,
 }))
 
 const dish: RecipeSummary = { id: 'tomato', name: '番茄炒蛋', image: null, category: '素菜', cuisine: '家常', tags: ['快手'], calories: null, caloriesEstimated: false, origin: 'howtocook', sourceLabel: 'HowToCook', mine: false }
@@ -237,5 +244,76 @@ describe('翻页时两页之间的间隙', () => {
     const body = rule('recipes-page--body')
     expect(body, '没读到 .recipes-page--body 规则').toBeTruthy()
     expect(body, '外层不能再留横向栏距（会与页上那份叠成两倍）').toMatch(/padding\s*:\s*0\b/)
+  })
+})
+
+/*
+ * 分类筛选区（用户 2026-10-16 选定方案 B「胶囊双行」，D-096 / PLAN.md）。
+ *
+ * 这一组盯三件事，都是"改坏了不容易发现"的：
+ * ① **标签进到行内**——它原来各独占一行（28px × 2），是这一刀要省的 87px 里的大头；
+ * ② **点胶囊真的换筛选**（并且两组各自独立、互不干扰）；
+ * ③ 结构上是"两行，每行一个标签 + 一组选项"，行数变了就说明又被摊开了。
+ */
+describe('分类筛选区（胶囊双行）', () => {
+  it('标签与选项在同一行：两行、每行一个标签、一组选项', async () => {
+    mockList()
+    mount()
+    await screen.findByText('番茄炒蛋')
+
+    const filters = document.querySelector('.recipes-filters') as HTMLElement
+    const rows = [...filters.querySelectorAll('.recipes-filters__row')]
+    expect(rows).toHaveLength(2)
+    const labels = rows.map((row) => row.querySelector('.recipes-filters__label')?.textContent?.trim())
+    expect(labels).toEqual(['品类', '菜系'])
+    // 每一行里，标签与选项是**兄弟**（同一行），而不是标签自成一行
+    rows.forEach((row) => {
+      expect(row.querySelector('.recipes-filters__label')).toBeTruthy()
+      expect(row.querySelector('.recipes-filters__track')).toBeTruthy()
+      // 选项那一截里有真的可选按钮（Chips 被上面 mock 掉了，所以认它渲染出来的按钮）
+      expect(row.querySelector('.recipes-filters__track')!.querySelectorAll('button').length).toBeGreaterThan(1)
+    })
+    // 两组选项各自一串
+    const tracks = [...filters.querySelectorAll('.recipes-filters__track')]
+    expect(tracks).toHaveLength(2)
+    expect(tracks[0].querySelectorAll('button').length).toBeGreaterThan(1)
+    expect(tracks[1].querySelectorAll('button').length).toBeGreaterThan(1)
+  })
+
+  it('点品类胶囊只换品类（菜系那边不动），点菜系胶囊只换菜系', async () => {
+    mockList()
+    mount()
+    await screen.findByText('番茄炒蛋')
+
+    // 两项各自独立：品类那一行的按钮点下去，只该改 category
+    fireEvent.click(screen.getByRole('button', { name: '荤菜' }))
+    await waitFor(() => {
+      const location = new URL(screen.getByTestId('location').textContent!, 'http://localhost')
+      expect(location.searchParams.get('category')).toBe('荤菜')
+    })
+    expect(useRecipeFilters.getState().category).toBe('荤菜')
+
+    fireEvent.click(screen.getByRole('button', { name: '川菜' }))
+    await waitFor(() => {
+      const location = new URL(screen.getByTestId('location').textContent!, 'http://localhost')
+      expect(location.searchParams.get('cuisine')).toBe('川菜')
+    })
+    // 先前选的品类**没被顶掉**（两个筛选项是叠加的，不是二选一）
+    expect(useRecipeFilters.getState().category).toBe('荤菜')
+  })
+
+  it('选中的那颗是胶囊的选中态（不是靠颜色深浅猜）', async () => {
+    mockList()
+    mount('/recipes?category=素菜')
+    await screen.findByText('番茄炒蛋')
+
+    const pressed = screen
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('aria-pressed') === 'true')
+      .map((b) => b.textContent?.trim())
+    // 「全部菜系」也在一开始就被选中（菜系未筛），加上传进来的「素菜」
+    expect(pressed).toContain('素菜')
+    expect(pressed).toContain('全部菜系')
+    expect(pressed).not.toContain('荤菜')
   })
 })
