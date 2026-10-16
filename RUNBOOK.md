@@ -4502,7 +4502,7 @@ node /tmp/cdp.mjs http://127.0.0.1:9222 "(() => {
 2. **滚动位置只从滚动事件来**：别在"换页那一刻"顺手记一笔——那时 `scrollTop` 已被浏览器夹过，记下来的是假的（这一条写在了 `TabLayout.tsx` 的注释里）；
 3. **角标文案的唯一来源是后端那条 `tag`**：前端不按 `kind` 再写一张映射表；测试夹具里出现过的文案要跟后端一起改（`order.test.tsx` 与 `unread-badges.test.ts` 里各有一处）。
 
-## R-075 公网后端重新部署到最新 + 出两个 APK：怎么跑、怎么验（✅ 已验证，2026-10-14）
+## R-075 公网后端重新部署到最新 + 出两个 APK：怎么跑、怎么验（✅ 已验证，2026-10-14；2026-10-16 复跑）
 
 背景：用户问「打包最新 apk 了吗」时发现**线上后端落后一整天**——2026-10-14 早上那版还没有 `notifications` 模块，`GET /api/notifications` 实测 **404**，三张新表一个都没建。所以这一条记的是"把线上追平"的完整跑法，以及**怎么判断手上那个 APK 能不能用**。
 
@@ -4522,16 +4522,33 @@ ssh cook 'docker exec cook-api-1 sh -lc "grep -c 选好了 /app/dist/modules/not
 ssh cook 'docker exec cook-api-1 sh -lc "node -e \"const {PrismaClient}=require('@prisma/client');const p=new PrismaClient();(async()=>{const r=await p.\\\$queryRawUnsafe('SHOW TABLES');console.log(r.map(x=>Object.values(x)[0]).filter(n=>/otif|atrol/i.test(n)).join(', ')||'（无）');await p.\\\$disconnect()})()\""'
 ```
 
+**第四种，也是最硬的一种：逐字节比对**——"线上到底是哪一版"直接回答到文件级（2026-10-16 复跑用它判的：209 个文件、0 差异）：
+
+```bash
+cd /Users/aihf/Downloads/work/cook
+git ls-files services docker-compose.yml | sort > /tmp/localfiles.txt
+cat /tmp/localfiles.txt | ssh cook 'cd /opt/cook && while read -r f; do [ -f "$f" ] && sha256sum "$f" || echo "MISSING  $f"; done' > /tmp/srv.sha
+shasum -a 256 $(cat /tmp/localfiles.txt) | diff - /tmp/srv.sha && echo "逐字节一致"
+
+# 反向也要查一遍：服务器有没有本地已删掉的文件留下的"僵尸"
+ssh cook 'cd /opt/cook && find services docker-compose.yml -type f ! -path "*/node_modules/*" ! -path "*/dist/*" ! -path "*/.test-build/*" ! -name "._*" | sort' > /tmp/srvfiles.txt
+comm -13 /tmp/localfiles.txt /tmp/srvfiles.txt   # 期望空；实际只多 tsconfig.tsbuildinfo（构建缓存，无害）
+```
+
+⚠️ **`/api/realtime` 用普通 `curl` 探必是 404——这不代表没部署**：它吃的是 WebSocket upgrade（`ws` 挂在同一个 HTTP server 上），根本没有普通 HTTP 路由。验它只有两条路：真 WebSocket（§四的 `verify-realtime-ws.cjs`），或看容器 `dist` 里有没有 `realtime` 模块。
+
 ### 二、传代码并重建（沿用 R-056 §四，**注意 .env 的位置**）
 
 ```bash
 cd /Users/aihf/Downloads/work/cook
-tar czf - --exclude='node_modules' --exclude='dist' --exclude='.env' --exclude='.git' \
+tar czf - --exclude='node_modules' --exclude='dist' --exclude='.test-build' --exclude='.env' --exclude='.git' \
   docker-compose.yml services/ | ssh cook 'tar xzf - -C /opt/cook'
 ssh cook 'find /opt/cook/services -name "._*" -delete'        # 清 macOS 元数据（tar 会刷一屏 LIBARCHIVE 警告，无害）
 ssh cook 'cd /opt/cook && docker compose build api'            # 慢，几分钟
 ssh cook 'cd /opt/cook && docker compose up -d api && sleep 12 && docker compose ps api'
 ```
+
+**`--exclude='.test-build'` 是 2026-10-16 补的**：它在 `.dockerignore` 里本来就有（不会进镜像），但传上去是宿主机跑测试留下的旧编译产物，纯垃圾。
 
 **服务器的 `.env` 在 `/opt/cook/.env`（根级、root 所有）**，不在 `services/` 下——`services/api/.env` 不存在是**正常的**（compose 从 `/opt/cook/.env` 读变量）。别看到"没有 .env"就以为部署漏了密钥。
 
@@ -4541,12 +4558,12 @@ ssh cook 'cd /opt/cook && docker compose up -d api && sleep 12 && docker compose
 ssh cook 'cd /opt/cook && docker compose logs api 2>&1 | grep -iE "migration|applied" | tail -8'
 ```
 
-实测输出（本次）：
+实测输出（2026-10-14 那次是三段；2026-10-16 复跑是 `checkin_comments` + `notification_more_kinds` 两段，日志开头写 `22 migrations found`）：
 
 ```
 The following migration(s) have been applied:
 migrations/
-    └─ migration.sql        ← 三个迁移各一段
+    └─ migration.sql        ← 每个待应用迁移一段
 All migrations have been successfully applied.
 [api] migrations applied, starting server…
 ```
@@ -4555,16 +4572,20 @@ All migrations have been successfully applied.
 
 ### 四、验在**公网**上（本地容器绿不算）
 
-三套验收脚本都支持 `BASE_URL`，直接打公网：
+这批验收脚本都支持 `BASE_URL`，直接打公网（2026-10-16 扩到七套）：
 
 ```bash
 export BASE_URL=http://120.48.142.161:3000/api
-node services/api/scripts/verify-notifications-http.cjs   # 47/47
-node services/api/scripts/verify-patrol-http.cjs          # 33/33
-node services/api/scripts/verify-meal-detail-http.cjs     # 25/25
+node services/api/scripts/verify-notifications-http.cjs        # 47/47
+node services/api/scripts/verify-patrol-http.cjs               # 33/33
+node services/api/scripts/verify-notifications-change.cjs      # 70/70（F10-07 扩容）
+node services/api/scripts/verify-orders-http.cjs               # 145/145（含 nextActions 取值）
+node services/api/scripts/verify-checkins-http.cjs             # 67/67（含打卡评论）
+node services/api/scripts/verify-meal-detail-http.cjs          # 25/25
+node services/api/scripts/verify-realtime-ws.cjs               # 22/22（真 WebSocket）
 ```
 
-**注意**：这三套脚本会在公网库里**新建测试家庭与账号**（见 `NOW.md`「待你决定」第 3 条——开发库与公网库都会攒这个）。
+**注意**：这些脚本都会在公网库里**新建测试家庭与账号**（见 `NOW.md`「待你决定」——开发库与公网库都会攒这个）。
 
 ### 五、两个 APK 的区别与出包（**这一节是问"打包了吗"时最该看的**）
 
@@ -4575,19 +4596,23 @@ node services/api/scripts/verify-meal-detail-http.cjs     # 25/25
 
 **两个包不能混**：dev 包不 `adb reverse` 就什么都请求不到；release 包连的是公网，**线上没部署到最新的话，装上去就是"新界面配旧后端"**（本轮查出来的就是这个）。
 
-release 包发出前四条核对（R-058 三条 + R-059 一条）：
+release 包发出前四条核对（R-058 三条 + R-059 一条，**标记串随版本换**——挑那个版本刚加上、又绝不会出现在旧包里的文案）：
 
 ```bash
 cd apps/mobile/android/app/build/outputs/apk/release
 ASSET=$(unzip -l app-release.apk | grep -o 'assets/public/assets/index-[^ ]*\.js' | head -1)
+CSS=$(unzip -l app-release.apk | grep -o 'assets/public/assets/index-[^ ]*\.css' | head -1)
 unzip -p app-release.apk "$ASSET" | grep -c "120.48.142.161:3000"   # ≥1
 unzip -p app-release.apk "$ASSET" | grep -c "127.0.0.1:3000"        # 0
-unzip -p app-release.apk "$ASSET" | grep -c "选好了"                 # ≥1（本轮的角标文案，用来确认打的是最新码）
+unzip -p app-release.apk "$ASSET" | grep -c "已选"                   # ≥1（2026-10-16 的标记：长按多选操作条）
 unzip -p app-release.apk "$ASSET" | grep -c "tab-layout__page"      # ≥1（keep-alive 在包里）
+unzip -p app-release.apk "$CSS"   | grep -c "dish-pic-h"            # ≥1（2026-10-16：图片统一尺寸的 token）
 curl -s -o /dev/null -w '%{http_code}\n' http://120.48.142.161:3000/api/health        # 200
 curl -s -i -X OPTIONS http://120.48.142.161:3000/api/health -H "Origin: http://localhost" \
   -H "Access-Control-Request-Method: GET" | grep -i access-control-allow-origin        # http://localhost
 ```
+
+逐条核对的**看门牌**技巧：两次部署之间被替换掉的旧镜像会变成 `<none>` 悬空镜像，用 `docker images --format '{{.Repository}} {{.CreatedAt}} {{.ID}}'` 与 `docker inspect cook-api-1 --format '{{.Image}}'` 对 ID，就能确认容器跑的确实是刚构建的那一个（2026-10-16 实跑：`8856f0ce135f`、16:28:06，容器 `.Image` 与之一致）。**2026-10-16 另有一条原生侧的核对**：APK 的 `classes.dex` 里应当能直接 grep 到 `RealtimeService` 与 `NotifyChannels`（实时前台服务与三渠道的唯一创建处），渠道名 `family_events` / `meal_reminders` / `realtime_link` 也都在；`assets/public/runners/patrol.js` 里应是 `family_events`。
 
 ⚠️ **`unzip -p` 里面的通配符必须自己先解析**：`unzip -p x.apk assets/public/assets/index-*.js` 在 zsh 下报 `no matches found`（那是**shell** 在展开、不是 unzip），grep 跟着报 0，看起来像"包不对"。用 `unzip -l` 先取到真文件名。
 
@@ -4600,9 +4625,17 @@ APKSIGNER=$(ls "$HOME/Library/Android/sdk/build-tools"/*/apksigner | tail -1)
 
 ### 六、改这一块时要连带注意的三处
 
-1. **"打包了"不等于"能用了"**：APK 是新的、后端是旧的，装上去照样坏——回答"打包了吗"必须**连线上版本一起查**（第一节那三条命令就是干这个的）；
+1. **"打包了"不等于"能用了"**：APK 是新的、后端是旧的，装上去照样坏——回答"打包了吗"必须**连线上版本一起查**（第一节那些命令就是干这个的；**要一句准话就用第四种哈希比对**，能直接说出"线上等于哪一版、差哪些文件"）；
 2. **`services/api/.env` 在服务器上不存在是正常的**（compose 读 `/opt/cook/.env`），别去"补"一个——那会引入一份没人读的配置，下次改错地方；
-3. **三套验收脚本都会写公网库**：跑之前心里有数，跑完别惊讶库里多了几个 `AI 验收家`。
+3. **这些验收脚本都会写公网库**：跑之前心里有数，跑完别惊讶库里多了几个 `AI 验收家`。
+
+### 七、2026-10-16 复跑记录（用户授权「全部重新提交就行了」）
+
+- **跨 28 笔提交，动到后端的 9 笔**：`51f1f6e`（退菜放开）、`e37eace`、`89aa721`、`8548797`、`79a742c`（点单页四连改）、`df60ab6`（打卡评论）、`2158917`（通知扩容）、`28ba415`（按钮分表）、`76378be`（实时通知）。`76378be` 之后全是前端与原生，不进后端镜像。落后范围用第一节的**哈希比对**判（209 文件 0 差异），不靠"抽看几个文件"。
+- **两条迁移**由入口自动应用：`20261015140000_checkin_comments`、`20261016120000_notification_more_kinds`（日志形状见第三节）。
+- **公网实测**：七套脚本 47/33/70/145/67/25/22 全过；`/api/health` 200、CORS `http://localhost` 照旧。
+- **容器自证**：`cook-api-1` 里 `dist/modules/realtime/` 存在、`app.module.js` 含 `RealtimeModule`、通知服务含 `recordChange`。
+- **APK**：当日重出的服务器版（`release/御膳-服务器版-20261016.apk`）四条核对已过（§五），含实时通道、三渠道与长按多选等全部前端改动。
 
 ## R-076 抽屉的「开了关、关了再开」怎么验（R-66 配套，✅ 已验证，2026-10-14）
 
