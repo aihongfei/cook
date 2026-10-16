@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
-import { apiClient } from './client'
+import { apiErrorMessage, apiClient } from './client'
 
 export interface RecipeSummary {
   id: string
@@ -200,6 +200,34 @@ export function useDeleteRecipe() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: deleteRecipe,
+    onSuccess: () => invalidateRecipeViews(queryClient),
+  })
+}
+
+/**
+ * 一次删好几道（「原创的」长按多选，用户 2026-10-16：「删除改为按住弹出复选框这种形式的」）。
+ *
+ * **后端只有单删**（`DELETE /recipes/:id`），所以这里是前端扇出 N 个单删。不假装它是一次
+ * 原子操作：每道菜各自是一次独立事务，删掉的就是删掉了——真有失败的就如实回报
+ * 「删掉了几道、哪几道没删掉、后端说什么」，让调用方能把没删掉的留在选择模式里重试，
+ * 而不是一句话"失败了"把已经删掉的那些也说成没删。
+ *
+ * 顺带只作废一次缓存：`useDeleteRecipe` 那个 N 次调用会作废 N 次（N 个请求抢着重取同一份列表）。
+ */
+export function useDeleteRecipes() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (targets: { id: string; name: string }[]) => {
+      const results = await Promise.allSettled(targets.map((target) => deleteRecipe(target.id)))
+      const removed: string[] = []
+      const failed: { id: string; name: string; message: string }[] = []
+      results.forEach((result, index) => {
+        const target = targets[index]
+        if (result.status === 'fulfilled') removed.push(result.value.name)
+        else failed.push({ ...target, message: apiErrorMessage(result.reason) })
+      })
+      return { removed, failed }
+    },
     onSuccess: () => invalidateRecipeViews(queryClient),
   })
 }

@@ -821,80 +821,9 @@
 }
 
 /*
- * 选择模式的顶部操作条。**放上部**（底栏是 Tab、右下角是 AI 悬浮球，多一层会抢位置），
- * 而且它就压在筛选行原来的位置上——进选择模式时那一行本来也没有意义了。
+ * 选择模式的顶部操作条 `.pick-bar`（点菜单与「我的菜谱 → 原创的」共用）
+ * 已经搬到 `shared.scss`：两页各写一份迟早会分叉，而它是**同一套交互的同一个零件**。
  */
-.pick-bar {
-  /* 一排按钮 + （可能要的）一句为什么退不掉。**装进同一个卡片**：
-     提示单摆在外面时，它看着像页面上的另一段话，而不是"这条操作条的附注"（用户 2026-10-15 反馈间隙） */
-  overflow: hidden;
-  /*
-   * 左右跟着卡片走 `var(--spacing-page)`、上下各留 10px（用户 2026-10-15：
-   * 「多选菜单现在左右间隙也没有，上下也没有都需要优化」——原来它四面贴边，
-   * 上方紧挨分段控件、下方紧挨两个入口，看着像被压扁的一整条）。
-   */
-  margin: 10px var(--spacing-page);
-  background: color-mix(in srgb, var(--color-brand) 8%, var(--color-paper));
-  border: 1.5px solid var(--color-brand);
-  border-radius: 14px;
-}
-
-.pick-bar__row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  /* 11px 是这一条的里衬（外面还有 10px 的外边距）：四个角不顶字，按钮也不贴边 */
-  padding: 11px 12px;
-}
-
-.pick-bar__exit,
-.pick-bar__all {
-  flex: none;
-  padding: 5px 12px;
-  font-size: 13px;
-  color: var(--color-ink-soft);
-  background: var(--color-paper);
-  border: 1.5px solid var(--color-line);
-  border-radius: 999px;
-}
-
-/* 「已选 N 餐」占满中间并按**居中**排：靠左会让两边留一大一小两个空档，看着像排版坏了 */
-.pick-bar__count {
-  flex: 1;
-  min-width: 0;
-  font-size: 13.5px;
-  font-weight: 700;
-  text-align: center;
-  color: var(--color-ink);
-}
-
-/* 退菜是破坏性的（会退掉家里人点的菜），砖红实底，与「取消整餐」同一个色族 */
-.pick-bar__go {
-  flex: none;
-  padding: 6px 16px;
-  font-size: 13.5px;
-  font-weight: 700;
-  color: var(--color-paper);
-  background: #b4451f;
-  border: none;
-  border-radius: 999px;
-}
-
-.pick-bar__go:disabled {
-  color: var(--color-ink-soft);
-  background: var(--color-line);
-}
-
-/* 附注行：虚线把它和按钮排分开，底色比卡片本身再深一点（是解释，不是又一条操作） */
-.pick-bar__tip {
-  margin: 0;
-  padding: 9px 14px 11px;
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: #b4451f;
-  background: color-mix(in srgb, #b4451f 7%, transparent);
-  border-top: 1px dashed color-mix(in srgb, #b4451f 30%, transparent);
-}
 
 /*
  * 状态筛选那一行：**chips 自己横着滚，多选图标钉在右边不跟着滚**

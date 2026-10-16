@@ -199,7 +199,12 @@
   gap: 12px;
 
   .dish-card { min-width: 0; }
-  .dish-card__pic { height: auto; aspect-ratio: 1.25; }
+  /*
+   * 图高**不再在这一层改**（原来写的是 `height: auto; aspect-ratio: 1.25`）：
+   * 那张卡在有图时被图片自己撑到 156px、没图（占位碗盘）时只有 125px，
+   * 一屏里高矮不一（用户 2026-10-16：「所有的菜谱图片要大小一致，可以使用 cover」）。
+   * 现在统一吃 `--dish-pic-h` 这一个值（见 kitchen.scss 的 `.dish-card__pic`）。
+   */
 }
 
 .recipe-image-placeholder {
@@ -399,9 +404,14 @@
 }
 
 /*
- * 我的菜谱（F1-12）。顶部一行只放两样东西：**新建**（左）与总数（右）。
- * 新建不是普通的入口而是这一页的主行动，所以它做成实心胶囊、贴在与标题同一条竖线上
- * （`.pscreen` 的标题自带 `padding-inline`，这里用 margin 对齐，见 favorites.scss 里那段说明）。
+ * 「原创的」的**固定那一行**：左边「＋ 新建菜谱」、右边「多选」（用户 2026-10-16）。
+ *
+ * 这一行只有「原创的」有（用户原话「这个新建菜谱应该只有原创里面才有啊」）：在「做过的」
+ * 或「收藏的」底下写一道新菜，本来是两件事凑在一起。它算这一页的**动作**，所以在固定区
+ * （D-091 的口径里"页头 + tab + 页面级操作行"都固定）——翻到列表中间想写一道新菜，
+ * 不该先滚回顶上（原来的注释记着这条，改成"只有原创的"之后它照旧成立）。
+ *
+ * `justify-content: space-between` 让两颗各贴一边：新建在左（主行动），多选在右（次要入口）。
  */
 .my-recipes__top {
   display: flex;
@@ -422,6 +432,31 @@
 
 .my-recipes__new:active {
   opacity: 0.85;
+}
+
+/*
+ * 「多选」：长按是**不可发现的手势**，只给长按的话第一次用的人永远找不到
+ * （本项目在"点不动的箭头""看不见的角标"上各栽过一次，见 D-066 / D-082）。
+ * 所以与点菜单那颗图标同形（31px 圆形、描边、只有图形没有文字，名字走 aria-label）：
+ * 同一件事在两处长得一样，用户不用学第二遍。
+ */
+.my-recipes__multi {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 31px;
+  height: 31px;
+  padding: 0;
+  color: var(--color-ink-3);
+  background: var(--color-paper);
+  border: 1.5px solid var(--color-line);
+  border-radius: 999px;
+}
+
+.my-recipes__multi:active {
+  color: var(--color-brand);
+  border-color: var(--color-brand);
 }
 
 .my-recipes__count {

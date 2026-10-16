@@ -262,9 +262,17 @@
   box-shadow: var(--shadow-card);
 }
 
+/*
+ * 卡片图片的盒子：**全站的菜谱图都吃这一个高度**（`--dish-pic-h`，见 tailwind.css）。
+ *
+ * 高度必须是写死的一个值，不能交给内容（`height: auto` + `aspect-ratio` 试过）：
+ * 真图与"暂无图片"的占位碗盘是两种内在尺寸，auto 之下同一屏里能差三十多像素
+ * （实测 156 vs 125，用户 2026-10-16 报「所有的菜谱图片要大小一致」）。
+ * 配合 `img { object-fit: cover }`，任何比例的图都按同一个框裁，不再撑高卡片。
+ */
 .dish-card__pic {
   position: relative;
-  height: 120px;
+  height: var(--dish-pic-h);
   background: var(--color-cream-2);
   /* 图片不参与伸缩：列方向上的 flex 子项默认可收缩，空间紧时会把图压扁 */
   flex: none;
@@ -275,6 +283,49 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/*
+ * 多选模式（长按一张卡进来，只有「原创的」会画，见 DishCard 的 `select`）。
+ *
+ * 勾选方块挂在**左上角**：右上角是收藏那颗心的位置，两个叠在一起会互相盖住
+ * （点菜单那边角标在右上、所以方块也在左上，两处同一个记号）。
+ * `pointer-events: none`：它是"状态"，点它不该是唯一的命中选择——整张卡都是目标。
+ */
+.dish-card__pick {
+  position: absolute;
+  /*
+   * **贴在卡内**（6px 而不是像点菜单那样压到描边外）：这张卡有 `overflow: hidden`
+   * （图与圆角要裁干净），负偏移会被直接切掉，方块就看不见了。
+   */
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: transparent;
+  background: var(--color-paper);
+  border: 1.5px solid var(--color-line);
+  border-radius: 7px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  pointer-events: none;
+}
+
+.dish-card__pick.is-on {
+  color: var(--color-paper);
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+/* 选中的卡整体淡品牌底 + 描边加深：扫一列卡片时"我动了哪几张"一眼看得出 */
+.dish-card.is-picked {
+  border-color: var(--color-brand);
+  background: color-mix(in srgb, var(--color-brand) 6%, var(--color-paper));
 }
 
 /* 收藏的心（F1-09）：压在图片右上角。
@@ -526,26 +577,8 @@
   object-position: center 47%;
 }
 
-/* 自己写的菜的改/删（只有「我的菜谱 → 原创的」会画，见 DishCard 的 manage）：
-   安静的一行，够得着但不跟"点卡片看做法"抢注意力 */
-.dish-card__manage {
-  display: flex;
-  gap: 8px;
-  padding: 0 12px 10px;
-}
-
-.dish-card__edit,
-.dish-card__remove {
-  flex: 1;
-  padding: 5px 0;
-  font-size: 12.5px;
-  color: var(--color-ink-3);
-  background: transparent;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-}
-
-.dish-card__remove:active {
-  color: #b4451f;
-  border-color: color-mix(in srgb, #b4451f 40%, var(--color-line));
-}
+/*
+ * 自己写的菜的改/删**不在这张卡上**：2026-10-15 试过在卡上直接放一行「编辑 / 删除」，
+ * 2026-10-16 用户看过后收回——改走详情页（那里本来就有），删改成"按住这张卡弹复选框"
+ * （多选 + 批量删，见 MyRecipesPage）。卡片于是回到三处共用时的样子，没有管理入口。
+ */

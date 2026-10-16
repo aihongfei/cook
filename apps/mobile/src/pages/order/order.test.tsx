@@ -1310,8 +1310,12 @@ it('「多选」是筛选行最右的图标按钮（不跟着 chips 横滚、与
   expect(document.querySelector('.order-filter__manage')).toBeNull()
 
   // ④ 样式：这一行吃页面栏距（左右间隙），图标 `flex: none` 不被压扁；
-  //    操作条（选择模式）也要有左右与上下的间隙——用户原话「左右间隙也没有，上下也没有」
-  const css = readFileSync(join(__dirname, './order.scss'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  //    操作条（选择模式）也要有左右与上下的间隙——用户原话「左右间隙也没有，上下也没有」。
+  //    操作条那条规则 2026-10-16 搬去了 `shared.scss`（「原创的」也用同一套），所以两个文件一起读。
+  const css = [
+    readFileSync(join(__dirname, './order.scss'), 'utf8'),
+    readFileSync(join(__dirname, '../shared.scss'), 'utf8'),
+  ].join('\n').replace(/\/\*[\s\S]*?\*\//g, '')
   const rule = (name: string) => css.match(new RegExp(`\\.${name}\\s*\\{[\\s\\S]*?\\n\\}`))?.[0] ?? ''
   const filter = rule('order-filter')
   expect(filter, '没读到 .order-filter 规则').toBeTruthy()

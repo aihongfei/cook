@@ -1529,3 +1529,51 @@ document.querySelector('.my-recipes').parentElement.className  // "page__fixed"
 `apps/mobile/android/app/src/main/java/com/yushan/cook/NotifyChannels.java`（唯一创建处）、
 `apps/mobile/patches/@capacitor__background-runner.patch`、
 `RUNBOOK.md` **R-094**（怎么 dump 渠道、怎么区分"删掉了"与"又被建回来了"）。
+
+## R-85 「按住弹复选框」这类手势有两处**静默失败**：长按被移动取消（本意如此）、抬手补的 click 把勾选立刻取消掉（✅ 已定规矩，2026-10-16；配套 D-103）
+
+### 一、风险本身
+
+把管理动作交给**长按**（用户 2026-10-16：「删除改为按住弹出复选框这种形式的」）会踩两个坑，
+两个都**不报错、看起来像"这个功能没做"**：
+
+1. **长按被"移动超过阈值"取消**——这是 `useLongPress` 的本意（列表里按住是为了滚动），
+   但如果取消的判据只挂在卡片自己身上，手指一旦滑出那张卡就再也收不到移动事件，
+   那 500ms 的计时器没人清，**"想滚列表"会变成"进了多选"**；
+2. **抬手时浏览器补的那一次 `click`**——不吞掉的话，刚被长按选中的那一张会被紧接着的点击
+   **立刻取消**（表现为"按半天选不上"），或者顺着链接跳进详情页。
+
+### 二、判别要点
+
+- 手指停在卡上不动 700ms → 应该进多选并勾上它（本次实测：`已选 1 道`，
+  卡片 `role=checkbox` / `aria-checked=true`）；
+- **按住之后横滑 40px** → 应该**不**进多选（本次实测：操作条没出现、卡片没有 `role`）；
+- 长按抬手后立刻补一次 `click` → 勾选**仍在**（本次实测：`已选 1 道` 不变、URL 没跳详情）。
+
+### 三、为什么容易再犯
+
+- 三个判据里有两条是"**不该发生的事**"（不该进多选、不该被取消），
+  只测"长按能不能选中"会一路绿灯；
+- 在 jsdom 里 `TouchEvent` / `pointercancel` 这些都不真派发，**必须去真浏览器**用
+  `dispatchEvent(new PointerEvent(...))` 打一遍（`lib/long-press.test.tsx` 已覆盖判定本身，
+  但接线只有 DOM 能验）；
+- 第一版取消判据只挂卡片自己身上（漏掉"手指滑出去"）**已经真踩过一次**，
+  修法与理由记在 `lib/long-press.ts` 文件头。
+
+### 四、怎么修（这一版采用的）
+
+- 长按一律用 `lib/long-press.ts` 的 `useLongPress`：它起手之后**在 window 上**补一份
+  capture 监听（`pointermove` / `touchmove` / `pointerup` / `pointercancel`），
+  手指走到哪儿都算数——**不要自己写第二份计时器**；
+- 卡片的 `onClick` 里**第一句**就是 `if (consumeClick()) { event.preventDefault(); return }`
+  （`preventDefault` 是必须的：这次 click 的默认动作在冒泡结束后才执行，
+  不拦的话它会顺着 `<Link>` 跳走）；
+- 长按触发后卡片会从 `<Link>` 换成 `<div>`（多选模式下点卡片＝勾选），
+  这次重渲染**不能**让那个 hook 实例被换掉——hook 挂在**卡片组件自己**身上，
+  不要挂到 `.map()` 里面的元素上。
+
+### 五、相关
+
+- `lib/long-press.ts`（判定与它的文件头注释）、`RISKS.md` R-059（弹层与提示的层级）、
+  `RISKS.md` R-081（用触摸验手势——本次同样走真触摸事件）；
+- `D-103`（本条的出处）、`RUNBOOK.md` **R-095**（怎么验这一套，含三个判据的具体命令）。

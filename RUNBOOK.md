@@ -5939,3 +5939,120 @@ adb shell pm grant com.yushan.cook android.permission.POST_NOTIFICATIONS
 `DECISIONS.md` **D-102**（三个渠道清单 + 为什么分两个）、`RISKS.md` **R-84**、
 `apps/mobile/patches/@capacitor__background-runner.patch`、
 `RUNBOOK.md` **R-091**（实时通知怎么验，本文件的第四节与它配套）。
+
+## R-095 验「长按弹复选框 + 批量删」怎么验：三条判据必须都过，另加一条"部分失败"的对照（D-103 / R-85 配套，✅ 已验证，2026-10-16）
+
+### 一、为什么不能只验"长按能选中"
+
+长按这一套的真正难点在**两个"不该发生的事"**上（见 `RISKS.md` R-85）：
+按住滑动不该进多选、长按抬手补的那次 click 不该取消勾选。只验"能选中"会一路绿灯，
+而这两个坑在真机上表现为"按半天选不上"或"一滚列表就进多选"。
+
+先跑单测把判定那一半钉住：
+
+```bash
+pnpm --dir apps/mobile run test -- src/lib/long-press.test.tsx src/pages/recipes/MyRecipesPage.test.tsx
+```
+
+### 二、进到真页面，用真事件打三条判据
+
+在 360 宽的页面上打开「我的菜谱 → 原创的」（这一页才有长按）：
+
+```
+http://127.0.0.1:5173/recipes/mine?tab=mine
+```
+
+**① 长按进多选并勾上它**（`pointerdown` 之后**停在原地**等过 500ms 阈值）：
+
+```js
+// 卡片上按下（pointerType 要写 touch：桌面鼠标那一路不会被系统抢手势，验不出真机问题）
+const card = document.querySelector('.dish-card')
+const r = card.getBoundingClientRect()
+card.dispatchEvent(new PointerEvent('pointerdown', {
+  bubbles: true, cancelable: true, button: 0, pointerId: 7, pointerType: 'touch',
+  clientX: Math.round(r.left + r.width / 2), clientY: Math.round(r.top + 30),
+}))
+// 等 900ms，然后读三条：操作条的计数、卡片的 aria-checked、方块的类名
+```
+
+判据：`.pick-bar__count` 是「已选 1 道」、卡片 `role="checkbox"` 且 `aria-checked="true"`、
+`.dish-card__pick` 带 `is-on`（实测 22×22、卡内左上 7px）、**URL 没有变成详情页**。
+
+**② 按住之后滑走 → 不该进多选**（这一条是"滚动 vs 长按"的分界）：
+
+```js
+window.dispatchEvent(new PointerEvent('pointermove', {
+  bubbles: true, pointerType: 'touch', pointerId: 7,
+  clientX: r.left + 30 + 40, clientY: r.top + 30,   // 横着走 40px（> LONG_PRESS_SLOP 的 10）
+}))
+```
+
+判据：等 900ms 后 `.pick-bar` **不存在**、卡片没有 `role`。
+
+**③ 抬手补的那次 click 要吐掉**：
+
+```js
+card.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7, pointerType: 'touch' }))
+card.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))   // 浏览器补的那一次
+```
+
+判据：勾选**仍在**（还是「已选 1 道」、`aria-checked` 仍是 `true`），且 URL 没跳详情。
+
+### 三、批量删：真建两道临时菜，删完清干净
+
+删菜谱**不可逆**（收藏与常用组合里的引用一起没），所以验收脚本必须**自己建、自己删**，
+不碰用户原有的菜。用真接口建两道（账号沿用 `/auth/login` 那一套开发账号，
+口令见 `services/api/scripts/verify-*-http.cjs` 里那一份，不在这里再抄一遍）：
+
+```bash
+TOKEN=$(curl -s -X POST http://127.0.0.1:3000/api/auth/login -H 'Content-Type: application/json' \
+  -d '{"account":"<开发账号>","password":"<与脚本里同一份口令>"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+
+for n in A B; do
+  curl -s -X POST http://127.0.0.1:3000/api/recipes -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"验收临时-${n}\",\"category\":\"荤菜\",\"cuisine\":\"家常\",\"ingredients\":[{\"name\":\"料\",\"amount\":\"1\"}],\"steps\":[\"做\"]}" \
+    | python3 -c "import sys,json;d=json.load(sys.stdin);print('created:',d['id'],d['name'])"
+done
+```
+
+然后在页面上：**点「多选」图标**（显式入口那一条，顺带验它）→ 点两张卡 → 点「删除」。
+判据依次是：
+
+| 步 | 判据 |
+| --- | --- |
+| 点「多选」 | 操作条出现「已选 **0** 道」（不带卡进模式＝一个都没选） |
+| 点两张卡 | 「已选 2 道」，两张 `aria-checked="true"`，**URL 不变** |
+| 点「删除」 | 只弹确认框，**一个请求都没发**；文案说清是几道：「选中的 2 道菜谱（A、B）会…」 |
+| 确认 | 列表回到原来那几条、计数回落、toast「删掉了 2 道菜谱」、操作条**自动收起** |
+
+⚠️ 读勾选数要**等一拍**再读：DOM 更新在 React 提交之后，同步读会拿到上一帧的「已选 0 道」
+（这一轮踩过，差点判成"点卡片没反应"）。
+
+### 四、"部分失败"怎么验（这一支最容易漏）
+
+后端只有 `DELETE /recipes/:id`，批量删是**前端扇出 N 个单删**，
+所以"删了 3 道、其中 1 道被拒"是真会发生的状态。验法（不起服务也能验，走单测）：
+
+```bash
+pnpm --dir apps/mobile run test -- src/pages/recipes/MyRecipesPage.test.tsx -t 删不掉
+```
+
+判据：**没删掉的那道留在勾选状态里**（操作条还显示「已选 1 道」），
+toast 是 `「X」没删掉：<后端原话>`（不是笼统的"删除失败"），卡片仍在列表里。
+
+### 五、这一轮实测的结果（2026-10-16，360×844）
+
+- 三条判据全过：长按 → `已选 1 道` / `role=checkbox` / `aria-checked=true` / 方块 22×22；
+  按住横滑 40px → 操作条不出现；抬手补 click → 勾选仍在、URL 不变；
+- 批量删：临时建 2 道 → 勾 2 道 → 确认框说清「选中的 2 道菜谱（验收临时-B、验收临时-A）」
+  → 真删 → toast「删掉了 2 道菜谱」、操作条收起、列表回落；**临时数据已清干净**；
+- 非多选模式下点卡片仍进详情，详情页的「编辑」（`<a href="/recipes/xxx/edit">`）与「删除」都在；
+- 三个 tab 逐个查入口：做过的 / 收藏的**没有**「＋ 新建菜谱」，原创的有；
+- 图片尺寸四个位置全部 `120×156`（含两张占位碗盘，见 D-104）。
+
+### 六、相关
+
+`RISKS.md` R-85（这一套的两个静默失败）、`lib/long-press.ts` 文件头、
+`RUNBOOK.md` **R-093**（栏距/间距怎么量）、`D-103` / `D-104`。

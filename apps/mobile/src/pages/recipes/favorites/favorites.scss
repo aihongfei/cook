@@ -61,8 +61,9 @@
   text-decoration: none;
 }
 
+/* 图高与另外三处卡片同一个值（`--dish-pic-h`）：翻着看时图该是同一个尺寸 */
 .fav-card__pic {
-  height: 96px;
+  height: var(--dish-pic-h);
   background: var(--color-cream-2);
 }
 

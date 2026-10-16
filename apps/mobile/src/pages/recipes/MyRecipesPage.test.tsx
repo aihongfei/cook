@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError, type AxiosRequestConfig } from 'axios'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -122,6 +122,76 @@ it('顶部「＋ 新建菜谱」与空态里的入口都去 `/recipes/new`', asy
   // 空态自己那条同时给出"下一步"
   fireEvent.click(screen.getByRole('link', { name: '写下第一道菜' }))
   expect(screen.getByTestId('form-page')).toBeTruthy()
+})
+
+/*
+ * 「＋ 新建菜谱」只在「原创的」那一支（用户 2026-10-16：「这个新建菜谱应该只有原创里面才有啊」）。
+ *
+ * 它原先在**固定页头**里，三个 tab 都看得见：在「做过的」或「收藏的」底下写一道新菜，
+ * 本来就是两件事凑在一起。现在它跟「原创的」的钩子绑在一起。
+ */
+it('「＋ 新建菜谱」只在「原创的」上有（做过的 / 收藏的底下不出现）', async () => {
+  signIn()
+  mockAllThree()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', state: { from: '/mine' } }]}>
+        <Routes>
+          <Route path="/recipes/mine" element={<MyRecipesPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  // 默认落在「做过的」：这一支不该有新建入口
+  expect(await screen.findByText('我做的排骨')).toBeTruthy()
+  expect(screen.queryByRole('link', { name: '＋ 新建菜谱' })).toBeNull()
+
+  fireEvent.click(screen.getByText('收藏的'))
+  expect(await screen.findByText('我收的菜')).toBeTruthy()
+  expect(screen.queryByRole('link', { name: '＋ 新建菜谱' })).toBeNull()
+
+  fireEvent.click(screen.getByText('原创的'))
+  expect((await screen.findByRole('link', { name: '＋ 新建菜谱' })).getAttribute('href')).toBe('/recipes/new')
+})
+
+it('「多选」只在真有菜的时候画（空列表上摆一颗点了没事发生的按钮最糟）', async () => {
+  mockGet([])
+  mount()
+
+  expect(await screen.findByText('还没有自己上传的菜谱')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '多选' })).toBeNull()
+})
+
+it('换走 tab 就退出多选（否则会留着一条"已选 N 道 / 删除"对着看不见的东西）', async () => {
+  signIn()
+  mockAllThree()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', search: '?tab=mine', state: { from: '/mine' } }]}>
+        <Routes>
+          <Route path="/recipes/mine" element={<MyRecipesPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  const card = (await screen.findByText('外婆的红烧肉')).closest('article') as HTMLElement
+  await longPress(card)
+  expect(await screen.findByText('已选 1 道')).toBeTruthy()
+
+  fireEvent.click(screen.getByText('做过的'))
+  expect(await screen.findByText('我做的排骨')).toBeTruthy()
+  expect(screen.queryByText('已选 1 道')).toBeNull()
+
+  // 切回来是干净的：没有复选框、没有操作条
+  fireEvent.click(screen.getByText('原创的'))
+  expect(await screen.findByRole('link', { name: '＋ 新建菜谱' })).toBeTruthy()
+  expect(document.querySelector('.dish-card__pick')).toBeNull()
 })
 
 it('取回来之前先说一声"正在找"，不闪一个"还没有自己上传的菜谱"（那是假空态）', async () => {
@@ -362,31 +432,78 @@ it('在「收藏的」里点的卡片，`from` 不会被**当前正在看的 tab
 })
 
 // ---------------------------------------------------------------------------
-// 原创的：卡片上直接放「编辑 / 删除」（交付二 / D-085）
+// 原创的：卡上不再有「编辑 / 删除」，改走详情页与长按多选
+// （用户 2026-10-16：「这两个按钮不要了，编辑在点进去的详情里面可以编辑，
+//   删除改为按住弹出复选框这种形式的」）
 // ---------------------------------------------------------------------------
 
-it('原创的：卡上直接给「编辑 / 删除」，编辑带 `from` 跳表单页（改完返回才回得到这一页）', async () => {
+/** 长按：按下 → 等过阈值 → 抬手（浏览器还会补一次 click，这里也补上，验"吐掉"那一句） */
+async function longPress(element: HTMLElement) {
+  fireEvent.pointerDown(element, { button: 0, clientX: 10, clientY: 10 })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 600))
+  })
+  fireEvent.pointerUp(element)
+  fireEvent.click(element)
+}
+
+it('原创的：卡片上**没有**「编辑 / 删除」两颗按钮了（编辑回详情页）', async () => {
   mockGet([own])
   mount()
 
-  const edit = await screen.findByRole('button', { name: '编辑' })
-  // 与"点卡片进详情"**不是同一个动作**：这里直接进表单
-  fireEvent.click(edit)
+  expect(await screen.findByText('外婆的红烧肉')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
+  expect(document.querySelector('.dish-card__manage')).toBeNull()
+})
 
-  const landing = await screen.findByTestId('edit-page')
-  expect(landing.dataset.from).toContain('/recipes/mine?tab=mine')
+it('原创的：点卡片还是进详情（那里能改，也看得到全文）', async () => {
+  mockGet([own])
+  mount()
+
+  fireEvent.click(await screen.findByText('外婆的红烧肉'))
+  expect(await screen.findByTestId('detail-page')).toBeTruthy()
+})
+
+/*
+ * 长按弹复选框（用户 2026-10-16：「删除改为按住弹出复选框这种形式的」）。
+ * 与点菜单同一套：长按一张卡→进多选并勾上它→此后点卡片=勾选/取消→顶部操作条批量删。
+ */
+it('原创的：长按一张卡弹出复选框并勾上它（点卡片这时候是勾选，不再跳详情）', async () => {
+  mockGet([own])
+  mount()
+
+  const card = (await screen.findByText('外婆的红烧肉')).closest('article') as HTMLElement
+  await longPress(card)
+
+  expect(await screen.findByText('已选 1 道')).toBeTruthy()
+  expect(card.getAttribute('role')).toBe('checkbox')
+  expect(card.getAttribute('aria-checked')).toBe('true')
+  expect(card.querySelector('.dish-card__pick')?.className).toContain('is-on')
+  // **长按那一下自己不能顺势进详情**（浏览器补的那次 click 要吐掉）
   expect(screen.queryByTestId('detail-page')).toBeNull()
 })
 
-it('原创的：删除要先确认（不点卡片进详情），确认后发 DELETE 并报一句', async () => {
+it('原创的：动作条上的「多选」是显式入口（长按是手势，第一次用的人找不到）', async () => {
+  mockGet([own])
+  mount()
+
+  fireEvent.click(await screen.findByRole('button', { name: '多选' }))
+  // 不带卡进来 = 一个人都没选，等着用户点卡片挑
+  expect(await screen.findByText('已选 0 道')).toBeTruthy()
+  expect(screen.queryByTestId('detail-page')).toBeNull()
+})
+
+it('原创的：批量删除要先确认（说清删的是几道），确认后逐道发 DELETE 并报一句', async () => {
   mockGet([own])
   const remove = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: { id: 'own-1', name: '外婆的红烧肉' } } as never)
   mount()
 
+  const card = (await screen.findByText('外婆的红烧肉')).closest('article') as HTMLElement
+  await longPress(card)
   fireEvent.click(await screen.findByRole('button', { name: '删除' }))
 
-  // 两颗按钮是 `<Link>` 的**兄弟**：点它们不能顺势进详情（进详情就等于把确认框盖掉）
-  expect(screen.queryByTestId('detail-page')).toBeNull()
+  // 还没确认，一个请求都不该发
   expect(remove).not.toHaveBeenCalled()
   const dialog = screen.getByRole('dialog')
   // 与详情页同一句：说清连带影响（收藏与常用组合里的引用也一起没了）
@@ -399,25 +516,31 @@ it('原创的：删除要先确认（不点卡片进详情），确认后发 DEL
   await waitFor(() => expect(
     useToasts.getState().items.some((item) => item.text === '已删掉「外婆的红烧肉」'),
   ).toBe(true))
+  // 全成 → 退出多选（操作条收起来，卡片回到能点进详情的样子）
+  await waitFor(() => expect(screen.queryByText('已选 1 道')).toBeNull())
 })
 
-it('删不掉时把后端那句话说出来，卡片留在原地（不假装删掉了）', async () => {
+it('删不掉时把后端那句话说出来并**留在勾选状态**（不假装删掉了，也能接着重试）', async () => {
   mockGet([own])
   vi.spyOn(apiClient, 'delete').mockRejectedValue({
     isAxiosError: true, response: { status: 403, data: { message: '这道菜谱不是你们家的，改不了' } },
   } as never)
   mount()
 
+  const card = (await screen.findByText('外婆的红烧肉')).closest('article') as HTMLElement
+  await longPress(card)
   fireEvent.click(await screen.findByRole('button', { name: '删除' }))
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '删除' }))
 
   await waitFor(() => expect(
-    useToasts.getState().items.some((item) => item.text === '这道菜谱不是你们家的，改不了'),
+    useToasts.getState().items.some((item) => item.text.includes('这道菜谱不是你们家的，改不了')),
   ).toBe(true))
+  // 卡片留在原地，且还勾着——用户能立刻再点一次「删除」
   expect(screen.getByText('外婆的红烧肉')).toBeTruthy()
+  expect(await screen.findByText('已选 1 道')).toBeTruthy()
 })
 
-it('不是自己传的那些不画「编辑 / 删除」（公共菜谱只能看：给个按钮再拿 403 拒绝比不给更糟）', async () => {
+it('「收藏的」那些不接长按（公共菜谱只能看：给个手势再拿 403 拒绝比不给更糟）', async () => {
   signIn()
   mockAllThree()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -432,9 +555,12 @@ it('不是自己传的那些不画「编辑 / 删除」（公共菜谱只能看�
     </QueryClientProvider>,
   )
 
-  expect(await screen.findByText('我收的菜')).toBeTruthy()
-  expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
-  expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
+  const name = await screen.findByText('我收的菜')
+  await longPress(name.closest('article') as HTMLElement)
+
+  expect(screen.queryByText(/已选 \d+ 道/)).toBeNull()
+  expect(document.querySelector('.dish-card__pick')).toBeNull()
+  expect(name.closest('article')?.getAttribute('role')).toBeNull()
 })
 
 // ---------------------------------------------------------------------------
@@ -484,5 +610,60 @@ describe('「原创的」的横向栏距', () => {
     const dead = css().match(/\.my-recipes\s+\.([\w-]+)/g) ?? []
     expect(dead, `这些选择器在 DOM 里匹配不到（.my-recipes 在固定页头、内容在页体）：${dead.join('、')}`)
       .toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 菜谱图片统一尺寸（用户 2026-10-16：「所有的菜谱图片要大小一致，可以使用 cover」）
+// ---------------------------------------------------------------------------
+
+/**
+ * 实测（360 宽，改前）：
+ * - 菜谱小书 / 原创的：`.dish-card__pic` 在**有图**时 156px、**没图**（占位碗盘）时 125px
+ *   ——同一屏里高矮不一。原因是那一层写的是 `height: auto; aspect-ratio: 1.25`
+ *   （recipes.scss 的 `.recipes-grid .dish-card__pic`），盒子被图片自己的内在尺寸撑开；
+ * - 做过的 / 收藏的又各是一套：96px。
+ *
+ * 修法：**一个 token 管四个消费点**（`--dish-pic-h`，见 styles/tailwind.css），
+ * 图片一律 `object-fit: cover`（已有，这里守它不许掉）。jsdom 算不了布局，所以守规则。
+ */
+describe('菜谱图片统一尺寸', () => {
+  const read = (...parts: string[]) =>
+    readFileSync(join(__dirname, ...parts), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const rule = (source: string, selector: string) =>
+    source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{[\\s\\S]*?\\n\\}`))?.[0] ?? ''
+
+  it('四个消费点都吃同一个 token，且不再有"交给内容"的 height: auto', () => {
+    const token = read('../../styles/tailwind.css').match(/--dish-pic-h:\s*(\S+);/)
+    expect(token, '样式 token 里没有 --dish-pic-h').toBeTruthy()
+
+    const consumers: [string, string[]][] = [
+      ['kitchen.scss 的 .dish-card__pic（小书 / 原创的）', ['..', 'kitchen', 'kitchen.scss']],
+      ['cooked.scss 的 .cooked-card__pic', ['cooked', 'cooked.scss']],
+      ['favorites.scss 的 .fav-card__pic', ['favorites', 'favorites.scss']],
+    ]
+    const blocks: string[] = []
+    for (const [label, path] of consumers) {
+      const selector = path[path.length - 1] === 'kitchen.scss' ? '.dish-card__pic' : path[path.length - 1] === 'cooked.scss' ? '.cooked-card__pic' : '.fav-card__pic'
+      const block = rule(read(...path), selector)
+      expect(block, `没读到 ${label} 的图高规则`).toBeTruthy()
+      expect(block, `${label} 没吃 --dish-pic-h（自己写死的高度会在别处改图高时掉队）`)
+        .toMatch(/height:\s*var\(--dish-pic-h\)/)
+      blocks.push(block)
+    }
+
+    // 那个把盒子交给图片内在尺寸的选择器必须已经不在（它正是"同屏高矮不一"的来源）
+    const recipes = read('recipes.scss')
+    expect(recipes, '`.recipes-grid .dish-card__pic` 那条 height: auto 又回来了')
+      .not.toMatch(/\.dish-card__pic\s*\{[^}]*height:\s*auto/)
+  })
+
+  it('图片一律 cover（任何比例的图都按同一个框裁，不撑高卡片）', () => {
+    for (const path of [['..', 'kitchen', 'kitchen.scss'], ['cooked', 'cooked.scss'], ['favorites', 'favorites.scss']]) {
+      const source = read(...path)
+      const img = source.match(/__pic\s+img\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+      expect(img, `${path.join('/')} 里没有 __pic img 的规则`).toBeTruthy()
+      expect(img, `${path.join('/')} 的图片没用 cover`).toMatch(/object-fit:\s*cover/)
+    }
   })
 })
