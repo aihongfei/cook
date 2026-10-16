@@ -86,7 +86,7 @@ export class DiscoverController {
    */
   @Get('seasonal')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: '时令精选：按当月季节取应季菜（D-108）' })
+  @ApiOperation({ summary: '时令精选：按当月季节取应季菜（D-110）' })
   async seasonal(@CurrentUserId() userId: string) {
     return this.discover.seasonal(userId)
   }
@@ -97,7 +97,7 @@ export class DiscoverController {
    * 不需要登录：它读的是公共菜谱库的标签统计，与"谁在看"无关。
    */
   @Get('occasions')
-  @ApiOperation({ summary: '换个场合挑：四个场合词与各自的道数（D-108）' })
+  @ApiOperation({ summary: '换个场合挑：四个场合词与各自的道数（D-110）' })
   async occasions() {
     return this.discover.occasions()
   }
@@ -109,7 +109,7 @@ export class DiscoverController {
    */
   @Get('report')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: '家庭月报：本月全家的四个数（D-108）' })
+  @ApiOperation({ summary: '家庭月报：本月全家的四个数（D-110）' })
   async report(@CurrentUserId() userId: string) {
     return this.discover.monthlyReport(userId)
   }

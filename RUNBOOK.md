@@ -6438,7 +6438,7 @@ adb shell input motionevent UP 400 800
 `apps/mobile/capacitor.config.ts`（`disableBackButtonHandler`）、
 `apps/mobile/src/api/back-gesture-native.ts`、`apps/mobile/src/lib/back-gesture.ts`。
 
-## R-100 验"发现页补内容"这一族（时令精选 / 家庭月报 / 抽屉场合胶囊）：四层证据（2026-10-16，配套 D-110 / R-90）
+## R-100 验"发现页补内容"这一族（时令精选 / 家庭月报 / 抽屉场合胶囊）：五层证据（2026-10-16，配套 D-110 / R-90 / R-91）
 
 这一族的特点是**每个模块都有一个印在界面上的数字**（「38 道」「74 道」「一起吃了 3 顿」），
 而那些数字全都来自"某次筛选的结果"。所以验证的重点不是"画出来了没有"，
@@ -6478,7 +6478,8 @@ const box = (s) => { const e = document.querySelector(s); const r = e?.getBoundi
    docW: document.documentElement.scrollWidth })   // docW 必须等于 390
 ```
 
-- 时令 **154px**（预览里 157，差的是真实行高）、月报 **152px**、工具行 41px；
+- 时令 **182px**（2026-10-16 补当季底之后；补底前是 154，预览里写 157，差的是真实行高）、
+  月报 **152px**、工具行 41px；
 - `docW` 必须是 390——大于它就是有东西把页面撑宽了
   （`.season__pic` 忘了 `display:block` 时就是这个症状，见下一条）；
 - 然后**点那一行走一遍**：菜谱小书报的「共 N 道」必须等于发现页写的 N。
@@ -6502,3 +6503,41 @@ const box = (s) => { const e = document.querySelector(s); const r = e?.getBoundi
 - 「时令精选」照常在（它不依赖历史）。
 
 这一层必须单独跑：有历史的账号永远看不到这条分支，而它正是新用户的第一眼。
+
+### 第五层：底色这类"看着是审美、其实可测"的参数（2026-10-16 补，配套 R-91）
+
+补当季底时开出来的一层。**这一层的重点不是"好不好看"，是三个能测的数值**
+（好看与否是用户的事，测不了；对不齐、读成灰、越界，都能测）：
+
+```js
+// ① 混出来的颜色（不要只读自己写的色号——color-mix 的结果与直觉常常不同）
+const card = document.querySelector('.season');
+card.setAttribute('data-season', '冬');           // 四个都切一遍
+getComputedStyle(card).backgroundImage;           // 读出来的是 color(srgb r g b)
+// 判据：冷色应该蓝通道最大。实测第一版冬天是 0.822/0.813/0.786 —— 红>绿>蓝，是灰不是蓝。
+
+// ② 与同页其它卡片对齐（量文字左缘，不是元素盒左缘）
+const left = (s) => +document.querySelector(s).getBoundingClientRect().x.toFixed(1);
+({ season: left('.season__title'), picks: left('.picks__title') })   // 必须相等
+
+// ③ 横滑的留白要**量三个位置**（静止 / 滚动中 / 到底），判据是"被裁的那张卡
+//    有没有越过容器的右内缘"——只量静止与到底会得出错误结论（第一版就是这么误判的）
+const card = document.querySelector('.season');
+const list = document.querySelector('.season__list');
+const last = document.querySelector('.season__card:last-child');
+const inset = () => +(card.getBoundingClientRect().right - list.getBoundingClientRect().right).toFixed(1);
+list.scrollLeft = 0;        const 静止 = inset();   // 必须 = 16（栏距）
+list.scrollLeft = 240;      const 滚动中 = inset(); // 也必须 = 16 ← 这一条是关键
+list.scrollLeft = list.scrollWidth; const 到底 = inset();  // 同样 16
+// 反之：栏距加在横滑行**自己**身上时，静止/到底是 16，但「滚动中」会是 0 或负数
+```
+
+- ② 的坑：这一块**不能用**页面通用的 `var(--spacing-page)`（16px）——同页卡片的文字
+  都在 32px 处（外边距 16 + 描边 1 + 内边距 15），用 16 会落到 33px，**错 1px 且肉眼看不出来**；
+- ③ 的判据（2026-10-16 最终版，实测值）：卡右缘 **374**、横滑区右缘 **358**、栏距 **16**，
+  三个滚动位置都一样。「还有更多」的暗示仍然成立——滑到一半时最后一张的右缘在 538，
+  远在卡外，也就是说**它被裁了，只是裁完还留着 16px 底色**；
+- ⚠️ 栏距**只加一处**（卡身）。横滑行自己再垫一份就叠加成 30px；
+  额外挂"末尾垫片"同样叠加（实测右缝 40px = gap 10 + 垫片 15 + padding 15）；
+- **四个季节都要切一遍**看混出来的色，不能只看当前那一季：冷暖在暖纸面上的退化程度不同，
+  只看秋天会以为四个都成立。

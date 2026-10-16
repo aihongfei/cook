@@ -7,7 +7,7 @@ import '../../shared.scss'
 import '../discover.scss'
 
 /**
- * 时令精选（2026-10-16 新增，见 D-108）：**这个季节有什么**。
+ * 时令精选（2026-10-16 新增，见 D-110）：**这个季节有什么**。
  *
  * 与旁边两块问的不是同一件事：「摇一桌」配这一餐、「帮我决定」挑一道，
  * 而这一块是"天凉了，这些正当时"——一批可以逛的菜，点进去看做法。
@@ -39,7 +39,13 @@ export default function SeasonalPicks() {
   const board = seasonal.data
 
   return (
-    <section className="season" aria-label="时令精选">
+    /*
+     * `data-season`：这一块的**底色跟着季节变**（四季各一个色，见 discover.scss 的
+     * `.season[data-season]`）。值是**后端算的那个季节**，不在前端按月份自己算一遍——
+     * 两边各算一次，标题写着秋天而底是夏天绿，是最难查的一类。
+     * 还没拿到数据时这个属性不在，样式表里的兜底是暖琥珀（这一页的主色族）。
+     */
+    <section className="season" data-season={board?.season} aria-label="时令精选">
       <div className="season__head">
         <span className="season__title">{board?.title ?? '时令精选'}</span>
         {board && <span className="season__note">{board.note}</span>}

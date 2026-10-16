@@ -18,6 +18,10 @@
  * ③ 「早上吃什么」换成「做给孩子」：**这一版的餐次只有午饭/晚饭**
  *    （`MealSlot = LUNCH | DINNER`），把早餐菜加进晚饭是硬错，见页脚「一个差错」。
  *
+ * 同一天稍晚又补了一处（用户：「这块的样式优化下，加个背景啥的」）：
+ * ④ 时令那一块从"裸排"改成**一张当季底的卡**——底色跟着季节换（春绿/夏碧/秋琥珀/冬霜蓝），
+ *    见页脚「为什么后来加了一张当季的底」。
+ *
  * 三处刻意简化（不属于对比，也不影响尺寸）：
  * ① 右上角插画用色块示意（应用里是 84×84 的水彩 PNG，旋转 4°）；
  * ② 图标用 emoji（应用里是手绘风图标），字体用系统字体；
@@ -145,8 +149,26 @@ html[data-theme=dark] .phone{ border-color:#0c0908 }
 }
 .today__ask b{ color:#8b3f10 }
 
-/* 时令精选（新） */
-.season{ display:flex; gap:10px; overflow-x:auto; padding-bottom:2px; scrollbar-width:none }
+/* 时令精选（新）——外面是一张**当季底的卡**（用户 2026-10-16：「这块的样式优化下，加个背景啥的」） */
+.season-card{
+  /* 左右栏距加在**卡身**上：横滑行由此整体内缩，滚动中途被裁的那张停在栏距里，
+     右边于是始终露着当季底色（用户：「这块右侧也需要留白，**有滚动时也要**」）。
+     **15 不是 16**：同页卡片的文字都落在「外边距 16 + 描边 1 + 内边距 15」那条竖线上，
+     用 16 会右错 1px。栏距只有这一个来源，横滑行与标题行都不要再各垫一份。 */
+  --season-gutter:15px;
+  padding:14px var(--season-gutter) 12px; overflow:hidden; border-radius:var(--radius-card);
+  background:linear-gradient(135deg,
+    color-mix(in srgb, var(--season-tint) 16%, var(--paper)),
+    color-mix(in srgb, var(--season-tint) 32%, var(--cream-2)));
+  border:1px solid color-mix(in srgb, var(--season-tint) 30%, var(--line));
+}
+/* 冷色（夏/冬）比暖色饱和得多：纸色偏暖，同饱和度下冷色会被中和成脏灰 */
+.season-card[data-season="春"]{ --season-tint:#7faa3f }
+.season-card[data-season="夏"]{ --season-tint:#2f8f86 }
+.season-card[data-season="秋"]{ --season-tint:#d8863a }
+.season-card[data-season="冬"]{ --season-tint:#3f6f9e }
+/* 横滑行自己不垫左右——栏距在卡身上，两处都有就叠加成 30px */
+.season{ display:flex; gap:10px; overflow-x:auto; padding:0 0 2px; scrollbar-width:none }
 .season::-webkit-scrollbar{ display:none }
 .season__card{ flex:0 0 auto; width:116px }
 /*
@@ -367,8 +389,8 @@ body[data-newbie='1'] .blk-report{ display:none }
     <tbody>
       <tr>
         <td>② 时令精选</td>
-        <td>标题行 24 + 横滑行 133 ≈ <b>157px</b>；卡 116 宽（图 84、名字 17、品类 14）、gap 10</td>
-        <td>按**季节标签**取（月份 → 季节，每个季节是 3~4 个标签的并集）；标题「秋日时令 · 38 道 ›」点进菜谱小书（带 tag 参数）</td>
+        <td>标题行 24 + 横滑行 133 + 卡上下 14/12（含 1px 描边）≈ <b>182px</b>（应用实测）；卡 116 宽（图 84、名字 17、品类 14）、gap 10；左右栏距 <b>15px 加在卡身上</b>（横滑行整体内缩，所以滚动中途右边也露着底色）</td>
+        <td>按**季节标签**取（月份 → 季节，每个季节是 3~4 个标签的并集）；标题「秋日时令 · 38 道 ›」点进菜谱小书（带 tag 参数）；<b>卡的底是当季色</b>（`--season-tint` 四季各一个值，`color-mix` 按 16%/32% 混进纸色）</td>
       </tr>
       <tr>
         <td>A 家庭月报</td>
@@ -418,11 +440,20 @@ body[data-newbie='1'] .blk-report{ display:none }
   <ul>
     <li>它是这一批里唯一**凭好玩**才成立的块：翻菜收着，收下的进「家人最爱」。
       形态（按钮版 / 滑动版）当时都做出来了，用户看过之后决定不做——<strong>那一整天的工作里这是唯一被砍掉的一块</strong>。</li>
-    <li>所以这一份预览里**没有它**：页面高度按两块算（时令 157 + 家人最爱 + 月报 156）。
-      接口与组件都没写进代码，只有这份记录与 D-108 里留着它的来龙去脉。</li>
+    <li>所以这一份预览里**没有它**：页面高度按两块算（时令 182 + 家人最爱 + 月报 156）。
+      接口与组件都没写进代码，只有这份记录与 D-110 里留着它的来龙去脉。</li>
     <li>顺带说清它对「家人最爱」的影响：那一块在**新家庭**是空态（用户定的「没有最爱就是没有」）。
       翻牌子原本是给新家庭"玩着玩着就有了信号"的那条路，砍掉之后新家庭就靠时令与月报慢慢长——
       这是用户明确选择的结果，不是遗漏。</li>
+  </ul>
+
+  <h3>时令那一块为什么后来加了一张**当季的底**（2026-10-16 当天补）</h3>
+  <ul>
+    <li>第一版落地时它是"裸排"：标题与一行图直接压在纸面上，是这一页唯一没有承托的一块。用户看过之后说「这块的样式优化下，加个背景啥的」，于是补成一张卡。</li>
+    <li>底的来历是<strong>这一块自己的内容</strong>——它是"这个季节有什么"，所以底色跟着季节走：春嫩绿 / 夏青碧 / 秋琥珀 / 冬霜蓝。切右上角「季节」那两个按钮，卡的颜色会跟着换。</li>
+    <li><b>两个坑（都是实测出来的，不是想出来的）：</b>① <strong>冷暖不一样</strong>——纸色是暖的（`#fffbf2`，蓝通道天生低），冷色倒进去会被中和：第一版冬天用低饱和的 `#6f8bab` 混出来实测是 `0.822/0.813/0.786`，红 &gt; 绿 &gt; 蓝，<strong>读起来是脏灰不是蓝</strong>；所以冷色（夏/冬）用了更饱和的色号。② <strong>文字要落在同一条竖线上，差 1px 也不行</strong>——同页卡片的文字都在 32px 处（外边距 16 + 描边 1 + 内边距 15），这里若用页面通用的 16px 栏距会落到 33px。</li>
+    <li><b>右侧留白这件事改过一版，值得记下来（用户两轮反馈）：</b>用户先说「这块右侧也需要留白，<strong>有滚动时也要</strong>」，我第一版把栏距加在横滑行自己身上（右边 0 → 15px）——<strong>那还不算数</strong>：滚到一半时被裁的那张卡是在<strong>卡片的右边缘</strong>被裁的，右边一点底色都没有，看着还是缺一块。用户第二次点明「我说的是滚动那块，你就给<strong>外层容器一个 padding</strong> 不就好了」——对了。栏距挪到卡身上之后，横滑行整体内缩，滚动中途被裁的那张停在栏距以内，右边于是<strong>始终</strong>露着当季底色。教训：横滑容器的"右留白"要加在**它的容器**上，加在它自己身上只在"停住"时有效。</li>
+    <li>「还有更多」的暗示没有丢：<strong>第三张卡仍被裁掉一截</strong>（卡的右边缘就是裁切线），只是裁完还留着 15px 底色。</li>
   </ul>
 
   <h3>「新家庭」那一档（切右上角那个开关看）</h3>
@@ -546,7 +577,8 @@ function blkToday(){
 
 function blkSeasonal(){
   var s = SEASON[document.body.dataset.season] || SEASON['秋'];
-  return '<section class="sec blk-seasonal">'+
+  /* data-season 就是那张卡的底色：四季各一个色，深浅跟纸色走（暗色不用另写一遍） */
+  return '<section class="sec blk-seasonal season-card" data-season="'+document.body.dataset.season+'">'+
     '<div class="sec__head">'+
       '<span><span class="sec__title">'+s.title+'</span><span class="sec__sub">'+s.note+'</span></span>'+
       '<a class="sec__more" href="'+s.more+'">'+s.count+' 道 ›</a>'+
