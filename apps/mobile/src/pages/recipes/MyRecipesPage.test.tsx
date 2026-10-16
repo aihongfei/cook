@@ -37,6 +37,12 @@ function EditLanding() {
   return <div data-testid="edit-page" data-from={JSON.stringify(location.state)} />
 }
 
+/** 详情页探针：点卡片进去之后，**返回要回得到原来那个 tab**，判据就是这里读到的 `from` */
+function DetailLanding() {
+  const location = useLocation()
+  return <div data-testid="detail-page" data-from={(location.state as { from?: string } | null)?.from ?? '(没带)'} />
+}
+
 function mount() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, retryDelay: 0 }, mutations: { retry: false } },
@@ -48,7 +54,7 @@ function mount() {
         <Routes>
           <Route path="/recipes/mine" element={<MyRecipesPage />} />
           <Route path="/recipes/new" element={<div data-testid="form-page" />} />
-          <Route path="/recipes/:id" element={<div data-testid="detail-page" />} />
+          <Route path="/recipes/:id" element={<DetailLanding />} />
           <Route path="/recipes/:id/edit" element={<EditLanding />} />
         </Routes>
       </MemoryRouter>
@@ -272,6 +278,85 @@ it('认不出的 tab 值落回第一个（URL 是不可信输入）', async () =
   )
 
   expect(await screen.findByText('我做的排骨')).toBeTruthy()
+})
+
+/*
+ * 「点卡片进详情 → 返回」要回到**原来那个 tab**（用户 2026-10-16：
+ * 「做过的和收藏的那两个，进入后返回有问题」）。
+ *
+ * 缺陷的形状：两张卡片的 `from` 写的是 `location.pathname`——**把查询串丢了**，
+ * 而"在第几个 tab"恰恰只写在查询串里。于是从「收藏的」点进详情，返回落回
+ * 「做过的」（无参数时的默认 tab），用户看到的就是"tab 被重置了"。
+ * 「原创的」那一支自己拼的是 `pathname + search`，所以它一直是好的——
+ * 这正是用户说"那两个"而不是"三个"的原因。
+ */
+it('收藏的：点卡片进详情时 `from` **带着 tab**（否则返回会落回「做过的」）', async () => {
+  signIn()
+  mockAllThree()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', search: '?tab=favorites', state: { from: '/mine' } }]}>
+        <Routes>
+          <Route path="/recipes/mine" element={<MyRecipesPage />} />
+          <Route path="/recipes/:id" element={<DetailLanding />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  fireEvent.click(await screen.findByText('我收的菜'))
+  const detail = await screen.findByTestId('detail-page')
+  expect(detail.dataset.from).toBe('/recipes/mine?tab=favorites')
+})
+
+it('做过的：点卡片进详情时 `from` 也带着**这一页自己的**地址', async () => {
+  signIn()
+  mockAllThree()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      {/* 做过的这一支是默认 tab，地址里没有参数——返回目标就是这一页本身 */}
+      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', state: { from: '/mine' } }]}>
+        <Routes>
+          <Route path="/recipes/mine" element={<MyRecipesPage />} />
+          <Route path="/recipes/:id" element={<DetailLanding />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  fireEvent.click(await screen.findByText('我做的排骨'))
+  const detail = await screen.findByTestId('detail-page')
+  expect(detail.dataset.from).toBe('/recipes/mine')
+})
+
+it('在「收藏的」里点的卡片，`from` 不会被**当前正在看的 tab** 串改（每一支各有各的地址）', async () => {
+  signIn()
+  mockAllThree()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[{ pathname: '/recipes/mine', search: '?tab=favorites', state: { from: '/mine' } }]}>
+        <Routes>
+          <Route path="/recipes/mine" element={<MyRecipesPage />} />
+          <Route path="/recipes/:id" element={<DetailLanding />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+
+  // 先切回「做过的」再切回「收藏的」——两边的卡片都不该拿到对方那一支的地址
+  fireEvent.click(await screen.findByText('做过的'))
+  expect(await screen.findByText('我做的排骨')).toBeTruthy()
+  fireEvent.click(screen.getByText('收藏的'))
+  fireEvent.click(await screen.findByText('我收的菜'))
+
+  const detail = await screen.findByTestId('detail-page')
+  expect(detail.dataset.from).toBe('/recipes/mine?tab=favorites')
 })
 
 // ---------------------------------------------------------------------------

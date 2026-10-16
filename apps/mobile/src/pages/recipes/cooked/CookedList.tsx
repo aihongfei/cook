@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { useCooked } from '@/api/cooked'
 import EmptyState from '@/components/ui/EmptyState'
@@ -29,7 +29,6 @@ import './cooked.scss'
  * - **空态给出去处**：第一次进来必然为空，要说清怎么才能让这儿有东西。
  */
 export default function CookedList({ from, emptyTo = '/recipes' }: { from: string; emptyTo?: string }) {
-  const location = useLocation()
   const cooked = useCooked()
 
   const items = cooked.data?.items ?? []
@@ -81,7 +80,16 @@ export default function CookedList({ from, emptyTo = '/recipes' }: { from: strin
             <Link
               className="cooked-card__link"
               to={`/recipes/${encodeURIComponent(dish.id)}`}
-              state={{ from: location.pathname }}
+              /*
+               * 用**传进来的 `from`**，不要自己拼 `location.pathname`（2026-10-16 修）。
+               *
+               * 差别只有一处，但正是用户报的那一处：`pathname` **丢查询串**，
+               * 而"这个列表是「我的菜谱」的第几个 tab / 菜谱小书的哪个品类"恰恰只写在
+               * 查询串里。原先这里写 `location.pathname`，于是从「收藏的」点进详情、
+               * 返回时落到 `/recipes/mine`（无参数＝默认「做过的」）——用户看到的就是
+               * "返回后 tab 被重置了"。空态那条链接一直用的是 `from`，所以两处行为分叉。
+               */
+              state={{ from }}
             >
               <div className="cooked-card__pic">
                 <RecipeImage src={dish.image} name={dish.name} />

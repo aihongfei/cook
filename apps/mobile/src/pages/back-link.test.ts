@@ -79,6 +79,35 @@ it('「点单历史」仍走它自己的静态条目（不被这一餐详情那�
   expect(back.label).toBe('返回点单历史')
 })
 
+/*
+ * 每个"会被当作来源传出去"的页都必须在白名单里，否则来源被静默丢掉、退回兜底。
+ *
+ * 2026-10-16 补 `/cooked`：它自己的卡片传的就是 `from: '/cooked'`
+ * （`CookedPage` 里 `<CookedList from={location.pathname} />`），而白名单里只有
+ * `/favorites` 那一支——实测"从我做过点进详情，返回落到了菜谱小书"
+ * （用户同一轮报的「做过的和收藏的那两个，进入后返回有问题」里的一条）。
+ *
+ * 这一条**逐页列举**而不是"从路由表自动派生"：白名单的语义是"这里值得回去"，
+ * 不是"路由里有"（登录页、表单页都不该成为返回目标）。列举写在这里，
+ * 新加一个"会被当来源传出去"的页时，这条会提醒你回来补。
+ */
+it('会被当作来源传出去的页，白名单一个都不能漏（漏了就是静默退兜底）', () => {
+  for (const [from, expectedTo] of [
+    ['/cooked', '/cooked'],
+    ['/favorites', '/favorites'],
+    ['/recipes/mine', '/recipes/mine'],
+    ['/fridge/cookable', '/fridge/cookable'],
+    ['/order/history', '/order/history'],
+    ['/notifications', '/notifications'],
+    ['/combos', '/combos'],
+    ['/prep', '/prep'],
+    ['/shopping', '/shopping'],
+  ] as const) {
+    const back = readBackLink({ from }, '/recipes')
+    expect(back.to, `${from} 没认出，退回了兜底`).toBe(expectedTo)
+  }
+})
+
 it('一餐详情的子路径不认（`/order/<key>/xxx` 不是合法来源）', () => {
   expect(readBackLink({ from: '/order/2026-10-18-DINNER/x' }, '/recipes').to).toBe('/recipes')
 })

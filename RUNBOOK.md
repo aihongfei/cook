@@ -5717,3 +5717,69 @@ docker compose logs api --since 45s | grep -c "实时通道接入"
 `DECISIONS.md` **D-099**、`RISKS.md` **R-81**、
 `services/api/scripts/verify-realtime-ws.cjs`、`services/api/src/modules/realtime/`、
 `apps/mobile/src/lib/realtime-sync.ts`、`apps/mobile/android/app/src/main/java/com/yushan/cook/RealtimeService.java`。
+
+## R-092 验「点进详情再返回，页内状态（tab / 筛选）与滚动位置还在不在」（D-100 / R-82 配套，✅ 已验证，2026-10-16）
+
+### 一、什么时候用这个
+
+改了**路由 state 的 `from`**、**`back-link` 白名单**、**页内状态怎么存**（URL 还是组件 state），
+或动了 `KeepAlivePages` / 滚动记忆。用户报的措辞通常很短——「返回有问题」「返回就重置了」
+「tab 没了」「回到最上面了」——**必须自己把"进入前 vs 返回后"逐项量出来**，
+因为这类错**不报错、页面照常跳**，只是少带了参数。
+
+### 二、三层证据
+
+```bash
+# ① 规则层：白名单认得出来吗、带查询串的保留吗
+pnpm --dir apps/mobile test src/pages/back-link.test.ts
+
+# ② 组件层：卡片/空态给详情页的 from 到底带没带 tab（先红后绿）
+pnpm --dir apps/mobile test src/pages/recipes/MyRecipesPage.test.tsx
+
+# ③ 真机/浏览器层：四个入口逐一往返，比 URL 与 tab
+```
+
+### 三、浏览器里怎么量（本项目里有两处必须绕开的工具坑）
+
+**判据**：进详情前记一组 `{ url, tab/筛选, 滚动位置 }`，返回后再记一次，**逐项相等**才算过。
+
+**坑①：这个 IAB 标签页里 `requestAnimationFrame` 不回调。**
+而 `TabLayout` 的"记滚动位置"走 `rAF` 节流 → 不 shim 的话，**任何滚动都记不进去**，
+你会测到"位置永远是 0"并误判成 bug。测量前先装：
+
+```js
+window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 16)
+window.cancelAnimationFrame = (id) => clearTimeout(id)
+```
+
+（`goto` 会重新加载页面、**shim 会丢**，所以每次 `goto` 之后都要重装。）
+
+**坑②：元素上的 `scroll` 事件不派发。**
+`scrollTop = 112` 之后不会自己发事件 → 应用那边的保存逻辑根本不跑。**手动补一发**：
+
+```js
+body.scrollTop = 112
+body.dispatchEvent(new Event('scroll'))
+await new Promise((r) => setTimeout(r, 600))   // 等 rAF 节流那次保存落地
+```
+
+**两条都只影响自动化测量，与真机无关**（真机上 rAF 与 scroll 事件都正常）。
+
+### 四、这一批的入口清单（照抄，逐个跑）
+
+| 从哪进 | 地址 | 返回后应当 |
+| --- | --- | --- |
+| 我的菜谱 · 做过的 | `/recipes/mine` | 同一个地址、同一个 tab |
+| 我的菜谱 · 收藏的 | `/recipes/mine?tab=favorites` | **回到收藏的**（改前会落回做过的） |
+| 我的菜谱 · 原创的 | `/recipes/mine?tab=mine` | 回到原创的 |
+| 我收藏的菜（独立路由） | `/favorites` | 回到 `/favorites` |
+| 我做过（独立路由） | `/cooked` | 回到 `/cooked`（改前落到 `/recipes`） |
+| 菜谱小书（带品类） | `/recipes?category=主食` | 回到带品类的地址 |
+| 能做点什么 | `/fridge/cookable` | 回到 `/fridge/cookable` |
+| 点单列表（页内筛选） | `/order` | 筛选与卡片数不变（**它不在 URL 里**，靠 keep-alive） |
+
+### 五、相关
+
+`DECISIONS.md` **D-100**、`RISKS.md` **R-82**、`apps/mobile/src/pages/back-link.ts`、
+`apps/mobile/src/lib/scroll-memory.ts`（`pageKeyOf` 含查询串、`pageIdentityOf` 不含——两个键回答两个问题）、
+`apps/mobile/src/layouts/TabLayout.tsx`（滚动记忆的两个 `useLayoutEffect`）。

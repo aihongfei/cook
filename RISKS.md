@@ -1367,3 +1367,55 @@ mock 换成**真正被 import 的那个组件**（本次是 `Chips`），并且�
 `DECISIONS.md` **D-099 七**、`services/api/src/modules/realtime/realtime.service.ts`（`attach`/`sweep`）、
 `apps/mobile/src/lib/realtime-sync.ts`（`wake`）、
 `RUNBOOK.md` **R-091**（怎么验实时通道，含"怎么看出连接在风暴"）。
+
+## R-82 「从哪来」用 `location.pathname` 拼 → **查询串被丢掉**，返回时页内状态（tab / 筛选）被重置（用户 2026-10-16 报「做过的和收藏的那两个，进入后返回有问题」；✅ 已定规矩，2026-10-16；配套 D-100）
+
+### 一、风险本身
+
+子页面把"从哪来"塞进路由 state（`state={{ from: ... }}`），详情页据此决定返回按钮指向哪。
+如果这一串是**自己拼 `location.pathname`** 而不是把当前地址（含查询串）传下去，
+那么"进入前我在第几个 tab / 哪个筛选"就丢了——而它在返回时被用来重建页面。
+
+本次的具体形状：`/recipes/mine` 的「我的菜谱」三个 tab 写在查询串里
+（`?tab=favorites` / `?tab=mine`），两个列表的卡片却写 `from: location.pathname`，
+于是从「收藏的」进去、返回落到 `/recipes/mine`（无参数＝默认「做过的」）。
+`readBackLink` 认得这个路径、返回按钮看起来也对，**只有 tab 悄悄回到了第一个**。
+
+### 二、为什么容易再犯
+
+- **漏掉的那一半看不出来**：返回目标是个合法地址、能正常跳转、不报错，
+  只是"少带了参数"；单测若只断言"能返回"，它就绿；
+- **同一个文件里两种写法**：这两个组件的空态链接一直用的是传进来的 `from`（对的那份），
+  只有卡片那两行自己拼 `location.pathname`。**列表为空时走空态、一切正常**，
+  有内容时才露——所以"我本地试了没问题"很容易成立；
+- **prop 已经有了**：`CookedList({ from })` 收得到正确值，卡片那行却不用它，
+  这种"手边就有正确答案却另拼一份"是重复事实的典型（与"键各拼一遍"同族）；
+- **`useLocation()` 在这儿格外像对的**：它确实给当前地址——**只是没带 search**，
+  而这一处要的恰恰是 search。
+
+### 三、判别要点
+
+- **判据只有一条：这个状态在不在 `search` 里。** 在（tab、品类、冰箱筛选、能做点什么的
+  食材）→ 必须把 `pathname + search` 一起传下去，漏了就是这一族；
+  不在（点单列表的筛选是 `useState`，靠 keep-alive 保）→ 不适用，别硬塞进 URL；
+- **同一个组件里"从哪来"只能有一个来源**：给卡片与空态链接都用传进来的 `from`。
+  两处各拼一遍，就会像这次一样只错一半；
+- **验收判据是"往返后地址与进入前一致"**，不是"能返回"：
+  自动化里读 `location.href` 比对比对（本次实测四个入口逐一过）；
+- **白名单要跟着补齐**：能把某个路径当来源传出去，就必须在 `back-link.ts` 里认得它，
+  否则来源被静默丢掉、退兜底（本次 `/cooked` 就是这样漏的，与当年漏 `/discover` 同一族）。
+  `back-link.test.ts` 里那条**逐页列举**的用例就是守它的——新加一个"会被当来源传出去"的页，
+  记得回去补一行。
+
+### 四、怎么修
+
+- 卡片改用组件本来就有、且传对了的 `from` prop（删掉多余的 `useLocation()`）；
+- 白名单补上漏掉的路径（本次 `/cooked`）；
+- **先红后绿**：新加的用例在改前确实红（`expected '/recipes/mine' to be '/recipes/mine?tab=favorites'`）。
+
+### 五、相关
+
+`DECISIONS.md` **D-100**、`apps/mobile/src/pages/recipes/cooked/CookedList.tsx`、
+`apps/mobile/src/pages/recipes/components/FavoritesList.tsx`、
+`apps/mobile/src/pages/back-link.ts`（白名单与 `readBackLink`）、
+`apps/mobile/src/pages/back-link.test.ts`（逐页守卫）。

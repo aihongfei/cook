@@ -3937,3 +3937,58 @@ Android 的 OkHttp 自带 `newWebSocket()`（前台服务要用它），而 SSE 
 3. **进程被杀之后仍是"最多约一刻钟"**：原生长连接也活不过 `am kill`。
    要覆盖那一档只有厂商推送通道（调研结论见 `RESEARCH.md` 七）；
 4. **iOS 没有这条路**：Android 专属（前台服务），iOS 上退到后台仍是巡查那一档。
+
+## D-100 卡片里的「从哪来」必须带上**查询串**：`location.pathname` 会丢掉"我在第几个 tab"（用户 2026-10-16 报「做过的和收藏的那两个，进入后返回有问题」，✅ 已实现）
+
+### 一、用户报的与真因
+
+用户原话：「这块包括其他地方，点击卡片进入后，再返回还要保持进入之前的状态、tab、页面、滚动位置，不能重置啊」，随后补了最关键的一句：「**做过的和收藏的那两个**，进入后返回有问题」。
+
+三个 tab 里只有两个有问题，这个"两个"就是答案。查两条路：
+
+| tab | 卡片的 `from` 怎么来的 | 返回结果 |
+| --- | --- | --- |
+| 做过的 | `location.pathname` | 落在 `/recipes/mine` |
+| **收藏的** | `location.pathname` | **落在 `/recipes/mine`（＝默认的「做过的」）** ❌ |
+| 原创的 | `pathname + search`（内联写的） | 回到 `/recipes/mine?tab=mine` ✅ |
+
+**根因一句话：`location.pathname` 不含查询串，而"我在第几个 tab"恰恰只写在查询串里**。
+`readBackLink` 认 `/recipes/mine`（白名单里有），于是返回按钮"看起来对"——它忠实地回到了
+「我的菜谱」，只是**回到了第一个 tab**。用户看到的就是"tab 被重置了"。
+
+两处一模一样：`CookedList.tsx` 与 `FavoritesList.tsx` 的卡片都写 `state={{ from: location.pathname }}`，
+而**同一个组件**的空态那条链接用的却是传进来的 `from`（那个是对的）——同一个文件里两种写法，
+所以这个 bug 只在"列表里有内容"时才露出来（空列表走的是空态那条）。
+
+### 二、修法
+
+两处卡片改用**传进来的 `from` 属性**（`CookedList` / `FavoritesList` 本来就有这个 prop，
+`MyRecipesPage` 传的正是 `${pathname}${search}`），删掉那两个 `useLocation()`。
+一改完，两条路（空态与卡片）就是同一个来源，不会再分叉。
+
+### 三、顺带挖出的第二条（同一族，实测才发现的）
+
+`/cooked`（我做过，保留的独立路由）**不在 `back-link.ts` 的白名单里**：
+`CookedPage` 给卡片传的 `from` 是 `/cooked`，而白名单只认 `/favorites` 那一支——
+于是从「我做过」点进详情，返回被静默丢掉、退到兜底 `/recipes`（菜谱小书）。
+修法：`EXTRA_ENTRIES` 补 `'/cooked': '返回我做过'`。
+
+**边界划清（免得下次误判）**：点单列表的筛选**不是**这一族——它是组件内 state
+（`useState`，不在 URL 上），靠 keep-alive 保，实测往返后筛选与卡片数都在。
+写成"凡是页内状态都该进 URL"就过头了；**这一条的判据只有一条：这个状态在不在 `search` 里**。
+
+### 四、验收（2026-10-16）
+
+- **先红后绿**：`MyRecipesPage.test.tsx` 新增 3 条（收藏的卡片 `from` 带 tab、做过的带自己、
+  切 tab 后不被串改），改前 2 条红（`expected '/recipes/mine' to be '/recipes/mine?tab=favorites'`）；
+  `back-link.test.ts` 新增 1 条**逐页列举**的守卫，改前对 `/cooked` 红（`/cooked 没认出，退回了兜底`）；
+- 前端 **806/806**（71 文件）、`tsc -b` 0 错、lint 18 warnings / 0 errors；
+- **浏览器实测（360×844）逐入口往返**（判据是"返回后的 URL 与 tab 与进入前一致"）：
+  收藏的 `?tab=favorites` ✅、做过的 ✅、原创的 `?tab=mine` ✅、`/favorites` ✅、`/cooked` ✅
+  （改前落到 `/recipes`）、菜谱小书带品类 `?category=主食` ✅、能做点什么 ✅、
+  点单列表（页内筛选）✅。**滚动位置**另测：`/mine` 134 → 切走 → 回来仍是 134。
+- ⚠️ **一条工具事实**（排查过程踩的，写下来免得下次白费工夫）：这个 IAB 标签页里
+  **`requestAnimationFrame` 不回调、元素 scroll 事件也不派发**，而
+  `TabLayout` 的"记位置"正好走 `rAF` 节流——于是**任何靠滚动去测位置都会得到假的 0**。
+  改法：调用 `scrollTo`/`scrollTop` 后**手动 `dispatchEvent(new Event('scroll'))`** 再读。
+  这一条只影响自动化测量，**与真机无关**。

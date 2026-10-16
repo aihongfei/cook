@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
 import { useFavorites, useToggleFavorite } from '@/api/favorites'
 import EmptyState from '@/components/ui/EmptyState'
@@ -28,7 +28,6 @@ import '../favorites/favorites.scss'
  * 详情页据此决定返回按钮写「返回我收藏的菜」还是「返回我的菜谱」。
  */
 export default function FavoritesList({ from, emptyTo = '/recipes' }: { from: string; emptyTo?: string }) {
-  const location = useLocation()
   const favorites = useFavorites()
   const toggle = useToggleFavorite()
 
@@ -94,7 +93,12 @@ export default function FavoritesList({ from, emptyTo = '/recipes' }: { from: st
             <Link
               className="fav-card__link"
               to={`/recipes/${encodeURIComponent(dish.id)}`}
-              state={{ from: location.pathname }}
+              /*
+               * 与 `CookedList` 同一处修（2026-10-16）：用传进来的 `from`，不要自己拼
+               * `location.pathname`——那个值**丢了查询串**，而"第几个 tab"就在查询串里，
+               * 从「收藏的」点进详情再返回会落到默认的「做过的」。
+               */
+              state={{ from }}
             >
               <div className="fav-card__pic"><RecipeImage src={dish.image} name={dish.name} /></div>
               <div className="fav-card__body">
