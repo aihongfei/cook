@@ -100,6 +100,24 @@ const NEEDS_CONFIRM: OrderStatus[] = ['CANCELED', 'DONE']
  */
 export const ORDER_DAY_SPAN = 7
 
+/**
+ * 点单**列表**铺几天（用户 2026-10-16 定：「这块永远就展示今明后三天的菜单」）。
+ *
+ * 与点菜窗口（`ORDER_DAY_SPAN` = 7，备菜计划要排满一周）刻意**不是一个数**：
+ * - 能安排的范围大（7 天），列表只看得到近三天——列表的活是"这几顿吃什么"，
+ *   一次扫得完才是它该有的样子；更早的餐次本来就只在「点单历史」里翻；
+ * - 于是三天之外那几餐必须有个**去处**（备菜计划），否则用户排了第 5 天的菜
+ *   就再也找不着了。`list` 一并回一个 `beyondCount`（三天之外还有几餐），
+ *   前端据此在列表底下给那一句入口——**真有才说，不猜也不编**。
+ */
+export const LIST_DAY_SPAN = 3
+
+/** 列表覆盖的日期区间（含两端）：今天起 `LIST_DAY_SPAN` 天 */
+export function listWindowDays(now: Date = new Date()): { from: string; to: string } {
+  const days = dayWindow(LIST_DAY_SPAN, now)
+  return { from: days[0].value, to: days[days.length - 1].value }
+}
+
 export const ORDER_STATUSES: OrderStatus[] = ['PENDING', 'PLANNED', 'COOKING', 'DONE', 'CANCELED']
 export const MEAL_SLOTS: MealSlot[] = ['LUNCH', 'DINNER']
 export const NOTE_MAX_LENGTH = 120

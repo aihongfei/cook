@@ -1,10 +1,10 @@
 import { useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import PageHeader from '@/components/ui/PageHeader'
 import Page from '@/components/ui/Page'
 import { useTodaySession } from '@/stores/today-session'
 import { useSpreadSession } from '@/stores/spread-session'
 import FamilyPicks from './components/FamilyPicks'
-import WeekPlan from './components/WeekPlan'
 import AiChatSheet from './components/AiChatSheet'
 import TodaySheet from './components/TodaySheet'
 import SpreadSheet from './components/SpreadSheet'
@@ -12,8 +12,8 @@ import '../shared.scss'
 import './discover.scss'
 
 /**
- * 发现：今天吃什么 + 本周菜单（决策引擎见 FEATURES.md M5，菜单安排见 M4 / F4-02，
- * AI 推荐与问答见 D-026）。
+ * 发现：今天吃什么 + 家人最爱 + 两个工具入口（决策引擎见 FEATURES.md M5，
+ * 常用组合见 M4 / F4-04，备菜计划见 M4 / F4-03，AI 推荐与问答见 D-026）。
  *
  * **这一块 2026-10-13 又合了一次**（见 D-061）：原先卡上三个出口（摇一道 / 帮我决定 /
  * AI 帮你想），用户提出「帮我决定和 ai 帮你想是不是有点重复了」。它们确实都在说
@@ -27,6 +27,22 @@ import './discover.scss'
  * 两者都留着是因为回答的问题不同：这边是"今晚这一桌配什么"，那边是"我拿不定主意，你挑一道"。
  * 合并的收益不只是少一个按钮：**这条最常用的路不再会因为没配密钥而死掉**。
  * 问答是另一种问题（"豆腐怎么存"），所以只给小字入口。
+ *
+ * ---
+ *
+ * ## 2026-10-16：**「本周菜单」整卡删掉**（用户：「发现也不要展示本周菜单了」）
+ *
+ * 那块东西是**同一份数据在第三个地方画的只读副本**：今天/明天/后天各午晚两餐的安排，
+ * 点单页（可以操作）有、备菜计划页（排到第 7 天、每行能加菜）也有，只有这块既看不了更远、
+ * 也什么都改不了（实测占 508px，发现页大半屏）。项目规矩是每类事实只留一个权威来源——
+ * 一张单在两个页面各画一份，迟早会出现"这边待确认、那边已安排"的互相打脸。
+ *
+ * 它原来的两个出口（常用组合 / 备菜计划）**必须接住**：那是它们**唯一**的入口
+ * （备菜计划另有一条绕路在购物清单页里），删卡就等于删功能。于是收成页面底部一行两枚胶囊，
+ * 摆在内容之下——它们是"工具"，与上面两块"内容"分开摆。
+ *
+ * 找缺口（哪一餐还空着）**刻意不在这里补一个副本**：那是备菜计划页的本职，发现页再说一遍
+ * 又成了第二个来源。真需要的话，那一页一点就能到。
  */
 export default function DiscoverPage() {
   /*
@@ -37,6 +53,7 @@ export default function DiscoverPage() {
    * 开一次走 `start()`（清掉上一场），关一次走 `close()`（同样清干净）。
    */
   const [sheet, setSheet] = useState<'chat' | null>(null)
+  const location = useLocation()
   const todayOpen = useTodaySession((state) => state.open)
   const startToday = useTodaySession((state) => state.start)
   const closeToday = useTodaySession((state) => state.close)
@@ -95,11 +112,28 @@ export default function DiscoverPage() {
           </div>
         </section>
 
-        {/* 家人最爱（F5-02）：排在"本周菜单"之后——先看"这几天吃什么"（当下要办的），
-            再看"我们家平时吃什么"（回顾与找灵感）。 */}
+        {/* 家人最爱（F5-02）："我们家平时吃什么"——回顾与找灵感 */}
         <FamilyPicks />
 
-        <WeekPlan />
+        {/*
+          两个工具入口（原来挂在「本周菜单」卡头上，那块删掉之后搬到这里）。
+          做成一行两枚并列的胶囊：它们是**整页最下面的一档**，视觉重量低于上面两块内容
+          （用品牌淡底 + 描边，与「去安排」那种次要动作同一套语汇），但明确是能点的。
+        */}
+        <div className="discover-tools">
+          <Link className="discover-tool" to="/combos" state={{ from: location.pathname }}>
+            <span className="discover-tool__icon" aria-hidden>
+              🧩
+            </span>
+            常用组合
+          </Link>
+          <Link className="discover-tool" to="/prep" state={{ from: location.pathname }}>
+            <span className="discover-tool__icon" aria-hidden>
+              🗓
+            </span>
+            备菜计划
+          </Link>
+        </div>
       </div>
 
       {/* 「帮我决定 + AI」的开关来自 store：点菜名进详情再返回时它还得开着，

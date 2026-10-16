@@ -104,6 +104,13 @@ export interface OrderBoard {
   /** 各状态的数量（切筛选前就拿到，切换时不会互相清空） */
   counts: Record<string, number>
   scope: 'family' | 'mine'
+  /**
+   * 三天之外（第 4～7 天）还有几餐安排（用户 2026-10-16：列表只看今明后三天）。
+   *
+   * 列表底下那句「还有 N 餐在三天之外 · 去备菜计划」按它决定出不出现、说几餐——
+   * **真有才说**：0 的时候一句都不提，不给用户一个空入口。
+   */
+  beyondCount: number
 }
 
 /**

@@ -39,64 +39,131 @@
   margin: 14px var(--spacing-page) 0;
 }
 
-/* 各状态的戳色已提到 components/ui/ui.scss（本周菜单也要用同一套，不能各写一份） */
+/*
+ * 各状态的戳色已提到 components/ui/ui.scss（点菜单与其它页共用一份，不能各写一份）
+ */
 
-/* 「点单历史」和「自己写一道」并排一行：整行栏距与段间距由这一层给，
-   两个入口自己不再带外边距，各占一半宽度、等高对齐 */
-.order-shortcuts {
+/*
+ * 「历史」：筛选行最右端那枚小胶囊（用户 2026-10-16：「把历史按钮放在筛选右侧吧」）。
+ *
+ * 它占的是**原来那枚「多选」圆钮的位置**（多选整条已经不做了，见 OrderPage 的文件头）。
+ * 三处尺寸与筛选胶囊对齐：胶囊是 7px 13px 内边距 + 12px 字号，这里是 7px 11px + 12px，
+ * 于是它与那一行同高、右边缘与卡片右边缘在同一条竖线上。
+ *
+ * `flex: none` 是关键——不给它的话 flex 会把它压扁（chips 那一截是 `flex: 1`）。
+ */
+.order-history {
   display: flex;
-  gap: 10px;
-  align-items: stretch;
-  margin: 12px var(--spacing-page) 0;
-}
-
-.order-shortcuts > * {
-  flex: 1 1 0;
-  min-width: 0;
-  /* button 默认 nowrap，半行宽度下说明文字会撑破卡片；两个入口统一按可换行处理 */
-  white-space: normal;
-}
-
-/* 「自己写一道」入口（F3-10）：菜谱库里没有的菜也能点 */
-.order-freedish {
-  display: flex;
-  gap: 10px;
+  flex: none;
+  gap: 5px;
   align-items: center;
-  padding: 11px 13px;
-  font-family: inherit;
-  text-align: left;
+  padding: 7px 11px;
+  font-size: 12px;
+  color: #c4652a;
+  text-decoration: none;
   cursor: pointer;
   background: var(--color-paper);
-  border: 1.5px dashed #de9057;
-  border-radius: var(--radius-card);
+  border: 1px solid #e2a06c;
+  border-radius: 999px;
 }
 
-.order-freedish:active {
-  opacity: 0.7;
+.order-history:active {
+  transform: scale(0.94);
 }
 
-.order-freedish__icon {
-  flex: 0 0 auto;
-  font-size: 16px;
-}
-
-.order-freedish__text {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
+.order-history__icon {
   font-size: 13px;
-  color: #6e3a1c;
+  line-height: 1;
 }
 
-.order-freedish__text small {
-  font-size: 11px;
+/*
+ * 状态筛选那一行：**chips 自己横着滚，「历史」钉在右边不跟着滚**。
+ * 左右间隙与卡片同源（`var(--spacing-page)`），所以胶囊右边缘与卡片右边缘对齐。
+ */
+.order-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 var(--spacing-page);
+}
+
+.order-filter > :first-child {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/*
+ * 「自己写一道」（F3-10）的悬浮胶囊（用户 2026-10-16：「自己写一道可以用悬浮的，任何形式都行」）。
+ *
+ * 位置：**压在 AI 球正上方**（用户：「然后订单页的卡片又显的很乱」这一轮一起定的）。
+ * AI 球是 `bottom: calc(tabbar + safe + 14px)`、直径 54，所以这里的底边是
+ * `tabbar + safe + 14 + 54 + 12(间距)` = `tabbar + safe + 80px`——两个悬浮件在同一个
+ * 右下角排成一列，谁也不压谁。
+ *
+ * `z-index: 39`：AI 球是 40、弹层是 1000/1010（见 R-059 定的全站顺序），
+ * 它排在两者之间——要被球压着（同一列里它在上面那一格），但要盖住滚动内容。
+ *
+ * fixed 而不是 sticky：它是"随时能点的动作"，跟着列表滚走就失去意义了。
+ */
+.order-write {
+  position: fixed;
+  right: 14px;
+  bottom: calc(var(--spacing-tabbar) + var(--safe-bottom) + 80px);
+  z-index: 39;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 10px 16px;
+  font-family: inherit;
+  font-size: 13px;
+  color: #fff;
+  cursor: pointer;
+  background: linear-gradient(160deg, #e88b48, var(--color-brand));
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgb(180 110 50 / 34%);
+  transition: transform 0.12s ease;
+}
+
+.order-write:active {
+  transform: scale(0.94);
+}
+
+.order-write__icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+/*
+ * 列表底部留白：给两个悬浮件（写一道 + AI 球）让位。
+ * 算式：写一道 40.8 + 间距 12 + AI 球 54 + 呼吸 14 ≈ 120px；
+ * 而 `.page__body` 自己已经有 24px，这里补 96px。
+ *
+ * 不留够的后果在预览里实测过：滚到底时最后一张卡的动作行正好压在悬浮件下面
+ * （「选好了 / 取消这餐」被盖住，点不到）。
+ */
+.order-float-tail {
+  height: 96px;
+}
+
+/* 三天之外还有餐次时的那一句（去处是备菜计划） */
+.order-window-hint {
+  margin: 12px var(--spacing-page) 0;
+  font-size: 11.5px;
   color: var(--color-ink-3);
 }
 
-.order-freedish__arrow {
-  flex: 0 0 auto;
-  color: #c7a97e;
+.order-window-hint a {
+  color: #c4652a;
+  text-decoration: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .order-history:active,
+  .order-write:active {
+    transform: none;
+  }
 }
 
 /* 「该备菜」那条提醒（用户 2026-10-14：「还是没有通知的角标啊」）。
@@ -144,50 +211,9 @@
   color: #c7a97e;
 }
 
-/* 「点单历史」（F3-09）：与「自己写一道」同一档的整行入口。
-   边框用实线而不是虚线：虚线在这个界面里已经被"自己写一道"占住了（那是"共创"的意思），
-   历史是"回看"，两者不该长得一模一样。 */
-.order-history-link {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 11px 13px;
-  font-family: inherit;
-  text-align: left;
-  text-decoration: none;
-  cursor: pointer;
-  background: var(--color-paper);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-}
-
-.order-history-link:active {
-  opacity: 0.7;
-}
-
-.order-history-link__icon {
-  flex: 0 0 auto;
-  font-size: 16px;
-}
-
-.order-history-link__text {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 13px;
-  color: #6e3a1c;
-}
-
-.order-history-link__text small {
-  font-size: 11px;
-  color: var(--color-ink-3);
-}
-
-.order-history-link__arrow {
-  flex: 0 0 auto;
-  color: #c7a97e;
-}
+/* 「点单历史」那一行入口与「自己写一道」的旧样式已经撤掉：
+   历史搬进筛选行右端（`.order-history`），写一道改成悬浮胶囊（`.order-write`）。
+   两者都见本文件上方那两段。 */
 
 /* 一道菜一行：菜名 + 备注 + 撤回入口 */
 .order-card__dish {
@@ -221,6 +247,10 @@
   color: var(--color-ink-3);
 }
 
+/*
+ * 退菜（F3-03）：**只在详情页**用（列表上那颗药丸已经撤了，见 OrderPage 的文件头）。
+ * 样式挂类名，因为详情页的「谁点了什么」按人分组逐份列，与列表是两处不同的排布。
+ */
 .order-card__withdraw {
   padding: 2px 8px;
   margin-left: auto;
@@ -237,19 +267,71 @@
   cursor: default;
 }
 
-/* 流转按钮：正常推进用品牌色，取消用描边砖红（危险但不抢戏） */
+/*
+ * 卡片的**一行动作**（用户 2026-10-16：三层控件太乱）。
+ *
+ * 列表页：左边是"顺手能做的小事"（存组合 / 再点一次 / 传成品照），右边是这一餐的流转按钮；
+ * 详情页：只有右边那组流转按钮（`justify-content: flex-end` 保持原样）。
+ * 两边共用一个容器类名——**左边那组靠 `margin-right: auto` 自己顶到左边缘**，
+ * 于是同一条规则把两种排布都满足了，不必再开一个修饰类。
+ */
 .order-card__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
   justify-content: flex-end;
-  margin-top: 11px;
+  margin-top: 10px;
+}
+
+/* 列表卡上"顺手能做的小事"那一组：占住左边，把流转按钮挤到右边 */
+.order-card__quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  min-width: 0;
+  margin-right: auto;
+}
+
+/*
+ * 低频动作做成**无边框文字**（不再是小药丸）：它们与右边的主按钮不在一个量级上，
+ * 画成同一种形状就会让人"每个都要读一遍"。品牌色只给"想再来一次"那两个
+ * （存组合 / 再点一次），"传成品照"是灰色的日常动作。
+ */
+.order-card__quick-btn {
+  padding: 0;
+  font-family: inherit;
+  font-size: 12px;
+  color: #8a7259;
+  white-space: nowrap;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.order-card__quick-btn--brand {
+  color: #c4652a;
+}
+
+.order-card__quick-btn:active {
+  opacity: 0.7;
+}
+
+.order-card__main {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .order-card__action {
   flex: 0 0 auto;
   padding: 7px 14px;
+  font-family: inherit;
   font-size: 12.5px;
   color: var(--color-ink-2);
+  white-space: nowrap;
   cursor: pointer;
   background: transparent;
   border: 1.5px solid var(--color-line);
@@ -338,27 +420,22 @@
   margin-top: 4px;
 }
 
-/* 成品照入口（F9-08）：只在「已做好」的卡片上出现，做成描边按钮不抢流转按钮的注意力 */
+/*
+ * 成品照那一块（F9-08）：**现在只有详情页在用**（列表上改成了 `.order-card__photo-line`
+ * 那一条文字链 + 主按钮排里的一枚文字入口）。
+ *
+ * 详情页的版式与列表不同：那里是"这一餐"那一节里的一个**整宽描边按钮**
+ * （"上传这餐的成品照"是那一页最该点的动作之一），所以样式按整宽按钮写。
+ */
 .order-card__photos {
   margin-top: 11px;
-}
-
-.order-card__photo-link {
-  display: block;
-  margin-bottom: 7px;
-  font-size: 12px;
-  color: #8a7259;
-  text-decoration: none;
-
-  &:active {
-    opacity: 0.7;
-  }
 }
 
 .order-card__photo {
   display: block;
   width: 100%;
   padding: 9px;
+  font-family: inherit;
   font-size: 12.5px;
   color: var(--color-brand);
   cursor: pointer;
@@ -367,24 +444,84 @@
   border-radius: 12px;
 }
 
+/* 已传张数那一条（列表与详情页共用） */
+.order-card__photo-link {
+  display: block;
+  font-size: 11.5px;
+  color: #8a7259;
+  text-decoration: none;
+
+  &:active {
+    opacity: 0.7;
+  }
+}
+
+/* 详情页里它与整宽按钮上下相邻，要一点间距（列表上那一行自带 margin） */
+.order-card__photos .order-card__photo-link {
+  margin-bottom: 7px;
+  font-size: 12px;
+}
+
 /*
- * 「顺手能做的小事」：就餐人数（M4 / F4-05）、存成常用组合（M4 / F4-04）、
- * 再点一次（F3-06）。
+ * 卡片上唯一的**信息行**（用户 2026-10-16：统计 / 人数 / 提交时间散在四处，太乱）。
+ *
+ * 左边"几道菜、几个人点了、我点了几份"，右边"几个人吃"。上方一道虚线把它与菜品区分开：
+ * 这一行是**这一顿的小结**，不是又一道菜。
+ */
+.order-card__info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 9px;
+  padding-top: 8px;
+  font-size: 11px;
+  color: var(--color-ink-3);
+  border-top: 1px dashed #eadbc2;
+}
+
+/* 成品照那条文字链挂在信息行下面时，不用再要外边距 */
+.order-card__photo-line {
+  margin: 8px 0 0;
+}
+
+/*
+ * 就餐人数（M4 / F4-05）：它**在这一行里**，所以不再是小药丸——
+ * 一行小字 + 可点的「· 改」，与左侧统计同一档。
+ *
+ * 但样式挂在类名上（详情页 hero 里它跟别的小药丸并排，那里仍是药丸），
+ * 所以这里只写"在信息行里"需要的那几条覆盖。
+ */
+.order-card__info .order-card__diners {
+  padding: 0;
+  font-family: inherit;
+  font-size: 11px;
+  color: #c4652a;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.order-card__info .order-card__diners:disabled {
+  color: var(--color-ink-3);
+  cursor: default;
+}
+
+/*
+ * 「顺手能做的小事」那一排小药丸（M4 / F4-05 人数、F3-06 再点一次）。
  *
  * 用户 2026-10-14 的原话：「这三行按钮优化下，现在不太好看，不一定一个按钮一行」。
  * 原先三个各自都是 `display: block; width: 100%`、左对齐的一行字，于是每张卡下面
  * 挂着一列"文字清单条目"——它们其实是**三个能点的按钮**，看着却像三行备注。
+ * 于是做成小药丸：有底有边，看着就能点。
  *
- * 现在做成**小药丸**：有底有边，看着就能点（原来只有一行橙字，按下去也不像按了按钮）。
- * 样式挂在**类名**上而不是列表页那个容器上：同一个「🍚 4 人吃 · 改」在
- * 这一餐的详情页（`OrderDetailPage` 的 hero 里）**孤零零出现**，不在那一排里，
- * 写在容器上它就没样式了。
- *
- * 轻量仍然保得住：描边 + 淡底 + 12px 字，不跟底部那排实心流转按钮抢注意力
- * （真正的动作是"选好了""做好了"那些）。
+ * **2026-10-16 起这套只给详情页用**：列表卡上"存组合 / 再点一次"降成了无边框文字
+ * （见上一条），而详情页 hero 里它们仍然与「＋ 再加一道」并排成一行小药丸——
+ * 那边一层只有一个内容块，药丸不会跟别的东西抢注意力。
  */
 .order-card__diners,
-.order-card__combo,
+.order-card__add,
 .order-card__repeat {
   max-width: 100%;
   padding: 5px 11px;
@@ -409,13 +546,13 @@
   }
 }
 
-/* 「存成常用组合」与「再点一次」是"想再来一次"的动作，用品牌色区分于"改人数" */
-.order-card__combo,
+/* 「再点一次」是"想再来一次"的动作，用品牌色区分于"改人数" */
+.order-card__add,
 .order-card__repeat {
   color: #c4652a;
 }
 
-/* 列表卡上三个并排；放不下就自己折到第二行（窄屏 + 长文案） */
+/* 详情页 hero 里那几个并排；放不下就自己折到第二行（窄屏 + 长文案） */
 .order-card__tools {
   display: flex;
   flex-wrap: wrap;
@@ -424,7 +561,7 @@
   margin-top: 11px;
 }
 
-
+/* 详情页 hero 里没有主按钮那一排，所以信息行/动作行的间距按它自己的来 */
 /* 抽屉里先把"要照的是哪一桌"念清楚 */
 .repeat-sheet__dishes {
   padding: 8px 10px;
@@ -683,9 +820,14 @@
   border: 0;
 }
 
-/* ---- 卡片进详情（用户 2026-10-15：「订单里卡片增加下详情吧，可以点击进去看详细的」） ---- */
-
-/* 整张卡可点：指针形状与按下反馈都要给，否则用户不知道这儿能点 */
+/*
+ * 卡片可点（用户 2026-10-15：「订单里卡片增加下详情吧，可以点击进去看详细的」）：
+ * 指针形状与按下反馈都要给，否则用户不知道这儿能点。
+ *
+ * 2026-10-16 起**不接长按多选了**（用户：「不要多选了」）：`user-select: none` 那条
+ * 跟着退菜一起撤掉——列表要回到"普通网页"的手感（能选字、长按能弹系统的复制菜单）。
+ * 长按多选这一套仍在菜谱页的「原创的」上用（那边有它自己的类）。
+ */
 .order-card--link {
   cursor: pointer;
 
@@ -778,95 +920,14 @@
 }
 
 /*
- * 长按多选（用户 2026-10-15：「订单里面的卡片要能删除，可以用那个按住显示单选框」）。
- *
- * 选择模式的两件东西：**每张卡左上角的勾选方块**，与**顶部的操作条**。
+ * 长按多选那一套（勾选方块 / 选中态 / 选择条）**只剩菜谱页的「原创的」在用**
+ * （用户 2026-10-16：「不要多选了」——订单页那一轮整条撤掉）。
+ * 共用零件 `.pick-bar` 在 `shared.scss`；订单页自己的这几条（`.order-card__pick`、
+ * `.order-card.is-picked`）已经删掉：留着就是死代码，而它们只对订单卡的类名生效。
  */
-
-/* 拉长按的卡不能选中文字，也不能让系统弹自己的"复制/搜索"菜单（contextmenu 在 tsx 里拦） */
-.order-card--link {
-  user-select: none;
-  -webkit-touch-callout: none;
-}
-
-.order-card__pick {
-  position: absolute;
-  top: -8px;
-  left: -6px;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-  color: transparent;
-  background: var(--color-paper);
-  border: 1.5px solid var(--color-line);
-  border-radius: 7px;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  pointer-events: none;
-}
-
-.order-card__pick.is-on {
-  color: var(--color-paper);
-  background: var(--color-brand);
-  border-color: var(--color-brand);
-}
-
-/* 选中的卡整体退到"待处理"的样子：淡品牌底 + 描边加深（与未读那条竖标不冲突） */
-.order-card.is-picked {
-  border-color: var(--color-brand);
-  background: color-mix(in srgb, var(--color-brand) 6%, var(--color-paper));
-}
 
 /*
  * 选择模式的顶部操作条 `.pick-bar`（点菜单与「我的菜谱 → 原创的」共用）
  * 已经搬到 `shared.scss`：两页各写一份迟早会分叉，而它是**同一套交互的同一个零件**。
  */
 
-/*
- * 状态筛选那一行：**chips 自己横着滚，多选图标钉在右边不跟着滚**
- * （用户 2026-10-15：「多选按钮位置放到全部那行的右侧，改成图标吧，注意左右空白间隙」）。
- *
- * 左右间隙不是随手给的：这一行与卡片一样吃 `var(--spacing-page)` 的栏距，
- * 所以图标右边缘与卡片右边缘在同一条竖线上（上一版它贴着屏幕边、也没跟卡片对齐）。
- */
-.order-filter {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 var(--spacing-page);
-}
-
-.order-filter > :first-child {
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-}
-
-/*
- * 「多选」：**图标**（用户 2026-10-15：「改成图标吧」），与筛选胶囊同一行、贴这一行最右。
- *
- * 三处尺寸是按"和胶囊一样高"定的：胶囊是 5px 12px 内边距 + 13px 字号 ≈ 31px 高，
- * 所以这里圆钮给 31×31、图标 19px（描边图形在 19px 上仍看得清对勾）。
- * `flex: none` 是关键——不给它的话 flex 会把它压扁（上一版在页头是绝对定位，没有这个问题）。
- */
-.order-multi {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 31px;
-  height: 31px;
-  padding: 0;
-  color: var(--color-ink-soft);
-  background: var(--color-paper);
-  border: 1.5px solid var(--color-line);
-  border-radius: 999px;
-}
-
-.order-multi:active {
-  color: var(--color-brand-ink, var(--color-brand));
-  border-color: var(--color-brand);
-}

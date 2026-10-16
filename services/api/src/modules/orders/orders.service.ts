@@ -11,7 +11,7 @@ import {
   aggregateItems, canAddItem, canDeleteMeal, canRemoveItem, canRepeatFrom, confirmStampFor, dateKey, doneStampFor, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, mealWhenLabel, nextActionsFor, parseDinerCount,
   parseHistoryQuery, historyRange, hasEarlier, weekdayOf,
   parseItemTarget, parseBulkRecipeIds, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, planRepeat, revivedStatus, splitExisting,
-  todayKey, todayMealState, visibleToMember,
+  todayKey, todayMealState, visibleToMember, listWindowDays,
   dayOptions, type AggregateItem, type DishRef, type ItemTarget, type MealProgressRow, type PlanDayRow,
 } from './orders.rules'
 
@@ -786,7 +786,13 @@ export class OrdersService {
   async list(
     userId: string,
     options: { family?: boolean; status?: string } = {},
-  ): Promise<{ cards: MealCardView[]; counts: Record<string, number>; scope: 'family' | 'mine' }> {
+  ): Promise<{
+    cards: MealCardView[]
+    counts: Record<string, number>
+    scope: 'family' | 'mine'
+    /** 三天之外（第 4～7 天）还有几餐安排——列表底下那句入口要不要给、说几餐，都按它 */
+    beyondCount: number
+  }> {
     const { familyId, role } = await this.requireMember(userId)
     const family = await this.requireFamily(familyId)
 
@@ -799,16 +805,22 @@ export class OrdersService {
       scope === 'mine' ? { familyId, items: { some: { userId } } } : { familyId }
 
     /*
-     * **只看今天及之后**（用户 2026-10-15：「订单只显示今天及之后的订单，剩余的都放入点单历史中」）。
+     * **只看今明后三天**（用户 2026-10-16：「这块永远就展示今明后三天的菜单，其余历史的都放入历史中」）。
      *
-     * 过去的那几餐不是不见了——它们本来就在**点单历史**（F3-09）里，那一页是按天往前翻的，
-     * 回看、翻旧账、删记录都在那边。这一页是"接下来要做什么"（点菜、定菜单、做饭、退菜），
-     * 把已经吃完的那几餐也铺在这儿，会把"今天该干什么"淹掉。
+     * 三件事一起说清，否则很容易改错一头：
+     * - **过去**的餐次本来就不在这儿（2026-10-15 起收窗，回看/删记录在**点单历史** F3-09 那边）；
+     * - **三天之外（第 4～7 天）**是**能安排但列表不铺**：点菜窗口仍是一周（备菜计划要排满，
+     *   见 `ORDER_DAY_SPAN`），把那几餐从列表里拿掉之后，它们只在备菜计划页里看得到——
+     *   所以那一页每行的「点进去」必须落到**这一餐的详情**（曾经落的是列表，收窗后会点个空）；
+     * - 于是这里再数一个 `beyondCount`：三天之外**真有**餐次时，前端在列表底下给一句
+     *   「还有 N 餐在三天之外 · 去备菜计划」。真有才说，不猜也不编。
      *
-     * 写在 **where 里而不是取回来再 filter**：下面有 `take: 60`，先取后筛时一旦这个家常
-     * 用久了超过 60 条，被挤掉的会是**未来的**餐次（历史把名额吃光了），而那正是这一页要看的。
+     * 写在 **where 里而不是取回来再 filter**：计数徽标与卡片必须出自同一份可见范围，
+     * 先取后筛在取数上限附近会分叉。
      */
-    const from = dateOnly(todayKey())
+    const window = listWindowDays()
+    const from = dateOnly(window.from)
+    const to = dateOnly(window.to)
 
     /*
      * **今天排最前、往后顺排**（用户 2026-10-15：「订单页的排序，要先展示今日的，不然还得下滑」）。
@@ -817,17 +829,19 @@ export class OrdersService {
      * 十几张卡下面，每次进这一页都得先往下滑。同一天里也按**午饭 → 晚饭**的自然顺序
      * （`meal` 枚举的声明顺序就是 LUNCH、DINNER，`asc` 正好是它）。
      *
-     * 与下面的 `take: 60` 是配套的：升序留下的正是**离今天最近的** 60 餐；降序时会反过来，
-     * 这个家用久了之后被挤掉的恰恰是今天（最坏情况）。
+     * `take` 由三天窗口天然兜住（最多 6 餐），留着只是防御脏数据。
      */
     // 一次取**不带状态筛选**的全部餐次：卡片按状态筛，但计数徽标必须给出每个状态的数量，
     // 否则点了「待确认」之后，其它状态的徽标会全变成 0，用户就没法切回去了。
-    const rows = await this.prisma.mealOrder.findMany({
-      where: { ...scoped, mealDate: { gte: from } },
-      include: MEAL_ORDER_INCLUDE,
-      orderBy: [{ mealDate: 'asc' }, { meal: 'asc' }],
-      take: 60,
-    })
+    const [rows, beyondCount] = await Promise.all([
+      this.prisma.mealOrder.findMany({
+        where: { ...scoped, mealDate: { gte: from, lte: to } },
+        include: MEAL_ORDER_INCLUDE,
+        orderBy: [{ mealDate: 'asc' }, { meal: 'asc' }],
+        take: 60,
+      }),
+      this.prisma.mealOrder.count({ where: { ...scoped, mealDate: { gt: to } } }),
+    ])
 
     const allCards = rows
       .map(row => this.cardFromRow(row, userId, role, family.shared))
@@ -839,7 +853,7 @@ export class OrdersService {
     }
 
     const cards = status ? allCards.filter(card => card.status === status) : allCards
-    return { cards, counts, scope: mineOnly ? 'mine' : 'family' }
+    return { cards, counts, scope: mineOnly ? 'mine' : 'family', beyondCount }
   }
 
   /** 单张卡片（点菜/撤回/流转后回传，前端据此刷新缓存） */

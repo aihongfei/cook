@@ -30,7 +30,9 @@ function renderHistory() {
       <MemoryRouter initialEntries={[{ pathname: '/order/history', state: { from: '/order' } }]}>
         <Routes>
           <Route path="/order/history" element={<HistoryPage />} />
-          <Route path="/order" element={<div data-testid="order-page" />} />
+          {/* 点单列表只看今明后三天，更早的那些餐在这里回看——所以行链接要去**这一餐的详情**
+              （指回列表会是死路：那一餐根本不在列表的窗口里）*/}
+          <Route path="/order/:mealKey" element={<div data-testid="meal-detail" />} />
           <Route path="/family" element={<div data-testid="family-page" />} />
         </Routes>
       </MemoryRouter>
@@ -170,12 +172,16 @@ it('一条记录都没有：说清楚是"还没有点单记录"，不是页面�
   expect(await screen.findByText('还没有点单记录。')).toBeTruthy()
 })
 
-it('有内容的那一格落到点菜单（改状态、看成品照、再点一次都在那边）', async () => {
+it('有内容的那一格落到**这一餐的详情**（改状态、看成品照、再点一次都在那边）', async () => {
   mockGet(() => page())
   renderHistory()
 
-  fireEvent.click(await screen.findByText('番茄炒蛋'))
-  expect(screen.getByTestId('order-page')).toBeTruthy()
+  const link = await screen.findByRole('link', { name: '番茄炒蛋' })
+  // 直接去那一餐的详情（2026-10-16 起列表只画今明后三天，历史里的餐回列表是找不到的）
+  expect(link.getAttribute('href')).toBe('/order/2026-10-13-DINNER')
+
+  fireEvent.click(link)
+  expect(screen.getByTestId('meal-detail')).toBeTruthy()
 })
 
 it('共享关闭时说明为什么看到的少（不能让人以为家里没张罗）', async () => {

@@ -1,170 +1,50 @@
-/* 发现页：本周菜单（M4 / F4-02）。日期分组 + 每餐一行，沿用 shared.scss 的 .card / .btn-ghost / .stamp */
+/* 发现页：今天吃什么 / 家人最爱 / 两个工具入口。
+ *
+ * 「本周菜单」那一整段样式（.weekplan__*）2026-10-16 随组件一起删掉了
+ * （用户：「发现也不要展示本周菜单了」）——同一份餐次安排在点单页与备菜计划页各有一份，
+ * 这里那份是只读副本。看到某个 .weekplan__ 类名还在用，说明有代码没跟着改。 */
 
-.weekplan__head {
+/* 底部两个工具入口（常用组合 / 备菜计划）：原来挂在「本周菜单」卡头上。
+   做成一行两枚并列的胶囊：一档低于上面的内容卡（品牌淡底 + 描边，同"去安排"那类次要动作），
+   但明确是能点的——用户 2026-10-12 那次已说过"这几个看不出来是可以点击的"。 */
+.discover-tools {
   display: flex;
-  /* 三个胶囊在窄屏放不进标题那一行时**换行**，不要压着标题互相挤 */
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
+  gap: 10px;
+  margin: 14px var(--spacing-page) 0;
 }
 
-.weekplan__title {
-  font-size: 15px;
-  color: #6e3a1c;
-}
-
-/* 卡片右上角的出路（常用组合 / 备菜计划 / 去点菜单）。
- * 用户 2026-10-12 指着这一排说「这几个现在看不出来是可以点击的」——原文案是与正文
- * 同色同字号的纯文字（ink-3、11.5px），只有一个小小的「→」，看起来像说明不像按钮。
- * 现在给它们胶囊描边 + 品牌色（与 .btn-ghost / .dish-card__browse 同一套"可点"语汇），
- * 按下缩一下（D-027：只有"一次性出现/消失"与按压反馈加动效，列表内容不动）。 */
-.weekplan__links {
+.discover-tool {
   display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
+  flex: 1 1 0;
   gap: 6px;
-  /* 换行后这一排仍然靠右：与标题同排时贴在卡片右上角 */
-  margin-left: auto;
-}
-
-.weekplan__more {
-  padding: 3px 8px;
-  font-size: 11px;
-  line-height: 1.5;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 10px 8px;
+  font-size: 12.5px;
   color: #c4652a;
   text-decoration: none;
+  cursor: pointer;
   background: rgb(224 123 57 / 9%);
   border: 1px solid #e2a06c;
   border-radius: 999px;
 }
 
-.weekplan__more:active {
-  transform: scale(0.94);
+.discover-tool:active {
+  transform: scale(0.97);
+}
+
+.discover-tool__icon {
+  font-size: 14px;
+  line-height: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .weekplan__more:active {
+  .discover-tool:active {
     transform: none;
   }
 }
 
-.weekplan__status-line {
-  padding: 6px 0;
-}
-
-.weekplan__scope {
-  margin: 6px 0 0;
-  padding: 7px 10px;
-  font-size: 11.5px;
-  line-height: 1.6;
-  color: var(--color-ink-3);
-  background: var(--color-cream-2);
-  border-radius: 8px;
-}
-
-.weekplan__empty {
-  margin: 8px 0 2px;
-  font-size: 12.5px;
-  line-height: 1.7;
-  color: var(--color-ink-3);
-}
-
-.weekplan__link {
-  display: block;
-  margin-top: 6px;
-  font-size: 12.5px;
-  color: var(--color-brand);
-}
-
-/* 一天一块：日头一行 + 午/晚两行 */
-.weekplan__day + .weekplan__day {
-  margin-top: 10px;
-  border-top: 1px dashed var(--color-line);
-}
-
-.weekplan__day-head {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  padding: 9px 0 2px;
-}
-
-.weekplan__badge {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  font-size: 11px;
-  color: #8a6a2f;
-  background: var(--color-cream-2);
-  border-radius: 8px;
-}
-
-.weekplan__day-label {
-  font-size: 12.5px;
-  color: #6e3a1c;
-}
-
-.weekplan__weekday {
-  font-size: 11px;
-  color: var(--color-ink-3);
-}
-
-.weekplan__row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 8px 0;
-}
-
-.weekplan__row + .weekplan__row {
-  border-top: 1px dashed var(--color-line);
-}
-
-/* 有内容的那行整行可点（落到点菜单）；链接触感但不画下划线 */
-.weekplan__row--link {
-  color: inherit;
-  text-decoration: none;
-
-  &:active {
-    opacity: 0.7;
-  }
-}
-
-.weekplan__meal {
-  flex: 0 0 auto;
-  font-size: 11.5px;
-  color: var(--color-ink-3);
-}
-
-.weekplan__main {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-  gap: 2px;
-}
-
-.weekplan__dishes {
-  font-size: 13px;
-  line-height: 1.5;
-  color: #4a3225;
-}
-
-.weekplan__meta {
-  font-size: 11px;
-  color: var(--color-ink-3);
-}
-
-/* 「去安排」是链接样式的按钮，别被压窄换行（同 btn-ghost 的顾虑） */
-.weekplan__arrange {
-  flex: 0 0 auto;
-  text-decoration: none;
-}
 
 /* ---- AI 抽屉（M16 子集 / D-026）----
    入口本身并进了首页的「今天吃什么」卡（见 shared.scss 的 .today）；

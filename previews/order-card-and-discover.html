@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>订单卡与发现页 · 结构调整预览（御膳）</title>
+<style>
+/* =====================================================================
+ * 这个文件是**给实现方的约束**，不是成品页面。
+ * token 抄自 apps/mobile/src/styles/tailwind.css（唯一来源），
+ * 尺寸/字号/内边距抄自 apps/mobile/src/pages/{order/order.scss,
+ * discover/discover.scss, shared.scss, layouts/TabLayout.scss}，
+ * 右侧量出的 px 就是接下来要落地的 px。
+ *
+ * 两处刻意简化（不参与方案对比）：
+ * ① 右上角插画用色块示意（应用里是 84×84 的水彩 PNG，旋转 4°）；
+ * ② 图标用 emoji（应用里是手绘风图标），字体用系统字体（应用标题是站酷快乐体）。
+ * ===================================================================== */
+:root{
+  --brand:#e07b39; --brick:#b94a2c;
+  --ink:#5a3520; --ink-2:#8e6b52; --ink-3:#a8785a; --ink-soft:#8a7259;
+  --cream:#fcf1da; --cream-2:#f8ead4; --paper:#fffbf2; --line:#eadcc4;
+  --title:#6e3a1c; --body:#4a3225;
+  --card-dash:#d9c4a4; --accent-line:#e2a06c; --accent-ink:#c4652a;
+  --radius-card:20px; --radius-tile:18px;
+  --shadow-card:0 8px 18px rgb(150 100 60 / 10%);
+  --spacing-page:16px; --tabbar:58px;
+  --grain:radial-gradient(rgb(190 160 120 / 10%) 1px, transparent 1px);
+}
+html[data-theme=dark]{
+  --ink:#f4e6d6; --ink-2:#cdb097; --ink-3:#a98c74; --ink-soft:#b0937c;
+  --cream:#221913; --cream-2:#2c2019; --paper:#31241c; --line:#4b3a2e;
+  --title:#f3d3ac; --body:#e8d6c2;
+  --card-dash:#5d4633; --accent-line:#8a5a34; --accent-ink:#e8a271;
+  --shadow-card:0 8px 18px rgb(0 0 0 / 40%);
+}
+
+/* ---------------- 预览脚手架（不属于应用） ---------------- */
+*{box-sizing:border-box}
+body{
+  margin:0; padding:0 0 60px;
+  font:13px/1.6 ui-sans-serif,system-ui,'PingFang SC','Microsoft YaHei',sans-serif;
+  color:#3b2a1e; background:#f3ece0;
+}
+html[data-theme=dark] body{ color:#e8dccd; background:#1a1310 }
+.pv-top{
+  display:flex; flex-wrap:wrap; gap:14px 26px; align-items:flex-end;
+  padding:18px 24px 14px; border-bottom:1px solid #e2d6c3;
+}
+html[data-theme=dark] .pv-top{ border-color:#3a2c22 }
+.pv-top h1{ margin:0 0 4px; font-size:17px; font-weight:600 }
+.pv-top .pv-lede{ margin:0; max-width:820px; font-size:12.5px; opacity:.82 }
+.pv-group{ display:flex; flex-direction:column; gap:5px }
+.pv-group > b{ font-size:11px; font-weight:600; letter-spacing:.4px; opacity:.6 }
+.pv-row{ display:flex; gap:6px; flex-wrap:wrap }
+.pv-chip{
+  padding:5px 11px; font:inherit; font-size:12px; color:inherit; cursor:pointer;
+  background:#fff; border:1px solid #dfd0bb; border-radius:999px;
+}
+html[data-theme=dark] .pv-chip{ background:#2a1f18; border-color:#4b3a2e }
+.pv-chip[aria-pressed=true]{ color:#fff; background:var(--brand); border-color:var(--brand) }
+
+.pv-main{ display:flex; gap:30px; align-items:flex-start; padding:20px 24px; flex-wrap:wrap }
+.pv-col{ display:flex; flex-direction:column; gap:10px }
+.pv-col > h2{ margin:0; font-size:12px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; opacity:.6 }
+
+/* 手机壳：外壳固定，内部 .app 三段（固定区 / 滚动区 / 底栏），悬浮件贴外壳 */
+.phone{
+  position:relative; width:390px; height:800px; overflow:hidden;
+  background:var(--cream); border:8px solid #2b211a; border-radius:34px;
+  box-shadow:0 18px 40px rgb(60 40 25 / 22%);
+}
+html[data-theme=dark] .phone{ border-color:#0c0908 }
+.app{
+  display:flex; flex-direction:column; height:100%;
+  background:var(--cream); background-image:var(--grain); background-size:5px 5px;
+  color:var(--body);
+}
+.chrome{ flex:none }                 /* 页头 / 段控 / 筛选行 / 入口行——不跟着滚 */
+.scroll{ flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain }
+.scroll::-webkit-scrollbar{ width:0 }
+
+/* 页头（.page-head / .ptitle / .psub + 角插画示意 + 右上角操作）。
+   padding-right:98px 与线上一致：右侧那段是插画的地盘，标题文字不许排进去。
+   「历史」不放页头（用户 2026-10-16 定：放筛选行右端），页头只留标题与插画。 */
+.page-head{ position:relative; padding:16px 98px 2px 16px; min-height:76px }
+.ptitle{ font-size:21px; color:var(--title) }
+.psub{ margin-top:6px; font-size:11.5px; color:var(--ink-3) }
+.art{
+  position:absolute; top:2px; right:4px; width:84px; height:84px;
+  display:grid; place-items:center; font-size:30px; opacity:.5;
+  background:radial-gradient(circle at 42% 38%, color-mix(in srgb,var(--brand) 26%,transparent), transparent 72%);
+  border-radius:48% 52% 44% 56% / 52% 46% 54% 48%; transform:rotate(4deg);
+  pointer-events:none;
+}
+/* 筛选行右端的「历史」（用户 2026-10-16 定稿位置）：与筛选胶囊同高、钉在这一行最右，
+   不跟着 chips 横滚——占的就是原来「多选」圆钮那个位置。 */
+.hist-pill{
+  flex:none; display:flex; gap:5px; align-items:center;
+  padding:7px 11px; font:inherit; font-size:12px; color:var(--accent-ink);
+  background:var(--paper); border:1px solid var(--accent-line); border-radius:999px;
+}
+body[data-order=now] .hist-pill{ display:none }
+
+/* 段控（.segmented） */
+.segmented{ display:flex; gap:8px; margin:14px 16px 0; padding:5px; background:var(--paper); border:1px solid var(--line); border-radius:20px }
+.segmented__item{ flex:1; padding:8px 0; font:inherit; font-size:13px; color:var(--ink-3); text-align:center; background:none; border:0; border-radius:14px }
+.segmented__item.is-active{ color:#fff; background:#e9a15e }
+
+/* 筛选行：chips 自己横滚，「历史」钉在最右（现状复刻里那是「多选」圆钮）。
+   用户 2026-10-16 定：不做多选了，这块位置让给「历史」。 */
+.filter-row{ display:flex; align-items:center; gap:8px; margin:12px 16px 0 }
+.chips{ display:flex; flex:1; gap:8px; overflow:hidden }
+.chip{ flex:0 0 auto; padding:7px 13px; font-size:12px; color:var(--ink-3); background:var(--cream-2); border:1px solid var(--line); border-radius:999px }
+.chip.is-active{ color:#fff; background:var(--brand); border-color:var(--brand) }
+/* 「多选」圆钮：只在现状复刻里出现，用来对比 */
+.multi-ico{
+  flex:none; display:none; align-items:center; justify-content:center;
+  width:31px; height:31px; color:var(--ink-soft); background:var(--paper);
+  border:1.5px solid var(--line); border-radius:999px;
+}
+.multi-ico svg{ display:block }
+body[data-order=now] .multi-ico{ display:flex }
+
+/* 两个整行入口（.order-shortcuts）——只有现状复刻里有 */
+.order-shortcuts{ display:flex; gap:10px; align-items:stretch; margin:12px 16px 0 }
+.order-history-link,.order-freedish{ display:flex; flex:1 1 0; min-width:0; gap:8px; align-items:center; padding:11px 12px; background:var(--paper); border-radius:18px }
+.order-history-link{ border:1px solid var(--line) }
+.order-freedish{ border:1.5px dashed #de9057 }
+.order-shortcuts .ic{ flex:0 0 auto; font-size:15px }
+.order-shortcuts .tx{ display:flex; flex:1; flex-direction:column; gap:1px; min-width:0; font-size:12.5px; color:var(--title) }
+.order-shortcuts .tx small{ font-size:10.5px; color:var(--ink-3) }
+.order-shortcuts .ar{ flex:0 0 auto; color:#c7a97e }
+body:not([data-order=now]) .order-shortcuts{ display:none }
+
+/* ---- 点单卡（.order-card）---- */
+.order-card{
+  position:relative; margin:12px 16px 0; padding:14px;
+  background:var(--paper); border:1px dashed var(--card-dash); border-radius:18px;
+}
+.order-card.is-unread{ background:color-mix(in srgb,var(--brand) 4%,var(--paper)); border-color:#e6c49c; box-shadow:inset 3px 0 0 var(--brand) }
+.corner{
+  position:absolute; top:-7px; right:-5px; padding:2px 9px;
+  font-size:10.5px; line-height:1.5; color:var(--paper); white-space:nowrap;
+  background:#d4552b; border:1.5px solid var(--paper); border-radius:999px;
+  box-shadow:0 1px 4px rgb(120 60 30 / 22%);
+}
+.oc-head{ display:flex; gap:8px; align-items:flex-start; justify-content:space-between }
+.oc-headlink{ display:flex; flex:1; flex-direction:column; gap:4px; min-width:0; color:inherit; text-decoration:none }
+.oc-date{ font-size:15.5px; color:var(--title) }
+.oc-who{ font-size:10.5px; color:var(--ink-3) }
+.oc-arrow{ flex:0 0 auto; font-size:15px; color:#c7a97e }
+body[data-octx=done] .oc-arrow{ opacity:.5 }
+.stamp{
+  flex:0 0 auto; padding:4px 9px; font-size:10px; letter-spacing:1px;
+  border:1.5px solid #d8a25c; border-radius:8px; transform:rotate(-5deg);
+  color:#a8762f; background:rgb(245 217 139 / 30%);
+}
+.stamp--done{ color:#5f7f4a; background:rgb(188 203 166 / 28%); border-color:#7fa06a }
+
+.oc-dishes{ margin-top:10px; font-size:12.5px; line-height:1.8 }
+.oc-dish{ display:flex; flex-wrap:wrap; gap:4px 8px; align-items:baseline; padding:5px 0 }
+.oc-dish + .oc-dish{ border-top:1px dashed var(--line) }
+.oc-dish-name{ font-size:13px; color:var(--body) }
+.oc-count{ margin-left:3px; font-size:11.5px; color:#b4571f }
+.oc-note{ flex-basis:100%; font-size:11px; color:var(--ink-3) }
+
+/* 现状复刻里的行尾药丸 */
+.withdraw-btn{ padding:2px 8px; margin-left:auto; font:inherit; font-size:10px; color:var(--ink-3); background:transparent; border:1px solid var(--card-dash); border-radius:999px }
+/* 方案 B：保留「退我这份」，但降成行尾浅色文字 */
+.withdraw-light{ display:none; margin-left:auto; font-size:11px; color:var(--ink-3); text-decoration:underline; text-underline-offset:2px }
+body[data-order=B] .withdraw-light{ display:inline }
+body[data-order=now] .withdraw-light{ display:none }
+
+.oc-foot{ display:flex; align-items:center; justify-content:space-between; margin-top:10px; font-size:10px; color:var(--ink-3) }
+
+/* 现状复刻：工具药丸一排 + 动作一排 */
+.oc-tools-row{ display:flex; flex-wrap:wrap; gap:6px; align-items:flex-start; margin-top:11px }
+.tool-pill{ max-width:100%; padding:5px 11px; font:inherit; font-size:12px; line-height:1.5; color:#8a7259; text-align:left; background:#fffdf8; border:1px dashed var(--line); border-radius:999px }
+html[data-theme=dark] .tool-pill{ background:#392a1f; color:#c9ad94 }
+.tool-pill--brand{ color:#c4652a }
+.oc-actions-row{ display:flex; gap:8px; justify-content:flex-end; margin-top:11px }
+
+/* 新结构：一条信息行 + 一行动作 */
+.oc-info{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-top:9px; padding-top:8px; font-size:11px; color:var(--ink-3); border-top:1px dashed var(--line) }
+.oc-info__link{ color:var(--accent-ink) }
+.oc-fix{ padding:0; font:inherit; font-size:11px; color:var(--accent-ink); background:none; border:0 }
+.oc-actions{ display:flex; align-items:center; gap:10px; margin-top:10px }
+.oc-tools{ display:flex; flex:1 1 auto; gap:14px; min-width:0 }
+.oc-tool{ padding:0; font:inherit; font-size:12px; color:var(--ink-soft); white-space:nowrap; background:none; border:0 }
+.oc-tool--brand{ color:var(--accent-ink) }
+.oc-main{ display:flex; flex:0 0 auto; gap:8px }
+.oc-btn{ flex:0 0 auto; padding:7px 14px; font:inherit; font-size:12.5px; color:var(--ink-2); background:transparent; border:1.5px solid var(--line); border-radius:999px; white-space:nowrap }
+.oc-btn.is-primary{ color:var(--paper); background:var(--brand); border-color:var(--brand) }
+
+/* 列表窗口提示（今明后三天之外不再铺卡，给一句去处） */
+.order-window-hint{ margin:12px 16px 0; font-size:11.5px; color:var(--ink-3) }
+.order-window-hint a{ color:var(--accent-ink); text-decoration:none }
+
+/* ---- 悬浮件：写一道（新） + AI 球（既有） ---- */
+.floaters{ position:absolute; right:14px; bottom:calc(var(--tabbar) + 14px); display:flex; flex-direction:column; align-items:flex-end; gap:12px; pointer-events:none }
+.floaters > *{ pointer-events:auto }
+.ai-ball{
+  display:grid; place-items:center; width:54px; height:54px; font-size:22px;
+  background:linear-gradient(160deg,#fff8ee,#fbe9d2); border:1.5px solid #e8c9a4; border-radius:50%;
+  box-shadow:0 6px 16px rgb(160 110 60 / 22%), inset 0 1px 0 #fff;
+}
+.write-pill{
+  display:flex; gap:7px; align-items:center; padding:10px 16px;
+  font:inherit; font-size:13px; color:#fff;
+  background:linear-gradient(160deg,#e88b48,var(--brand));
+  border:0; border-radius:999px;
+  box-shadow:0 8px 18px rgb(180 110 50 / 34%);
+}
+.write-pill .ic{ font-size:14px; line-height:1 }
+body[data-order=now] .write-pill{ display:none }
+
+/* ---- 发现页 ---- */
+.today{ position:relative; overflow:hidden; margin:14px 16px 0; padding:14px 15px 12px; background:linear-gradient(112deg,#f7cfa9,#eeb083); border-radius:20px; box-shadow:var(--shadow-card) }
+.today__head{ display:flex; align-items:baseline; gap:9px }
+.today__en{ font-size:9px; letter-spacing:2.2px; color:#9a6238 }
+.today__title{ font-size:18px; color:#7a3b1e }
+.today__row{ display:flex; gap:9px; margin-top:11px }
+.today__btn{ display:flex; flex:1; gap:7px; align-items:center; justify-content:center; min-width:0; padding:10px 12px; font-size:13px; border:1px solid transparent; border-radius:14px }
+.today__shake{ color:#a8542a; background:var(--paper); box-shadow:0 3px 8px rgb(150 100 60 / 12%) }
+.today__decide{ color:#8a4a1e; background:rgb(255 251 242 / 62%); border-color:rgb(224 123 57 / 34%) }
+.today__ask{ display:flex; align-items:baseline; justify-content:flex-end; gap:4px; margin-top:9px; padding-top:5px; font-size:11px; line-height:1.5; border-top:1px dashed rgb(160 110 70 / 26%) }
+.today__ask-text{ color:#a2714a }
+.today__ask-link{ padding:0; font:inherit; font-size:11px; font-weight:600; color:#8a4a1e; text-decoration:underline; text-underline-offset:3px; background:none; border:0 }
+
+.card{ margin:14px 16px 0; padding:15px; background:var(--paper); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow-card) }
+.card__title{ font-size:15px; color:var(--title) }
+
+.picks__list{ display:flex; flex-direction:column; gap:2px; margin:6px 0 0; padding:0; list-style:none }
+.picks__item{ display:flex; align-items:center; gap:8px }
+.picks__rank{ flex:0 0 auto; width:20px; font-size:11px; font-weight:600; color:var(--accent-ink); text-align:center }
+.picks__link{ display:flex; flex:1 1 auto; gap:9px; align-items:center; min-width:0; padding:6px 4px }
+.picks__pic{ flex:0 0 auto; width:40px; height:40px; border:1px solid var(--line); border-radius:10px;
+  background:linear-gradient(140deg,var(--cream-2),color-mix(in srgb,var(--brand) 22%,var(--cream-2))) }
+.picks__name{ flex:1 1 auto; min-width:0; overflow:hidden; font-size:13.5px; color:var(--title); white-space:nowrap; text-overflow:ellipsis }
+.picks__reason{ flex:0 0 auto; font-size:11.5px; color:var(--ink-3) }
+
+.discover-tools{ display:flex; gap:10px; margin:14px 16px 0 }
+.dtool{ display:flex; flex:1; align-items:center; justify-content:center; gap:6px; padding:10px 8px;
+  font-size:12.5px; color:var(--accent-ink);
+  background:rgb(224 123 57 / 9%); border:1px solid var(--accent-line); border-radius:999px }
+.gap-hint{ margin:10px 16px 0; font-size:11.5px; color:var(--ink-3) }
+.gap-hint a{ color:var(--accent-ink); text-decoration:none }
+
+.weekplan__head{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; margin-bottom:4px }
+.weekplan__links{ display:flex; flex:0 0 auto; gap:6px; margin-left:auto }
+.weekplan__more{ padding:3px 8px; font-size:11px; line-height:1.5; color:var(--accent-ink); background:rgb(224 123 57 / 9%); border:1px solid var(--accent-line); border-radius:999px }
+.weekplan__day + .weekplan__day{ margin-top:10px; border-top:1px dashed var(--line) }
+.weekplan__day-head{ display:flex; gap:7px; align-items:center; padding:9px 0 2px }
+.weekplan__badge{ display:flex; flex:0 0 auto; align-items:center; justify-content:center; width:22px; height:22px; font-size:11px; color:#8a6a2f; background:var(--cream-2); border-radius:8px }
+.weekplan__day-label{ font-size:12.5px; color:var(--title) }
+.weekplan__weekday{ font-size:11px; color:var(--ink-3) }
+.weekplan__row{ display:flex; gap:10px; align-items:center; padding:8px 0 }
+.weekplan__row + .weekplan__row{ border-top:1px dashed var(--line) }
+.weekplan__meal{ flex:0 0 auto; font-size:11.5px; color:var(--ink-3) }
+.weekplan__main{ display:flex; flex:1; flex-direction:column; min-width:0; gap:2px }
+.weekplan__dishes{ font-size:13px; line-height:1.5; color:var(--body) }
+.weekplan__meta{ font-size:11px; color:var(--ink-3) }
+.weekplan__arrange{ flex:0 0 auto; padding:5px 12px; font-size:12px; color:var(--accent-ink); background:rgb(224 123 57 / 9%); border:1px solid var(--accent-line); border-radius:999px }
+
+/* 列表底部留白：给悬浮件（写一道 + AI 球）让位。留不够的话滚到底时
+   最后一张卡的动作行正好压在悬浮件下面（预览实测盖住了「选好了 / 取消这餐」）。
+   算式：写一道 40.8 + 间距 12 + AI 球 54 + 呼吸 14 ≈ 120px（现状这段只有 14px）。 */
+.scroll-tail{ height:120px }
+
+/* 底栏（图标示意） */
+.tabbar{ flex:none; display:flex; padding:7px 0 10px; background:var(--paper); border-top:1px solid var(--line) }
+.tab{ flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; font-size:10.5px; color:var(--ink-3) }
+.tab .ic{ display:grid; place-items:center; width:20px; height:20px; font-size:15px; line-height:1 }
+.tab.is-active{ color:var(--brand); font-weight:600 }
+
+/* 标注与表格 */
+.pv-annot{ margin:0; font-size:11.5px; line-height:1.65; opacity:.78; max-width:390px }
+.pv-annot b{ color:var(--accent-ink) }
+table.pv-t{ width:100%; max-width:900px; border-collapse:collapse; font-size:12.5px; background:#fff; border:1px solid #e6dbc9; border-radius:12px; overflow:hidden }
+html[data-theme=dark] table.pv-t{ background:#2a1f18; border-color:#4b3a2e }
+table.pv-t th,table.pv-t td{ padding:7px 12px; text-align:left; border-bottom:1px solid #eee3d2 }
+html[data-theme=dark] table.pv-t th,html[data-theme=dark] table.pv-t td{ border-color:#3f2f24 }
+table.pv-t tr:last-child td{ border-bottom:0 }
+table.pv-t td.num{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap }
+.pv-measure{ padding:4px 24px 24px }
+.pv-measure h2{ font-size:13px; margin:0 0 8px }
+.pv-foot{ padding:0 24px; font-size:11.5px; opacity:.7; max-width:900px }
+
+/* 方案可见性 */
+body[data-order=now] .order-card[data-plan=new],
+body[data-order=A]   .order-card[data-plan=now],
+body[data-order=B]   .order-card[data-plan=now]{ display:none }
+body:not([data-octx=done]) .order-card[data-ctx=done]{ display:none }
+body[data-octx=done] .order-card[data-ctx=pending]{ display:none }
+body[data-octx=done] .order-window-hint{ display:none }
+body[data-discover=new] .weekplan{ display:none }
+body[data-discover=new] .discover-tools{ display:flex }
+body:not([data-discover=new]) .discover-tools{ display:none }
+body:not([data-discover=new]) .gap-hint{ display:none }
+body[data-gaps=off] .gap-hint{ display:none }
+</style>
+</head>
+<body data-theme="light" data-order="A" data-octx="pending" data-discover="new" data-gaps="off">
+
+<header class="pv-top">
+  <div>
+    <h1>订单卡与发现页 · 结构调整预览</h1>
+    <p class="pv-lede">
+      左边是订单页、右边是发现页，都是 390px 宽。切换方案时<strong>只有被比较的部分变</strong>：订单卡的结构、
+      两个入口的新位置、「历史」按钮、发现页去留「本周菜单」。表里量出的 px 就是接下来落地的 px。
+    </p>
+  </div>
+  <div class="pv-group">
+    <b>订单页</b>
+    <div class="pv-row" id="order-plans">
+      <button class="pv-chip" data-order="A" aria-pressed="true">A 推荐（退菜进详情）</button>
+      <button class="pv-chip" data-order="B" aria-pressed="false">B 保守（留退我这份）</button>
+      <button class="pv-chip" data-order="now" aria-pressed="false">现状复刻</button>
+    </div>
+  </div>
+  <div class="pv-group">
+    <b>卡片状态</b>
+    <div class="pv-row" id="order-ctx">
+      <button class="pv-chip" data-octx="pending" aria-pressed="true">待确认</button>
+      <button class="pv-chip" data-octx="done" aria-pressed="false">已做好</button>
+    </div>
+  </div>
+  <div class="pv-group">
+    <b>发现页</b>
+    <div class="pv-row" id="discover-plans">
+      <button class="pv-chip" data-discover="new" aria-pressed="true">新方案（删本周菜单）</button>
+      <button class="pv-chip" data-discover="now" aria-pressed="false">现状复刻</button>
+    </div>
+  </div>
+  <div class="pv-group">
+    <b>附加</b>
+    <div class="pv-row" id="extras">
+      <button class="pv-chip" data-gaps="on" aria-pressed="false">缺口提示行</button>
+      <button class="pv-chip" id="theme">暗色</button>
+    </div>
+  </div>
+</header>
+
+<main class="pv-main">
+  <!-- ================= 订单页 ================= -->
+  <section class="pv-col">
+    <h2>订单页 · 390px</h2>
+    <div class="phone">
+      <div class="app">
+        <!-- 固定区（D-091：页头的这一切不跟着滚） -->
+        <div class="chrome" id="order-chrome">
+          <div class="page-head">
+            <div class="art" aria-hidden="true">🍽</div>
+            <div class="ptitle">家宴点菜单</div>
+            <div class="psub">记录大家想吃什么，也记录每顿饭的回应</div>
+          </div>
+
+          <div class="segmented">
+            <span class="segmented__item is-active">全家点菜单</span>
+            <span class="segmented__item">只看我的</span>
+          </div>
+
+          <div class="filter-row">
+            <div class="chips">
+              <span class="chip is-active">全部 3</span>
+              <span class="chip">待确认 3</span>
+            </div>
+            <!-- 「历史」：原来「多选」圆钮那个位置（用户 2026-10-16 定，不做多选了） -->
+            <span class="hist-pill"><span class="ic">📖</span>历史</span>
+            <span class="multi-ico" aria-hidden="true">
+              <svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="14" height="14" rx="3.5"/><path d="M7.2 10.2l2 2 3.8-4.4"/>
+              </svg>
+            </span>
+          </div>
+
+          <!-- 现状复刻里才有：两个整行入口 -->
+          <div class="order-shortcuts">
+            <span class="order-history-link"><span class="ic">📖</span><span class="tx">点单历史<small>翻翻最近吃过的</small></span><span class="ar">›</span></span>
+            <span class="order-freedish"><span class="ic">✍️</span><span class="tx">自己写一道<small>写个名字就能点</small></span><span class="ar">›</span></span>
+          </div>
+        </div>
+
+        <!-- 滚动区：卡片 -->
+        <div class="scroll">
+          <!-- 现状复刻卡 -->
+          <article class="order-card is-unread" data-plan="now" data-ctx="pending">
+            <span class="corner">选好了</span>
+            <div class="oc-head">
+              <a class="oc-headlink">
+                <span class="oc-date">2026-10-16 · 午餐</span>
+                <span class="oc-who">小艾 点的</span>
+              </a>
+              <span class="stamp">待确认</span>
+              <span class="oc-arrow">›</span>
+            </div>
+            <div class="oc-dishes">
+              <div class="oc-dish">
+                <div class="oc-dish-name">三丝杏鲍菇<b class="oc-count">×2</b></div>
+                <button class="withdraw-btn">退掉我这份</button>
+              </div>
+              <div class="oc-dish">
+                <div class="oc-dish-name">三色春笋丁#多效护理一招制胜#</div>
+                <button class="withdraw-btn">退掉我这份</button>
+              </div>
+            </div>
+            <div class="oc-foot">
+              <span>共 2 道 · 1 人点了（含我点的 2 份）</span>
+              <span>10 / 16 17:22 提交</span>
+            </div>
+            <div class="oc-tools-row">
+              <button class="tool-pill">🍚 还没定几个人吃 · 改</button>
+              <button class="tool-pill tool-pill--brand">⭐ 存成常用组合</button>
+            </div>
+            <div class="oc-actions-row">
+              <button class="oc-btn is-primary">选好了</button>
+              <button class="oc-btn">取消这餐</button>
+            </div>
+          </article>
+
+          <article class="order-card" data-plan="now" data-ctx="pending">
+            <div class="oc-head">
+              <a class="oc-headlink">
+                <span class="oc-date">2026-10-16 · 晚餐</span>
+                <span class="oc-who">小艾 点的</span>
+              </a>
+              <span class="stamp">待确认</span>
+              <span class="oc-arrow">›</span>
+            </div>
+            <div class="oc-dishes">
+              <div class="oc-dish">
+                <div class="oc-dish-name">上海凉面</div>
+                <button class="withdraw-btn">退掉我这份</button>
+              </div>
+            </div>
+            <div class="oc-foot">
+              <span>共 1 道 · 1 人点了（含我点的 1 份）</span>
+              <span>10 / 16 17:22 提交</span>
+            </div>
+            <div class="oc-tools-row">
+              <button class="tool-pill">🍚 还没定几个人吃 · 改</button>
+            </div>
+            <div class="oc-actions-row">
+              <button class="oc-btn is-primary">选好了</button>
+              <button class="oc-btn">取消这餐</button>
+            </div>
+          </article>
+
+          <!-- 新结构卡（A / B 共用；B 多一枚浅色「退我这份」）。
+               列表只铺**今明后三天**（用户 2026-10-16 定），更早的去「历史」。 -->
+          <article class="order-card is-unread" data-plan="new" data-ctx="pending">
+            <span class="corner">选好了</span>
+            <div class="oc-head">
+              <a class="oc-headlink">
+                <span class="oc-date">今天 · 午餐</span>
+                <span class="oc-who">小艾 点的 · 17:22 提交</span>
+              </a>
+              <span class="stamp">待确认</span>
+              <span class="oc-arrow">›</span>
+            </div>
+            <div class="oc-dishes">
+              <div class="oc-dish">
+                <span class="oc-dish-name">三丝杏鲍菇<b class="oc-count">×2</b></span>
+                <span class="withdraw-light">退我这份</span>
+              </div>
+              <div class="oc-dish">
+                <span class="oc-dish-name">三色春笋丁#多效护理一招制胜#</span>
+                <span class="withdraw-light">退我这份</span>
+              </div>
+            </div>
+            <div class="oc-info">
+              <span>共 2 道 · 1 人点了 · 含我 1 份</span>
+              <span>🍚 3 人吃 · <button class="oc-fix">改</button></span>
+            </div>
+            <div class="oc-actions">
+              <div class="oc-tools">
+                <button class="oc-tool oc-tool--brand">⭐ 存组合</button>
+              </div>
+              <div class="oc-main">
+                <button class="oc-btn is-primary">选好了</button>
+                <button class="oc-btn">取消这餐</button>
+              </div>
+            </div>
+          </article>
+
+          <article class="order-card" data-plan="new" data-ctx="pending">
+            <div class="oc-head">
+              <a class="oc-headlink">
+                <span class="oc-date">今天 · 晚餐</span>
+                <span class="oc-who">小艾 点的 · 17:22 提交</span>
+              </a>
+              <span class="stamp">待确认</span>
+              <span class="oc-arrow">›</span>
+            </div>
+            <div class="oc-dishes">
+              <div class="oc-dish"><span class="oc-dish-name">上海凉面</span></div>
+            </div>
+            <div class="oc-info">
+              <span>共 1 道 · 1 人点了 · 含我 1 份</span>
+              <span>🍚 还没定 · <button class="oc-fix">改</button></span>
+            </div>
+            <div class="oc-actions">
+              <div class="oc-tools"></div>
+              <div class="oc-main">
+                <button class="oc-btn is-primary">选好了</button>
+                <button class="oc-btn">取消这餐</button>
+              </div>
+            </div>
+          </article>
+
+          <article class="order-card" data-plan="new" data-ctx="pending">
+            <div class="oc-head">
+              <a class="oc-headlink">
+                <span class="oc-date">明天 · 午餐</span>
+                <span class="oc-who">小艾 点的 · 17:22 提交</span>
+              </a>
+              <span class="stamp stamp--planned">已安排</span>
+              <span class="oc-arrow">›</span>
+            </div>
+            <div class="oc-dishes">
+              <div class="oc-dish"><span class="oc-dish-name">五彩斋</span></div>
+            </div>
+            <div class="oc-info">
+              <span>共 1 道 · 1 人点了 · 含我 1 份</span>
+              <span>🍚 2 人吃 · <button class="oc-fix">改</button></span>
+            </div>
+            <div class="oc-actions">
+              <div class="oc-tools">
+                <button class="oc-tool oc-tool--brand">⭐ 存组合</button>
+              </div>
+              <div class="oc-main">
+                <button class="oc-btn is-primary">开始做</button>
+                <button class="oc-btn">取消这餐</button>
+              </div>
+            </div>
+          </article>
+
+          <!-- 三天之外：列表底下给一句去处，备菜计划能排到第 7 天 -->
+          <p class="order-window-hint">列表只看今明后三天 · <a>更远的去备菜计划 →</a></p>
+
+          <!-- 已做好 -->
+          <article class="order-card" data-plan="new" data-ctx="done">
+            <div class="oc-head">
+              <a class="oc-headlink">
+                <span class="oc-date">今天 · 午餐</span>
+                <span class="oc-who">小艾 点的 · 17:22 提交</span>
+              </a>
+              <span class="stamp stamp--done">已做好</span>
+              <span class="oc-arrow">›</span>
+            </div>
+            <div class="oc-dishes">
+              <div class="oc-dish"><span class="oc-dish-name">红烧排骨<b class="oc-count">×2</b></span></div>
+              <div class="oc-dish"><span class="oc-dish-name">蒜蓉西兰花</span></div>
+            </div>
+            <div class="oc-info">
+              <span>共 2 道 · 1 人点了 · 含我 1 份 · <span class="oc-info__link">成品照 2 张 · 去看看 →</span></span>
+            </div>
+            <div class="oc-actions">
+              <div class="oc-tools">
+                <button class="oc-tool">🔁 再点一次</button>
+              </div>
+              <div class="oc-main">
+                <button class="oc-btn">📷 再传一张</button>
+              </div>
+            </div>
+          </article>
+
+          <!-- 列表底部留白：悬浮件（写一道 40.8 + 12 + AI 球 54 = 106.8）都压在这一段上，
+               不留够的话滚到底时最后一张卡的动作行会被盖住（预览实测确实会盖） -->
+          <div class="scroll-tail"></div>
+        </div>
+
+        <nav class="tabbar">
+          <span class="tab"><span class="ic">🏠</span>厨房</span>
+          <span class="tab is-active"><span class="ic">📋</span>订单</span>
+          <span class="tab"><span class="ic">✨</span>发现</span>
+          <span class="tab"><span class="ic">🧊</span>冰箱</span>
+          <span class="tab"><span class="ic">👤</span>我的</span>
+        </nav>
+      </div>
+
+      <!-- 悬浮件：写一道（新）+ AI 球（既有，"关掉页面也会响"那条功能的入口） -->
+      <div class="floaters">
+        <button class="write-pill"><span class="ic">✍️</span>自己写一道</button>
+        <span class="ai-ball" aria-hidden="true">🍳</span>
+      </div>
+    </div>
+    <p class="pv-annot" id="order-annot"></p>
+  </section>
+
+  <!-- ================= 发现页 ================= -->
+  <section class="pv-col">
+    <h2>发现页 · 390px</h2>
+    <div class="phone">
+      <div class="app">
+        <div class="chrome">
+          <div class="page-head">
+            <div class="art" aria-hidden="true">🥣</div>
+            <div class="ptitle">发现</div>
+            <div class="psub">今天不知道吃什么，交给它</div>
+          </div>
+        </div>
+
+        <div class="scroll">
+          <section class="today">
+            <div class="today__head">
+              <span class="today__en">WHAT TO EAT TODAY</span>
+              <span class="today__title">今天吃什么？</span>
+            </div>
+            <div class="today__row">
+              <span class="today__btn today__shake">🎲 摇一桌</span>
+              <span class="today__btn today__decide">✨ 帮我决定</span>
+            </div>
+            <div class="today__ask">
+              <span class="today__ask-text">下厨上的问题想问问人？</span>
+              <span class="today__ask-link">点这里问 AI →</span>
+            </div>
+          </section>
+
+          <section class="card picks">
+            <div class="card__title">家人最爱</div>
+            <ul class="picks__list">
+              <li class="picks__item"><span class="picks__rank">1</span><span class="picks__link"><span class="picks__pic"></span><span class="picks__name">红烧排骨</span><span class="picks__reason">做过 3 次 · 2 人收着</span></span></li>
+              <li class="picks__item"><span class="picks__rank">2</span><span class="picks__link"><span class="picks__pic"></span><span class="picks__name">番茄炒蛋</span><span class="picks__reason">做过 2 次 · 1 人收着</span></span></li>
+              <li class="picks__item"><span class="picks__rank">3</span><span class="picks__link"><span class="picks__pic"></span><span class="picks__name">紫菜蛋花汤</span><span class="picks__reason">做过 1 次</span></span></li>
+            </ul>
+          </section>
+
+          <p class="gap-hint">接下来 3 天还有 4 餐没安排 · <a>去备菜计划 →</a></p>
+
+          <div class="discover-tools">
+            <a class="dtool">🧩 常用组合</a>
+            <a class="dtool">🗓 备菜计划</a>
+          </div>
+
+          <section class="card weekplan">
+            <div class="weekplan__head">
+              <span class="card__title">本周菜单</span>
+              <span class="weekplan__links">
+                <span class="weekplan__more">常用组合 →</span>
+                <span class="weekplan__more">备菜计划 →</span>
+              </span>
+            </div>
+            <div class="weekplan__day">
+              <div class="weekplan__day-head"><span class="weekplan__badge">今</span><span class="weekplan__day-label">今天</span><span class="weekplan__weekday">周五</span></div>
+              <div class="weekplan__row">
+                <span class="weekplan__meal">午餐</span>
+                <span class="weekplan__main"><span class="weekplan__dishes">三丝杏鲍菇 · 三色春笋丁#多效护理一招制胜#</span><span class="weekplan__meta">人数还没定</span></span>
+                <span class="stamp">待确认</span>
+              </div>
+              <div class="weekplan__row">
+                <span class="weekplan__meal">晚餐</span>
+                <span class="weekplan__main"><span class="weekplan__dishes">上海凉面</span><span class="weekplan__meta">人数还没定</span></span>
+                <span class="stamp">待确认</span>
+              </div>
+            </div>
+            <div class="weekplan__day">
+              <div class="weekplan__day-head"><span class="weekplan__badge">明</span><span class="weekplan__day-label">明天</span><span class="weekplan__weekday">周六</span></div>
+              <div class="weekplan__row">
+                <span class="weekplan__meal">午餐</span>
+                <span class="weekplan__main"><span class="weekplan__dishes">五彩斋</span><span class="weekplan__meta">人数还没定</span></span>
+                <span class="stamp">待确认</span>
+              </div>
+              <div class="weekplan__row">
+                <span class="weekplan__meal">晚餐</span>
+                <span class="weekplan__main"><span class="weekplan__dishes">还没安排</span></span>
+                <span class="weekplan__arrange">去安排</span>
+              </div>
+            </div>
+            <div class="weekplan__day">
+              <div class="weekplan__day-head"><span class="weekplan__badge">后</span><span class="weekplan__day-label">后天</span><span class="weekplan__weekday">周日</span></div>
+              <div class="weekplan__row">
+                <span class="weekplan__meal">午餐</span>
+                <span class="weekplan__main"><span class="weekplan__dishes">还没安排</span></span>
+                <span class="weekplan__arrange">去安排</span>
+              </div>
+              <div class="weekplan__row">
+                <span class="weekplan__meal">晚餐</span>
+                <span class="weekplan__main"><span class="weekplan__dishes">还没安排</span></span>
+                <span class="weekplan__arrange">去安排</span>
+              </div>
+            </div>
+          </section>
+
+          <div style="height:14px"></div>
+        </div>
+
+        <nav class="tabbar">
+          <span class="tab"><span class="ic">🏠</span>厨房</span>
+          <span class="tab"><span class="ic">📋</span>订单</span>
+          <span class="tab is-active"><span class="ic">✨</span>发现</span>
+          <span class="tab"><span class="ic">🧊</span>冰箱</span>
+          <span class="tab"><span class="ic">👤</span>我的</span>
+        </nav>
+      </div>
+
+      <div class="floaters">
+        <span class="ai-ball" aria-hidden="true">🍳</span>
+      </div>
+    </div>
+    <p class="pv-annot" id="discover-annot"></p>
+  </section>
+</main>
+
+<section class="pv-measure">
+  <h2>这些数字是验收依据（390px 宽，预览内实测）</h2>
+  <table class="pv-t">
+    <thead>
+      <tr><th>部位</th><th class="num">现状</th><th class="num">新方案</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>订单页固定区（页头 → 筛选行）</td><td class="num" id="m-chrome-now">—</td><td class="num" id="m-chrome-new">—</td><td>去掉两个整行入口后省下的高度；页头不动、只滚卡片</td></tr>
+      <tr><td>待确认卡（2 道菜）</td><td class="num">269.8px</td><td class="num" id="m-card">—</td><td>整卡高度</td></tr>
+      <tr><td>卡上可点目标</td><td class="num">7 个</td><td class="num" id="m-targets">—</td><td>退菜 ×2 / 改人数 / 存组合 / 两个流转 / 标题链接</td></tr>
+      <tr><td>控件层数（菜品/工具/动作）</td><td class="num">3 层</td><td class="num">1 层</td><td>只剩一行动作</td></tr>
+      <tr><td>「历史」按钮（筛选行右端）</td><td class="num">—</td><td class="num" id="m-history">—</td><td>占原来「多选」圆钮的位置；插画位置不动（right:4px / 84×84）</td></tr>
+      <tr><td>「自己写一道」悬浮胶囊</td><td class="num">—</td><td class="num" id="m-write">—</td><td>压在 AI 球上方 12px（两者是页面级常驻件，不随卡片滚动）</td></tr>
+      <tr><td>「多选」圆钮</td><td class="num">31×31 圆钮</td><td class="num" id="m-multi">—</td><td>用户 2026-10-16 决定不做多选：这个位置让给「历史」，批量退菜随之取消</td></tr>
+      <tr><td>列表覆盖范围</td><td class="num">今天起 60 张卡（约一个月）</td><td class="num">今明后三天</td><td>更早、更远的都去「点单历史 / 备菜计划」；列表不再兼当历史</td></tr>
+      <tr><td>发现页「本周菜单」</td><td class="num">508.5px</td><td class="num">0（删）</td><td>同一批餐在订单页 / 备菜计划页已各有一份</td></tr>
+      <tr><td>发现页底部工具行</td><td class="num">—</td><td class="num" id="m-tools">—</td><td>常用组合 / 备菜计划</td></tr>
+      <tr><td>发现页删卡与加行的净变化</td><td class="num">本周菜单 508.5px</td><td class="num">工具行 42px</td><td>同一份数据下净省 ≈ 466px（数据出自线上实测）</td></tr>
+      <tr><td>列表底部留白</td><td class="num">14px</td><td class="num">120px</td><td>悬浮件高 106.8px；不留够时滚到底会把最后一张卡的动作行盖住（预览实测）</td></tr>
+      <tr><td>今明后三天之外怎么去</td><td class="num">—</td><td class="num">列表底一句入口</td><td>「更远的去备菜计划 →」（备菜页排 7 天）；历史里按日期往前翻</td></tr>
+    </tbody>
+  </table>
+</section>
+<p class="pv-foot">
+  现状值是在 127.0.0.1:5173 的 390px 视口上实测（getBoundingClientRect）；新方案值在本页同一块手机上量出。
+  暗色只用于检查颜色对比——应用当前只发布亮色。悬浮件在真机上是 fixed 定位，不随卡片滚动。
+</p>
+
+<script>
+  const b = document.body;
+  const h = (el) => el ? Math.round(el.getBoundingClientRect().height * 10) / 10 : 0;
+  const setPressed = (rootSel, attr, value) => {
+    document.querySelectorAll(rootSel + ' [data-' + attr + ']').forEach((el) => {
+      el.setAttribute('aria-pressed', String(el.dataset[attr] === value));
+    });
+  };
+  /** 临时改一个 body[data-*] 量隐藏块（预览专用测量手法） */
+  function withAttr(attr, value, fn) {
+    const prev = b.dataset[attr];
+    b.dataset[attr] = value;
+    void b.offsetHeight;
+    const result = fn();
+    b.dataset[attr] = prev;
+    void b.offsetHeight;
+    return result;
+  }
+  function bind(root, attr, fn) {
+    document.querySelectorAll(root + ' [data-' + attr + ']').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        b.dataset[attr] = btn.dataset[attr];
+        setPressed(root, attr, btn.dataset[attr]);
+        render();
+        if (fn) fn();
+      });
+    });
+  }
+  bind('#order-plans', 'order');
+  bind('#order-ctx', 'octx');
+  bind('#discover-plans', 'discover');
+  document.querySelector('#extras [data-gaps]').addEventListener('click', (e) => {
+    b.dataset.gaps = b.dataset.gaps === 'on' ? 'off' : 'on';
+    e.target.setAttribute('aria-pressed', String(b.dataset.gaps === 'on'));
+    render();
+  });
+  document.getElementById('theme').addEventListener('click', (e) => {
+    document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    e.target.setAttribute('aria-pressed', String(document.documentElement.dataset.theme === 'dark'));
+    e.target.textContent = document.documentElement.dataset.theme === 'dark' ? '切回亮色' : '暗色';
+  });
+
+  function render() {
+    const vis = (el) => el && getComputedStyle(el).display !== 'none';
+    const card = [...document.querySelectorAll('.order-card')].find(vis);
+    const planName = { A: '方案 A（推荐）', B: '方案 B（保守）', now: '现状复刻' }[b.dataset.order];
+    const ctxName = { pending: '待确认', done: '已做好' }[b.dataset.octx];
+
+    const annot = document.getElementById('order-annot');
+    if (annot) {
+      let text = '<b>' + planName + '</b> · ' + ctxName + '。';
+      if (b.dataset.order === 'now') {
+        text += '顶部是当前线上样式：两个整行入口占着固定区，筛选行右侧是一枚无文字的「多选」圆钮。';
+      } else {
+        text += '结构：菜品区不挂按钮；统计与人数收进一条信息行（「改」是文字入口，只对掌勺人与帮厨出现）；' +
+          '「存组合」「再点一次」降为无边框文字；主操作实心药丸。' +
+          '列表只铺今明后三天；「历史」占原来「多选」圆钮的位置（用户 2026-10-16 定：不做多选了）。';
+        text += b.dataset.order === 'B'
+          ? ' 方案 B 保留「退我这份」，降成行尾浅色文字（能力与现状一致）。'
+          : ' 方案 A 把逐份退菜收进详情页的「谁点了什么」。';
+      }
+      annot.innerHTML = text;
+    }
+    const dAnnot = document.getElementById('discover-annot');
+    if (dAnnot) {
+      dAnnot.innerHTML = b.dataset.discover === 'new'
+        ? '<b>新方案</b>：删掉「本周菜单」整卡（同一批餐在订单页 / 备菜计划页已各有一份），' +
+          '两个工具入口收成底部一行胶囊。缺口提示行为可选件，默认关闭。'
+        : '<b>现状复刻</b>：今天吃什么 + 家人最爱 + 本周菜单 508.5px，页面要滚才看得全。';
+    }
+
+    // 固定区高度（现状 vs 新）
+    const chrome = document.getElementById('order-chrome');
+    const chromeNow = withAttr('order', 'now', () => h(chrome));
+    const chromeNew = withAttr('order', 'A', () => h(chrome));
+    const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    setTxt('m-chrome-now', Math.round(chromeNow) + 'px');
+    setTxt('m-chrome-new', Math.round(chromeNew) + 'px');
+    setTxt('m-card', (b.dataset.order === 'now' ? 269.8 : h(card)) + 'px');
+    setTxt('m-targets', b.dataset.order === 'now' ? '7 个' : (b.dataset.order === 'B' ? '5 个' : '3 个'));
+    const hist = document.querySelector('.hist-pill');
+    setTxt('m-history', hist ? Math.round(hist.getBoundingClientRect().width) + '×' + h(hist) + ' 药丸' : '—');
+    setTxt('m-write', h(document.querySelector('.write-pill')) + 'px 高');
+    const multi = document.querySelector('.multi-ico');
+    setTxt('m-multi', b.dataset.order === 'now'
+      ? Math.round(multi.getBoundingClientRect().width) + '×' + Math.round(h(multi)) + ' 圆钮'
+      : '0（不做多选）');
+    setTxt('m-tools', b.dataset.discover === 'new' ? Math.round(h(document.querySelector('.discover-tools'))) + 'px' : '—');
+  }
+  render();
+</script>
+</body>
+</html>

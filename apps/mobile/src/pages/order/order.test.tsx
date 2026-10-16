@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { AxiosRequestConfig } from 'axios'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { readFileSync } from 'node:fs'
@@ -19,8 +19,12 @@ import OrderPage from './OrderPage'
 // 点菜单（M3 / F3-01~F3-05）的判定核心：
 // - 状态机不吃前端硬编码：卡片按钮来自后端下发的 nextActions（所以后端算错角色，这里也会照出来）；
 // - 计数徽标用后端给的 counts（切换筛选时其它状态的数字不能被清成 0）；
-// - 取消整餐要二次确认，撤回自己点的菜也要问一句；
+// - 取消整餐要二次确认；
 // - 没加入家庭时给引导，不去撞后端 404。
+//
+// 2026-10-16 列表改版（用户：「不要多选了，这块永远就展示今明后三天的菜单」）之后，
+// 这一页**不再有多选/批量退菜**，也**不再在卡片上逐份退菜**——那两件事都收进了这一餐的
+// 详情页（在那里验，见 OrderDetailPage.test.tsx）。这一份里与之相关的用例随之删掉。
 
 const clients: QueryClient[] = []
 
@@ -169,7 +173,27 @@ function boardFixture(
     CANCELED: 0,
   }
   for (const card of cards) counts[card.status] += 1
-  return { cards, counts, scope: 'family', ...overrides }
+  // 三天之外还有几餐（列表只看今明后三天）：默认 0，需要时由用例覆盖
+  return { cards, counts, scope: 'family', beyondCount: 0, ...overrides }
+}
+
+/*
+ * 卡片标题说人话：今天/明天/后天，再远的写月-日（OrderPage 的 `labelOfDay`）。
+ *
+ * 夹具的日期是**写死**的（2026-10-13 这类），所以断言不能写死标题：同一个夹具今天跑出来是
+ * 「10-13 · 晚餐」，在 10-13 那天跑就变成「今天 · 晚餐」。这里按同一套说法算出来，
+ * 免得这一批用例在某几天集体变红；规则本身另有一条用例（见「卡片标题说人话」）。
+ */
+function dayKey(offsetDays: number): string {
+  const now = new Date()
+  const at = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offsetDays)
+  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`
+}
+
+function headingOf(date: string, mealLabel = '晚餐'): string {
+  const day =
+    date === dayKey(0) ? '今天' : date === dayKey(1) ? '明天' : date === dayKey(2) ? '后天' : date.slice(5)
+  return `${day} · ${mealLabel}`
 }
 
 /** 页面同时用 /family、/orders、/orders/options 与 /notifications（卡片上的未读标记） */
@@ -247,8 +271,9 @@ it('把后端给的下一步渲染成按钮：待确认时有「选好了」与�
   mockGet({ boards: { family: boardFixture() } })
   renderOrder()
 
-  expect(await screen.findByText('2026-10-13 · 晚餐')).toBeTruthy()
-  expect(screen.getByText('妈妈 · 小满 点的')).toBeTruthy()
+  expect(await screen.findByText(headingOf('2026-10-13'))).toBeTruthy()
+  // 谁点的 + 几点提交（日期已由标题承担，这里不再重复一个日期）
+  expect(screen.getByText(/^妈妈 · 小满 点的 · \d{2}:\d{2} 提交$/)).toBeTruthy()
   expect(screen.getByRole('button', { name: '选好了' })).toBeTruthy()
   expect(screen.getByRole('button', { name: '取消这餐' })).toBeTruthy()
 })
@@ -261,7 +286,9 @@ it('卡片显示份数、谁交代的备注，以及「我」点了几份', asyn
   expect(screen.getByText('×2')).toBeTruthy()
   // 备注跟着菜走（F3-05）
   expect(screen.getByText('妈妈：少放盐')).toBeTruthy()
-  expect(screen.getByText('共 2 道 · 2 人点了（含我点的 1 份）')).toBeTruthy()
+  // 统计收成**一条信息行**（2026-10-16 改版：原来散在四处，每处都在说同一档事）
+  const info = document.querySelector('.order-card__info') as HTMLElement
+  expect(info.textContent).toContain('共 2 道 · 2 人点了 · 含我 1 份')
 })
 
 it('吃货的点单：后端没给 nextActions 就一个流转按钮都不显示', async () => {
@@ -274,11 +301,11 @@ it('吃货的点单：后端没给 nextActions 就一个流转按钮都不显示
   })
   renderOrder()
 
-  expect(await screen.findByText('2026-10-13 · 晚餐')).toBeTruthy()
+  expect(await screen.findByText(headingOf('2026-10-13'))).toBeTruthy()
   expect(screen.queryByRole('button', { name: '选好了' })).toBeNull()
   expect(screen.queryByRole('button', { name: '取消这餐' })).toBeNull()
-  // 但自己点的菜仍能撤回（这是 order.create 的附带动作，不是管理动作）
-  expect(screen.getByRole('button', { name: '退掉我这份' })).toBeTruthy()
+  // 而"我点了几份"这条信息照旧（吃货要知道自己点了什么，跟能不能管理这一餐无关）
+  expect(screen.getByText(/含我 1 份/)).toBeTruthy()
 })
 
 /*
@@ -388,7 +415,7 @@ it('还在收集中的那一餐不显示留痕（没有"谁定的"这回事）',
   })
   renderOrder()
 
-  expect(await screen.findByText('2026-10-13 · 晚餐')).toBeTruthy()
+  expect(await screen.findByText(headingOf('2026-10-13'))).toBeTruthy()
   expect(screen.queryByText(/定下这餐/)).toBeNull()
 })
 
@@ -432,49 +459,31 @@ it('取消整餐要二次确认：取消不请求，确认才发（且文案说�
   )
 })
 
-it('退掉一道菜也要确认：不点确认不会发请求', async () => {
+/*
+ * 逐份退菜**从列表搬去详情页**（2026-10-16 改版：用户「订单页的卡片又显的很乱」）。
+ *
+ * 原样是每道菜行尾挂一颗「退掉我这份」药丸，两道菜就是右侧一列药丸，而那张卡上还有
+ * 一整排工具与流转按钮。现在列表回到"扫一眼就知道这一顿有什么"，退谁的那一份在详情页
+ * ——那里按人分组，弹窗会把"退的是谁的"点名（**行为用例在 OrderDetailPage.test.tsx**：
+ * 每一份都能退、别人那一份点明是谁的、做好了就封口）。
+ *
+ * 这一条守的是**别把药丸又加回列表**（它是用户明说"很乱"的那一层），
+ * 同时守住"整卡可点"的前提还成立：菜品区里没有任何可交互元素，点菜名就是点这张卡。
+ */
+it('列表卡片上不再有逐份退菜的按钮：菜品区只有文字，整块让给"点进详情"', async () => {
   mockGet({ boards: { family: boardFixture() } })
-  const del = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: cardFixture() } as never)
   renderOrder()
 
-  fireEvent.click(await screen.findByRole('button', { name: '退掉我这份' }))
-  const dialog = await screen.findByRole('dialog')
-  expect(within(dialog).getByText(/把「番茄炒蛋」从这餐里退掉/)).toBeTruthy()
-
-  fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-  expect(del).not.toHaveBeenCalled()
-
-  fireEvent.click(screen.getByRole('button', { name: '退掉我这份' }))
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '退掉' }))
-  await waitFor(() => expect(del).toHaveBeenCalledWith('/orders/items/i1'))
+  await screen.findByText('番茄炒蛋')
+  const dishArea = document.querySelector('.order-card__dishes') as HTMLElement
+  expect(dishArea).toBeTruthy()
+  expect(dishArea.querySelectorAll('button, a, input')).toHaveLength(0)
+  // 两道菜的名字与份数都还在（去掉的是按钮，不是信息）
+  expect(screen.getByText('红烧排骨')).toBeTruthy()
+  expect(screen.getByText('×2')).toBeTruthy()
 })
 
-it('别人点的菜不显示撤回入口（只有我点过的才有）', async () => {
-  mockGet({
-    boards: {
-      family: boardFixture([
-        cardFixture({
-          mineCount: 0,
-          dishes: [
-            { recipeId: 'r2', name: '红烧排骨', image: null, count: 1, notes: [], mineItemIds: [] },
-          ],
-        }),
-      ]),
-    },
-  })
-  renderOrder()
-
-  expect(await screen.findByText('红烧排骨')).toBeTruthy()
-  expect(screen.queryByRole('button', { name: '退掉我这份' })).toBeNull()
-})
-
-it('「已安排」也还留着退的入口（口径 2026-10-15：到「正在做」为止都能退）', async () => {
-  /*
-   * 原来这条断言的是"已安排就不再显示撤回"——那条规矩已经改了：
-   * 菜单定了不等于不能少一道菜（家里没那食材、有人临时不回来吃），
-   * 所以现在只有「做好了」才封口（后端 `canRemoveItem`）。
-   */
+it('「已安排」的那一餐仍然给得出下一步按钮（状态机照旧，改的只是卡片的排版）', async () => {
   mockGet({
     boards: {
       family: boardFixture([
@@ -489,21 +498,22 @@ it('「已安排」也还留着退的入口（口径 2026-10-15：到「正在�
   renderOrder()
 
   expect(await screen.findByRole('button', { name: '开始做' })).toBeTruthy()
-  expect(screen.getByRole('button', { name: '退掉我这份' })).toBeTruthy()
 })
 
-it('「做好了」才收回退的入口（成品不再是能改的东西）', async () => {
+it('「做好了」的一餐：卡片上给的是成品照，而不是能改的东西', async () => {
   mockGet({
     boards: {
       family: boardFixture([
-        cardFixture({ status: 'DONE', statusLabel: '已做好', nextActions: [] }),
+        cardFixture({ status: 'DONE', statusLabel: '已做好', nextActions: [], photoCount: 1 }),
       ]),
     },
   })
   renderOrder()
 
-  expect(await screen.findByText('2026-10-13 · 晚餐')).toBeTruthy()
-  expect(screen.queryByRole('button', { name: '退掉我这份' })).toBeNull()
+  expect(await screen.findByText(headingOf('2026-10-13'))).toBeTruthy()
+  // 流转按钮一个都不给（后端 nextActions 为空），能点的只剩"看照片/传照片"那一档
+  expect(screen.queryByRole('button', { name: '选好了' })).toBeNull()
+  expect(screen.getByRole('button', { name: '📷 再传一张' })).toBeTruthy()
 })
 
 it('切换「只看我的」按 scope 重新取数（两个视角各自一片缓存）', async () => {
@@ -555,6 +565,7 @@ it('筛选后列表为空时给出空态而不是空白', async () => {
         cards: [],
         counts: { ALL: 1, PENDING: 1, PLANNED: 0, COOKING: 0, DONE: 0, CANCELED: 0 },
         scope: 'family',
+        beyondCount: 0,
       },
     },
   })
@@ -562,8 +573,8 @@ it('筛选后列表为空时给出空态而不是空白', async () => {
 
   // 正在准备中：0 条 → 这个 chip 本来不显示，所以直接用手动筛选是点不到的；
   // 改验「全部」为空时的空态（同一段渲染逻辑）
-  await screen.findByText('2026-10-13 · 晚餐')
-  expect(screen.queryByText('还没有人点菜')).toBeNull()
+  await screen.findByText(headingOf('2026-10-13'))
+  expect(screen.queryByText('这三天还没有人点菜')).toBeNull()
 })
 
 it('一单都没有时给空态与点菜引导', async () => {
@@ -573,12 +584,14 @@ it('一单都没有时给空态与点菜引导', async () => {
         cards: [],
         counts: { ALL: 0, PENDING: 0, PLANNED: 0, COOKING: 0, DONE: 0, CANCELED: 0 },
         scope: 'family',
+        beyondCount: 0,
       },
     },
   })
   renderOrder()
 
-  expect(await screen.findByText('还没有人点菜')).toBeTruthy()
+  // 空态的说法跟着列表窗口走：看的就是这三天，所以是"这三天还没有人点菜"
+  expect(await screen.findByText('这三天还没有人点菜')).toBeTruthy()
   // 空态要把两条路都说出来：去菜谱挑，或者自己写一道（F3-10）
   expect(screen.getByText(/点「想吃这道」/)).toBeTruthy()
   expect(screen.getByText(/也可以自己写一道/)).toBeTruthy()
@@ -591,6 +604,7 @@ it('点菜单上有「自己写一道」入口，点开是填写抽屉（F3-10�
         cards: [],
         counts: { ALL: 0, PENDING: 0, PLANNED: 0, COOKING: 0, DONE: 0, CANCELED: 0 },
         scope: 'family',
+        beyondCount: 0,
       },
     },
   })
@@ -601,21 +615,40 @@ it('点菜单上有「自己写一道」入口，点开是填写抽屉（F3-10�
   expect(await screen.findByPlaceholderText('如：外婆的糖醋小排')).toBeTruthy()
 })
 
-it('「点单历史」与「自己写一道」并排在同一行里', async () => {
+/*
+ * 这两个入口的位置在 2026-10-16 定了（用户：「历史按钮放在筛选右侧吧」、
+ * 「自己写一道可以用悬浮的」）。它们**不再是并排的一行**——原先是固定区里的一整行
+ * （`.order-shortcuts`），三件事里它最重，现在各自按自己的分量摆：
+ *
+ * - 「历史」进筛选行最右：它与 chips 同一行、与卡片同一条右栏距，但**不在 chips 那个横滚容器里**
+ *   （不然选后面几个状态时它会被一起滚走）；
+ * - 「自己写一道」成悬浮胶囊（`.order-write`）：压在 AI 球正上方，全页常驻、不占列表高度。
+ *
+ * jsdom 算不了布局，所以守的是**决定这件事的结构**：谁挂在谁下面、在不在固定区里。
+ */
+it('「历史」在筛选行最右（不在 chips 的横滚容器里）；「自己写一道」是悬浮胶囊', async () => {
   mockGet({ boards: { family: boardFixture() } })
   renderOrder()
 
-  // 两个入口随 family 数据一起出现，先等它们渲染出来再断言结构
-  const historyEntry = await screen.findByRole('link', { name: /点单历史/ })
-  const freeEntry = screen.getByRole('button', { name: /自己写一道/ })
-
-  // 两个入口同为"进另一个地方"的动作，各占半行（用户 2026-10-13 要求并排）。
-  // 这里是 DOM 结构断言：分行的样式（.order-shortcuts 的 flex）挂在这一个共同父节点上，
-  // 谁被移出去谁就会掉回整行——jsdom 算不了布局，守着这个父节点才守得住"在同一行"。
-  const row = document.querySelector('.order-shortcuts')
+  const historyEntry = await screen.findByRole('link', { name: /历史/ })
+  const row = document.querySelector('.order-filter') as HTMLElement
   expect(row).toBeTruthy()
+  // ① 同一行、且是这一行的最后一个子节点（贴右）
   expect(historyEntry.parentElement).toBe(row)
-  expect(freeEntry.parentElement).toBe(row)
+  expect(row.lastElementChild).toBe(historyEntry)
+  // ② chips 那一截（第一个子节点）才是横滚容器，历史不在里面
+  expect(row.firstElementChild?.contains(historyEntry)).toBe(false)
+
+  // ③ 「自己写一道」**不在固定区**、也不是列表里的一行：它是一个悬在最上层的按钮
+  const freeEntry = screen.getByRole('button', { name: /自己写一道/ })
+  expect(document.querySelector('.order-shortcuts')).toBeNull()
+  expect(freeEntry.closest('.page__fixed')).toBeNull()
+  const css = readFileSync(join(__dirname, './order.scss'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const write = css.match(/\.order-write\s*\{[\s\S]*?\n\}/)?.[0] ?? ''
+  expect(write, '没读到 .order-write 规则').toBeTruthy()
+  expect(write, '悬浮胶囊要脱离文档流才不占列表高度').toMatch(/position:\s*fixed/)
+  // 它压不住最后一排按钮：列表尾部要留出悬浮件的空档（预览里实测盖住了动作行）
+  expect(css).toMatch(/\.order-float-tail\s*\{[\s\S]*?height:\s*9[0-9]px|\.order-float-tail\s*\{[\s\S]*?height:\s*1[0-9][0-9]px/)
 })
 
 it('还没加入家庭时不显示「自己写一道」（点菜是家庭内的协作）', async () => {
@@ -661,7 +694,7 @@ it('一张成品照都没有时只说上传，不提"去看看"（没东西可�
   })
   renderOrder()
 
-  expect(await screen.findByRole('button', { name: '📷 上传这餐的成品照' })).toBeTruthy()
+  expect(await screen.findByRole('button', { name: '📷 传成品照' })).toBeTruthy()
   expect(screen.queryByText(/张成品照，去看看/)).toBeNull()
 })
 
@@ -692,7 +725,11 @@ it('定过人数就同时给出"几人吃"与"几人点了"（前者含没点菜
   mockGet({ boards: { family: boardFixture([cardFixture({ mealKey: 'd2', dinerCount: 5, ordererCount: 2 })]) } })
   renderOrder()
 
-  expect(await screen.findByRole('button', { name: /5 人吃（2 人点了）/ })).toBeTruthy()
+  // 人数在右边那颗按钮上，点单人数在左边的半句里——两个数各说各的事，不能合成一个
+  expect(await screen.findByRole('button', { name: /5 人吃/ })).toBeTruthy()
+  const stats = document.querySelector('.order-card__info > span') as HTMLElement
+  expect(stats.textContent).toContain('2 人点了')
+  expect(stats.textContent).not.toContain('5 人')
 })
 
 it('点人数那行会打开定人数的抽屉', async () => {
@@ -730,7 +767,7 @@ it('还在收集中的那一餐不给这个入口（要加菜直接点那道菜�
   })
   renderOrder()
 
-  expect(await screen.findByText('2026-10-13 · 晚餐')).toBeTruthy()
+  expect(await screen.findByText(headingOf('2026-10-13'))).toBeTruthy()
   expect(screen.queryByRole('button', { name: '🔁 再点一次' })).toBeNull()
 })
 
@@ -837,26 +874,25 @@ it('整桌都已经有了：只说"都有了"，不编一个"加了 0 道"', asy
  * 卡片进详情（用户 2026-10-15：「订单里卡片增加下详情吧，可以点击进去看详细的」）。
  *
  * 这里验的是**入口能不能用**，以及那条最容易踩坏的边界：整卡 onClick 挂在外层，
- * 而卡片里有一堆真按钮——点内层按钮**不能**顺带把人带去详情页
- * （点「退掉我这份」结果跳走了，是最典型的那种"点错了还不知道为什么"）。
+ * 而卡片里还有真按钮——点内层按钮**不能**顺带把人带去详情页
+ * （点「选好了」结果跳走了，是最典型的那种"点错了还不知道为什么"）。
  */
 it('点卡片空白处进这一餐的详情', async () => {
   mockGet({ boards: { family: boardFixture() } })
   renderOrder()
 
-  const date = await screen.findByText('2026-10-13 · 晚餐')
+  const date = await screen.findByText(headingOf('2026-10-13'))
   fireEvent.click(date)
   expect(await screen.findByText('这一餐详情')).toBeTruthy()
 })
 
-it('点卡片里的按钮（退掉我这份）**不会**误进详情页', async () => {
+it('点卡片里的按钮（选好了）**不会**误进详情页', async () => {
   mockGet({ boards: { family: boardFixture() } })
   renderOrder()
 
-  const withdraw = await screen.findByRole('button', { name: '退掉我这份' })
-  fireEvent.click(withdraw)
-  // 走的是退菜的二次确认，不是跳详情
-  expect(await screen.findByText(/退掉后要重新加一次/)).toBeTruthy()
+  fireEvent.click(await screen.findByRole('button', { name: '选好了' }))
+  // 走的是"定这一餐"的汇总视图，不是跳详情
+  expect(await screen.findByText('定下这一餐')).toBeTruthy()
   expect(screen.queryByText('这一餐详情')).toBeNull()
 })
 
@@ -864,8 +900,12 @@ it('卡片标题区是真链接：键盘与读屏也能进详情（不只是鼠�
   mockGet({ boards: { family: boardFixture() } })
   renderOrder()
 
-  await screen.findByText('2026-10-13 · 晚餐')
-  const links = screen.getAllByRole('link', { name: /2026-10-13/ })
+  await screen.findByText(headingOf('2026-10-13'))
+  /*
+   * 标题区那条链接的可达名是**整块**（日期 + 谁点的 + 提交时间），所以按前缀匹配。
+   * 页面别处还有「历史」「去备菜计划」等链接，但它们不含这个日期，不会误命中。
+   */
+  const links = screen.getAllByRole('link', { name: new RegExp(headingOf('2026-10-13')) })
   expect(links.length).toBe(1)
   expect(links[0].getAttribute('href')).toBe('/order/2026-10-13-DINNER')
 })
@@ -963,7 +1003,7 @@ it('一餐两条未读时都念得出来，且「做好了」在前（哪个更�
   })
   renderOrder()
 
-  await screen.findByText('2026-10-13 · 晚餐')
+  await screen.findByText(headingOf('2026-10-13'))
   // 角标写在**卡片右上角**（用户 2026-10-14 说标题行里的标记他根本没看见），
   // 一餐最多两条，并排念在一颗角标里（`A · B`），不叠两颗
   expect(document.querySelector('.order-card__corner')?.textContent).toBe('做好了 · 选好了')
@@ -996,7 +1036,7 @@ it('已读的那条不留标记（标过了还挂着，用户会以为没生效�
   })
   renderOrder()
 
-  await screen.findByText('2026-10-13 · 晚餐')
+  await screen.findByText(headingOf('2026-10-13'))
   expect(screen.queryByText('做好了')).toBeNull()
   expect(document.querySelector('.order-card')?.className).not.toContain('is-unread')
 })
@@ -1039,7 +1079,7 @@ it('再点一次订单 Tab：滚到那条未读提醒所在的卡', async () => 
     },
   })
   renderOrder()
-  await screen.findByText('2026-10-13 · 晚餐')
+  await screen.findByText(headingOf('2026-10-13'))
 
   emitTabRetap('/order')
   await waitFor(() => expect(scrollSpy).toHaveBeenCalled())
@@ -1083,14 +1123,14 @@ it('那条提醒的卡被筛选挡住时：放开筛选再滚（用户要的是"
     },
   })
   renderOrder()
-  await screen.findByText('2026-10-13 · 晚餐')
+  await screen.findByText(headingOf('2026-10-13'))
 
   fireEvent.click(screen.getByRole('tab', { name: '只看我的' }))
-  await waitFor(() => expect(screen.queryByText('2026-10-12 · 午餐')).toBeNull())
+  await waitFor(() => expect(screen.queryByText(headingOf('2026-10-12', '午餐'))).toBeNull())
 
   emitTabRetap('/order')
   // 它自己切回「全家点菜单」，那张卡回来了，然后才滚
-  await waitFor(() => expect(screen.getByText('2026-10-12 · 午餐')).toBeTruthy())
+  await waitFor(() => expect(screen.getByText(headingOf('2026-10-12', '午餐'))).toBeTruthy())
   await waitFor(() => expect(scrollSpy).toHaveBeenCalled())
 })
 
@@ -1132,35 +1172,18 @@ it('只有「该备菜」未读时：列表顶上说一句，去处是备菜页�
 })
 
 /*
- * 长按多选 + 批量退菜（用户 2026-10-15：「订单里面的卡片要能删除，可以用那个按住显示单选框，
- * 然后底部或上部有批量操作的功能，退菜这种的」）。
+ * 列表只看今明后三天（2026-10-16 用户定：「这块永远就展示今明后三天的菜单，其余历史的都放入历史中」）。
  *
- * 这一组盯四件事：
- * ① 长按**进选择模式并选中这一张**，短按仍然进详情（两个手势不能互相吃掉）；
- * ② 选择模式下点卡片=勾选/取消，**不跳详情**（这时候跳走等于把多选打断）；
- * ③ 批量退菜**逐餐发请求**，全成→退出选择模式、有失败→只留失败那些（部分成功要说清）；
- * ④ 「做好了」的餐退不掉：按钮禁用 + **写明原因**（D-066：点不动又不解释最糟）。
+ * 多选与批量退菜（原来这一整组用例守的东西）**整条不做**了——用户先前的判断是那块"也不好看"，
+ * 最终选择是删掉：逐份退菜在详情页，整餐取消在卡片上，批量退菜这个入口没有第三条出路。
+ *
+ * 这一组改成守收窗之后的三件事：
+ * ① 超过三天的餐**不进列表**（窗口由后端给，前端不自己按日期筛）；
+ * ② 三天之外还剩多少餐由后端数（`beyondCount`），真有才给那一句，0 时一句不提；
+ * ③ 那一句的去处是备菜计划——收窗之后那些餐唯一的家。
  */
 
-/**
- * 长按一张卡。**用真计时器等 600ms**，不用 `vi.useFakeTimers()`：
- * 这一页的数据来自 react-query，而 `findBy*`/`waitFor` 都靠真计时器——
- * 换成假计时器之后整条测试会一路等到超时（写这组时踩到的第一个坑）。
- *
- * 手势要**走完整**（按下 → 等 → 抬起 → 浏览器补的那次 click）：只按下不抬起的话，
- * 页面的"吐掉长按后那次点击"标记没人消费，会把它**后面**那次点击也吞掉，
- * 测试看到的就是"点第二张卡没反应"——真机抬手必定补那次 click，是模拟漏了一步。
- */
-async function longPress(element: HTMLElement) {
-  fireEvent.pointerDown(element, { button: 0, clientX: 10, clientY: 10 })
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 600))
-  })
-  fireEvent.pointerUp(element)
-  fireEvent.click(element)
-}
-
-/** 造两张卡（不同餐次），用于多选 */
+/** 造两张卡（不同餐次），用于滑动/滚动那一组 */
 const twoCards = () =>
   boardFixture([
     cardFixture(),
@@ -1172,166 +1195,32 @@ const twoCards = () =>
     }),
   ])
 
-it('长按卡片进选择模式并选中它；短按仍然进详情', async () => {
+it('列表只画后端给的那几餐：三天之外的餐不在这一页，也不在计数里', async () => {
+  // 后端已经把窗口之外的行过滤掉了（`listWindowDays`），前端只画收到的卡片
   mockGet({ boards: { family: twoCards() } })
   renderOrder()
 
-  const card = await screen.findByText('2026-10-13 · 晚餐')
-  const article = card.closest('article') as HTMLElement
-
-  // 先来一次短按（不到 500ms）：不该进选择模式
-  fireEvent.pointerDown(article, { button: 0, clientX: 10, clientY: 10 })
-  fireEvent.pointerUp(article)
-  expect(screen.queryByText(/已选 /)).toBeNull()
-
-  // 长按：进选择模式、并选中这一张
-  await longPress(article)
-
-  expect(await screen.findByText('已选 1 餐')).toBeTruthy()
-  expect(article.getAttribute('aria-checked')).toBe('true')
+  await screen.findByText(headingOf('2026-10-13'))
+  expect(document.querySelectorAll('.order-card').length).toBe(2)
+  // 卡片列表里没有"还有更远的餐"这种占位行——窗口之外的东西只在下面那一句里提
+  expect(screen.queryByText(/三天之外/)).toBeNull()
 })
 
-it('选择模式下点卡片是勾选/取消，不再跳详情；「全选」一次选中全部', async () => {
-  mockGet({ boards: { family: twoCards() } })
+it('三天之外还有安排时给一句真话与去处；为 0 时一个字都不说', async () => {
+  mockGet({ boards: { family: boardFixture([cardFixture()], { beyondCount: 4 }) } })
   renderOrder()
 
-  const article = (await screen.findByText('2026-10-13 · 晚餐')).closest('article') as HTMLElement
-  await longPress(article)
-  expect(await screen.findByText('已选 1 餐')).toBeTruthy()
-
-  // 点另一张卡 → 变成两张
-  const other = (await screen.findByText('2026-10-14 · 午餐')).closest('article') as HTMLElement
-  fireEvent.click(other)
-  expect(await screen.findByText('已选 2 餐')).toBeTruthy()
-  expect(screen.queryByText('这一餐详情')).toBeNull()
-
-  // 再点一次 → 取消（不是又选中）
-  fireEvent.click(other)
-  expect(await screen.findByText('已选 1 餐')).toBeTruthy()
-
-  // 全选
-  fireEvent.click(screen.getByRole('button', { name: '全选' }))
-  expect(await screen.findByText('已选 2 餐')).toBeTruthy()
+  const hint = await screen.findByText(/还有 4 餐在三天之外/)
+  expect(hint.textContent).toContain('去备菜计划')
+  expect(hint.querySelector('a')?.getAttribute('href')).toBe('/prep')
 })
 
-it('批量退菜：逐餐发请求，全成之后退出选择模式', async () => {
-  mockGet({ boards: { family: twoCards() } })
-  const del = vi.spyOn(apiClient, 'delete').mockResolvedValue({ data: cardFixture() } as never)
+it('beyondCount 为 0 时不留那句（宁可没有入口，也不要一个空去处）', async () => {
+  mockGet({ boards: { family: boardFixture() } })
   renderOrder()
 
-  const article = (await screen.findByText('2026-10-13 · 晚餐')).closest('article') as HTMLElement
-  await longPress(article)
-
-  fireEvent.click(await screen.findByRole('button', { name: '全选' }))
-  fireEvent.click(screen.getByRole('button', { name: '退菜' }))
-
-  // 二次确认里要把"退掉哪些餐"说清（这是不可逆的）
-  const dialog = await screen.findByRole('dialog')
-  expect(within(dialog).getByText(/全部.*退掉|把 .*里的菜/)).toBeTruthy()
-  fireEvent.click(within(dialog).getByRole('button', { name: '全退掉' }))
-
-  await waitFor(() => expect(del).toHaveBeenCalledTimes(2))
-  expect(del.mock.calls.map((call) => call[0]).sort()).toEqual([
-    '/orders/meals/2026-10-13-DINNER/items',
-    '/orders/meals/2026-10-14-LUNCH/items',
-  ])
-  // 全成 → 退出选择模式（选择条消失）
-  await waitFor(() => expect(screen.queryByText(/已选 /)).toBeNull())
-})
-
-it('批量退菜部分失败：只把失败的那一餐留在选中状态（不假装全成了）', async () => {
-  mockGet({ boards: { family: twoCards() } })
-  const del = vi.spyOn(apiClient, 'delete').mockImplementation((url: string) => {
-    if (url === '/orders/meals/2026-10-14-LUNCH/items') {
-      return Promise.reject(new Error('这一餐已经「做好了」了'))
-    }
-    return Promise.resolve({ data: cardFixture() } as never)
-  })
-  renderOrder()
-
-  const article = (await screen.findByText('2026-10-13 · 晚餐')).closest('article') as HTMLElement
-  await longPress(article)
-
-  fireEvent.click(await screen.findByRole('button', { name: '全选' }))
-  fireEvent.click(screen.getByRole('button', { name: '退菜' }))
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '全退掉' }))
-
-  // 还留在选择模式里，且只剩没退成的那一餐
-  await waitFor(() => expect(del).toHaveBeenCalledTimes(2))
-  expect(await screen.findByText('已选 1 餐')).toBeTruthy()
-  expect(
-    (await screen.findByText('2026-10-14 · 午餐')).closest('article')?.getAttribute('aria-checked'),
-  ).toBe('true')
-})
-
-it('「做好了」的餐退不掉：按钮禁用并写明原因（不是静默不理人）', async () => {
-  mockGet({
-    boards: {
-      family: boardFixture([
-        cardFixture({ status: 'DONE', statusLabel: '已做好', nextActions: [] }),
-      ]),
-    },
-  })
-  renderOrder()
-
-  const article = (await screen.findByText('2026-10-13 · 晚餐')).closest('article') as HTMLElement
-  await longPress(article)
-
-  const go = await screen.findByRole('button', { name: '退菜' })
-  expect((go as HTMLButtonElement).disabled).toBe(true)
-  expect(screen.getByText(/已经「做好了」.*去点单历史/)).toBeTruthy()
-})
-
-/*
- * 「多选」的入口位置与形态（用户 2026-10-15 两次定位置）：
- * ① 「多选按钮位置不对」（当时是筛选行里一枚**文字**胶囊，看着像第 4 个 chip）→ 先搬去页头；
- * ② 看过之后定稿：「多选按钮位置放到全部那行的右侧，改成图标吧，注意左右空白间隙」。
- *
- * 所以这一条盯三件事：**在这一行最右**（与 chips 同一行、但不在它那个横滚容器里）、
- * **是图标**（没有文字，读屏靠 aria-label）、以及**左右间隙跟着卡片走**（`.order-filter` 吃
- * `var(--spacing-page)`，图标右边缘与卡片右边缘对齐）。
- */
-it('「多选」是筛选行最右的图标按钮（不跟着 chips 横滚、与卡片同一条栏距）', async () => {
-  mockGet({ boards: { family: twoCards() } })
-  renderOrder()
-
-  const multi = await screen.findByRole('button', { name: '多选' })
-  const row = document.querySelector('.order-filter') as HTMLElement
-  expect(row).toBeTruthy()
-  // ① 与筛选胶囊同一行，且是这一行的**最后一个**子节点（靠右）
-  expect(multi.parentElement).toBe(row)
-  expect(row.lastElementChild).toBe(multi)
-  // ② chips 那一截（第一个子节点）才是横滚容器，多选不在里面
-  expect(row.firstElementChild?.contains(multi)).toBe(false)
-  // ③ 是**图标**：一个字都没有，图形在；名字走 aria-label（读屏照样念得出）
-  expect(multi.textContent?.trim()).toBe('')
-  expect(multi.querySelector('svg')).toBeTruthy()
-  expect(multi.getAttribute('aria-label')).toBe('多选')
-  expect(document.querySelector('.order-filter__manage')).toBeNull()
-
-  // ④ 样式：这一行吃页面栏距（左右间隙），图标 `flex: none` 不被压扁；
-  //    操作条（选择模式）也要有左右与上下的间隙——用户原话「左右间隙也没有，上下也没有」。
-  //    操作条那条规则 2026-10-16 搬去了 `shared.scss`（「原创的」也用同一套），所以两个文件一起读。
-  const css = [
-    readFileSync(join(__dirname, './order.scss'), 'utf8'),
-    readFileSync(join(__dirname, '../shared.scss'), 'utf8'),
-  ].join('\n').replace(/\/\*[\s\S]*?\*\//g, '')
-  const rule = (name: string) => css.match(new RegExp(`\\.${name}\\s*\\{[\\s\\S]*?\\n\\}`))?.[0] ?? ''
-  const filter = rule('order-filter')
-  expect(filter, '没读到 .order-filter 规则').toBeTruthy()
-  expect(filter).toMatch(/margin\s*:[^;]*var\(--spacing-page\)/)
-  const icon = rule('order-multi')
-  expect(icon, '没读到 .order-multi 规则').toBeTruthy()
-  expect(icon).toMatch(/flex:\s*none/)
-  expect(icon, '图标不该再用绝对定位（它现在在筛选行里）').not.toMatch(/position:\s*absolute/)
-  const bar = rule('pick-bar')
-  expect(bar, '没读到 .pick-bar 规则').toBeTruthy()
-  expect(bar, '操作条要左右留栏距、上下留呼吸').toMatch(/margin\s*:\s*10px\s+var\(--spacing-page\)/)
-
-  // ⑤ 进了选择模式它自己退场（那时候整条操作条已经有一排按钮）
-  await longPress((await screen.findByText('2026-10-13 · 晚餐')).closest('article') as HTMLElement)
-  expect(await screen.findByText('已选 1 餐')).toBeTruthy()
-  expect(screen.queryByRole('button', { name: '多选' })).toBeNull()
+  await screen.findByText(headingOf('2026-10-13'))
+  expect(screen.queryByText(/三天之外/)).toBeNull()
 })
 
 /*
@@ -1353,7 +1242,7 @@ it('列表上往左划 → 切到下一个状态筛选（「全部」→「待�
   mockGet({ boards: { family: twoCards() } })
   renderOrder()
 
-  await screen.findByText('2026-10-13 · 晚餐')
+  await screen.findByText(headingOf('2026-10-13'))
   // 翻页区只在**有数据**时才有（加载中那一段不该是一块能划的空白，D-091）
   const area = document.querySelector('.swipe-pager') as HTMLElement
   expect(area).toBeTruthy()
@@ -1371,7 +1260,7 @@ it('拖动中间两页都在（邻页是当场画出来的：筛选在前端做�
   mockGet({ boards: { family: twoCards() } })
   renderOrder()
 
-  await screen.findByText('2026-10-13 · 晚餐')
+  await screen.findByText(headingOf('2026-10-13'))
   const pager = document.querySelector('.swipe-pager') as HTMLElement
   fireEvent.touchStart(pager, { touches: [{ clientX: 340, clientY: 400 }] })
   fireEvent.touchMove(pager, { touches: [{ clientX: 280, clientY: 400 }] })
@@ -1387,7 +1276,7 @@ it('在筛选胶囊那一行上划动**不换筛选**（那一行自己横着滚
   renderOrder()
 
   // 先等数据到位（筛选行与卡片是同一批数据渲染出来的），再拿那一行
-  await screen.findByText('2026-10-13 · 晚餐')
+  await screen.findByText(headingOf('2026-10-13'))
   const row = document.querySelector('.chips') as HTMLElement
   expect(row).toBeTruthy()
 
@@ -1408,7 +1297,7 @@ it('在筛选胶囊那一行上划动**不换筛选**（那一行自己横着滚
 it('页头区固定、翻页区只包卡片：段控与筛选行都在 SwipePager 外面（否则两个手势会抢）', async () => {
   mockGet({ boards: { family: twoCards() } })
   renderOrder()
-  await screen.findByText('2026-10-13 · 晚餐')
+  await screen.findByText(headingOf('2026-10-13'))
 
   const fixed = document.querySelector('.page__fixed') as HTMLElement
   const body = document.querySelector('.page__body') as HTMLElement
@@ -1421,15 +1310,15 @@ it('页头区固定、翻页区只包卡片：段控与筛选行都在 SwipePage
   const filterRow = fixed.querySelector('.order-filter') as HTMLElement
   expect(segmented).toBeTruthy()
   expect(filterRow).toBeTruthy()
-  // …而两个入口行（点单历史 / 自己写一道）也在固定区（页面级操作行）
-  expect(fixed.querySelector('.order-shortcuts')).toBeTruthy()
+  // …而「历史」也跟着筛选行一起在固定区里（它是页面级的去处，滚到第 6 张卡也该够得着）
+  expect(fixed.querySelector('.order-history')).toBeTruthy()
 
-  // ② 翻页区在主体里，而且**只包卡片**：段控 / 筛选行 / 操作行一个都不在里面
+  // ② 翻页区在主体里，而且**只包卡片**：段控 / 筛选行一个都不在里面
   const pager = body.querySelector('.swipe-pager') as HTMLElement
   expect(pager).toBeTruthy()
   expect(pager.querySelector('.segmented')).toBeNull()
   expect(pager.querySelector('.chips')).toBeNull()
-  expect(pager.querySelector('.order-shortcuts')).toBeNull()
+  expect(pager.querySelector('.order-history')).toBeNull()
   // 卡片确实在里面（不然上面那几条"不在里面"等于没验）
   expect(pager.querySelector('.order-card')).toBeTruthy()
 })
@@ -1447,7 +1336,7 @@ function swipeSelf(el: Element, fromX: number, toX: number, dy = 4) {
 it('段控往左划 → 切到「只看我的」（用户 2026-10-16：段控也能滑）', async () => {
   mockGet({ boards: { family: twoCards(), mine: boardFixture([], { scope: 'mine' }) } })
   renderOrder()
-  await screen.findByText('2026-10-13 · 晚餐')
+  await screen.findByText(headingOf('2026-10-13'))
 
   const segmented = document.querySelector('.segmented') as HTMLElement
   expect(segmented).toBeTruthy()
@@ -1464,7 +1353,7 @@ it('段控往左划 → 切到「只看我的」（用户 2026-10-16：段控也
 it('在段控上划动不会顺带换筛选（两个开关各管各的）', async () => {
   mockGet({ boards: { family: twoCards(), mine: boardFixture([], { scope: 'mine' }) } })
   renderOrder()
-  await screen.findByText('2026-10-13 · 晚餐')
+  await screen.findByText(headingOf('2026-10-13'))
 
   const segmented = document.querySelector('.segmented') as HTMLElement
   swipeSelf(segmented.querySelector('.segmented__item') as HTMLElement, 140, 30)
@@ -1482,7 +1371,7 @@ it('在段控上划动不会顺带换筛选（两个开关各管各的）', asyn
 it('段控是 tablist：读屏念得出"这组开关在换什么"，当前那一格是选中态', async () => {
   mockGet({ boards: { family: twoCards() } })
   renderOrder()
-  await screen.findByText('2026-10-13 · 晚餐')
+  await screen.findByText(headingOf('2026-10-13'))
 
   const group = screen.getByRole('tablist', { name: '看谁的点单' })
   expect(group).toBeTruthy()

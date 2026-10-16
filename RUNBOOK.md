@@ -6162,3 +6162,122 @@ cd apps/mobile/android && ./gradlew :app:assembleDebug && adb install -r app/bui
 `DECISIONS.md` **D-105 / D-106**、`RISKS.md` **R-86**、`RISKS.md` R-61 / R-64 / R-65（"活着但看不见"那一族）、
 `apps/mobile/src/lib/back-policy.ts`、`back-target.ts`、`back-go.ts`、`back-transition.ts`、
 `apps/mobile/src/components/ui/BackLink.tsx`、`RUNBOOK.md` **R-092**（滚动位置的测法）。
+
+## R-097 验「列表只铺三天 + 窗口之外的餐还到不到得了」怎么验（D-107 / R-87 配套，✅ 已验证，2026-10-16）
+
+### 一、什么时候用这个
+
+改了**点菜单的窗口（`LIST_DAY_SPAN`）、点菜窗口（`ORDER_DAY_SPAN`）、备菜计划的天数、
+或点单历史的行为**。这一族错有两个特征：**接口不报错**（窗口本身就是"少返回几行"），
+而真正要命的那一半是**别处的链接指向被收窄的那一页**——用户点下去落到空列表，
+页面自己不会说"我错了"（R-87）。
+
+### 二、四层证据（改前改后都跑一遍全量，数字要能对得上）
+
+```bash
+# ① 规则层（两个窗口的边界与 beyondCount 的关系）
+pnpm --dir services/api test src/../tests/orders.rules.test.ts   # 或 pnpm --dir services/api run test
+
+# ② 接线层（前端拿 beyondCount 画不画那一句、三天的卡片怎么排）
+pnpm --dir apps/mobile test src/pages/order/order.test.tsx src/pages/order/history/HistoryPage.test.tsx
+# 全量（改这一族动的是多处：新窗口 + 两个页面的链接 + 卡片结构）
+pnpm --dir apps/mobile run test && pnpm --dir apps/mobile exec tsc -b
+pnpm --dir services/api run test
+
+# ③ 真实请求层（真正取一次数，见下一节）
+# ④ 浏览器层（真的点一遍链接，见第四节）
+```
+
+### 三、真实请求：**五条餐次打在窗口的两侧**
+
+关键不是"三天以内的能返回"，而是**第 4 天和第 7 天的行为**。造数据脚本的骨架（用完即删）：
+
+```bash
+API=http://127.0.0.1:3100/api            # 起一个**跑新代码**的实例，别用旧容器
+TOKEN=$(curl -s -X POST $API/auth/register -H 'Content-Type: application/json' \
+  -d '{"account":"win'$(date +%s)'","password":"cook123456","nickname":"窗口","avatar":"🍳"}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+curl -s -X POST $API/family -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"name":"窗口家"}' >/dev/null
+for d in 0 1 2 3 6; do                    # 今天 / +1 / +2 / +3（窗口外） / +6（窗口外）
+  DAY=$(python3 -c "import datetime;print(datetime.date.today()+datetime.timedelta(days=$d))")
+  curl -s -X POST $API/orders/items -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"dishName\":\"验收菜-$DAY\",\"mealDate\":\"$DAY\",\"meal\":\"DINNER\"}" >/dev/null
+done
+curl -s "$API/orders" -H "Authorization: Bearer $TOKEN" | python3 -c '
+import sys,json;d=json.load(sys.stdin)
+print("cards:",len(d["cards"]),"beyondCount:",d["beyondCount"])'
+```
+
+**期望**：`cards: 3`（只今明后三天）、`beyondCount: 2`（第 4 天与第 7 天）。
+再单独打一次"**只在窗口外点菜**"（只造 +3 与 +6）：`cards: 0`、`beyondCount: 2`。
+
+**还要验"窗口之外那一餐真的到得了"**（这是 R-87 的正题）：
+
+```bash
+curl -s "$API/orders/plan?days=7" -H "Authorization: Bearer $TOKEN" | python3 -c '
+import sys,json
+for day in json.load(sys.stdin)["days"]:
+    for m in day["meals"]:
+        if m["mealKey"]: print(day["date"], m["label"], m["mealKey"], m["canAdd"])'
+# 逐行应当都带 mealKey（前端就是拿它拼 /order/<mealKey>）
+
+curl -s "$API/orders/$(python3 -c 'import datetime;print(datetime.date.today()+datetime.timedelta(days=6))')-DINNER" \
+  -H "Authorization: Bearer $TOKEN" | head -c 200
+# 期望 200 + 这一餐的 JSON（**不是 404**）——详情页是窗口之外唯一能落地的去处
+```
+
+### 四、浏览器里怎么量（390×844）
+
+**别用旧容器**：`docker ps` 里那个 api 跑的是镜像里的旧代码，改完后端源码要
+**另起一个跑新代码的实例**（`PORT=3100 pnpm exec nest start`），前端用
+`VITE_API_BASE_URL=http://127.0.0.1:3100/api pnpm exec vite --port 5174` 指过去——
+否则你会看到"改了没生效"，那只是容器没重建。
+
+```js
+// ① 窗口/卡片形态（一次量全）
+() => {
+  const box = (s) => { const e = document.querySelector(s); if (!e) return null;
+    const r = e.getBoundingClientRect(); return { w: +r.width.toFixed(1), h: +r.height.toFixed(1) }; };
+  return {
+    fixedH: +document.querySelector('.page__fixed').getBoundingClientRect().height.toFixed(1),
+    cardH: +document.querySelector('.order-card').getBoundingClientRect().height.toFixed(1),
+    heads: [...document.querySelectorAll('.order-card__date')].map((e) => e.textContent),
+    historyPill: box('.order-history'), writePill: box('.order-write'), tail: box('.order-float-tail'),
+    multi: !!document.querySelector('.order-multi'),        // 必须 false（多选整条不做）
+    shortcuts: !!document.querySelector('.order-shortcuts'),// 必须 false（旧入口行已删）
+    hint: (document.querySelector('.order-window-hint') || {}).textContent,
+  };
+}
+// 期望：fixedH ≈ 192、cardH ≈ 200、heads = 今天/明天/后天 · 午/晚餐、
+//      historyPill ≈ 64×34、writePill ≈ 113×39.5、tail = 96、hint = "还有 N 餐在三天之外 · 去备菜计划"
+
+// ② 悬浮件压不压最后一排按钮（**滚到底**再量，R-91 的教训：静止时量不到）
+async () => {
+  const s = document.querySelector('.tab-layout__body');
+  s.scrollTop = s.scrollHeight;
+  await new Promise((r) => setTimeout(r, 700));
+  const r = (e) => e.getBoundingClientRect();
+  const hit = (a, b) => !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+  const w = r(document.querySelector('.order-write'));
+  const last = [...document.querySelectorAll('.order-card')].pop();
+  return { writeTop: Math.round(w.top),
+    overlaps: [...last.querySelectorAll('.order-card__action, .order-card__quick-btn')]
+      .filter((b) => hit(r(b), w)).map((b) => b.textContent.trim()) };
+}
+// 期望 overlaps: []（动作行底 ≈ 622，悬浮件顶 ≈ 667）
+
+// ③ 窗口之外那一餐：从备菜计划**真的点进去**
+() => [...document.querySelectorAll('a.prep__dishes--link')].map((a) => a.getAttribute('href'))
+// 期望全是 /order/<mealKey>（不是 /order）——收窄之后指向列表就是"点个空"
+```
+
+**判据**：③ 里挑一个**第 7 天**的 href，页面内 `el.click()` 之后应当落到 `/order/<mealKey>`
+且标题是「10-22的晚餐」、返回文案「← 返回备菜计划」。历史页同样验一遍（`.history__dishes--link`）。
+
+### 五、一个容易误判的地方
+
+- `beyondCount` 是 `count({ mealDate: { gt: 窗口末 } })`，**没有上界**——造数据时如果手写
+  了很远的日期（比如 +30 天），这个数会把它算进去而备菜计划看不到它。**当前前提**：
+  点菜窗口是 7 天、窗口内的日子只会随时间靠近，所以这个数对应的一定是第 4～7 天。
+- 这一族改动**不会让任何测试变红**（断言的是"该有的在"），所以**必须先红后绿**地补一条
+  边界断言（这次补的是 `LIST_DAY_SPAN < ORDER_DAY_SPAN` 与 `listWindowDays` 的 `to`）。

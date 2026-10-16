@@ -53,8 +53,14 @@ function mealRow(meal: MealProgressRow, from: string, date: string, onDelete: ()
       <span className="history__meal">{meal.label}</span>
       <span className="history__main">
         {hasContent ? (
-          // 有内容的那格整段可点：改状态、定人数、看成品照、再点一次都在点菜单那边
-          <Link className="history__dishes history__dishes--link" to="/order" state={{ from }}>
+          // 有内容的那格整段可点：落到**这一餐的详情**（改状态、定人数、看成品照、再点一次都在那边）。
+          // 2026-10-16 起指向详情而不是列表：点单列表只看今明后三天，而这一页翻的是过去的账——
+          // 指向列表的话，点进去不仅看不到这一餐，还得自己再翻一遍。
+          <Link
+            className="history__dishes history__dishes--link"
+            to={`/order/${encodeURIComponent(meal.mealKey)}`}
+            state={{ from }}
+          >
             {meal.dishes.join(' · ')}
           </Link>
         ) : (

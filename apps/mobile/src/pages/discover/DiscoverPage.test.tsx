@@ -148,7 +148,7 @@ it('问答入口（问 AI）还在，且打得开', async () => {
   expect(await screen.findByText(/拿不准的都能问/)).toBeTruthy()
 })
 
-it('发现页不再有那三格假数字，也不再有重复的入口胶囊（2026-10-13 信息架构改版，D-040）', async () => {
+it('发现页不再有那三格假数字，本周菜单也整卡删掉（D-040 / 2026-10-16 改版）', async () => {
   mockApi()
   renderDiscover()
 
@@ -158,9 +158,18 @@ it('发现页不再有那三格假数字，也不再有重复的入口胶囊（2
   // 更不该是假的。这条守住"别哪天又给加回来"。
   expect(document.querySelector('.stats')).toBeNull()
   for (const ghost of ['私房菜', '冰箱食材', '临期']) expect(screen.queryByText(ghost)).toBeNull()
-  // 入口胶囊只留跟「本周菜单」走的两个；收藏/点菜不再从发现页重复给
-  const pills = [...document.querySelectorAll('.picks__more, .weekplan__more')].map((p) => p.textContent?.trim())
-  expect(pills).toEqual(['常用组合 →', '备菜计划 →'])
+
+  /*
+   * 「本周菜单」2026-10-16 整卡删掉（用户：「发现也不要展示本周菜单了」）：
+   * 那是**同一份数据在第三个地方画的只读副本**（点单页能操作、备菜计划排到第 7 天），
+   * 实测占 508px。删卡之后它原来的两个出口必须接住——那是它们唯一的入口，
+   * 所以搬成页面底部一行两枚工具胶囊（`.discover-tools`）。
+   */
+  expect(document.querySelector('.weekplan')).toBeNull()
+  const tools = [...document.querySelectorAll('.discover-tool')].map((tool) =>
+    tool.textContent?.replace(/\s+/g, ''),
+  )
+  expect(tools).toEqual(['🧩常用组合', '🗓备菜计划'])
 })
 
 it('问 AI 那行只有后半句可点：前半句是说明，不该看着像按钮', async () => {

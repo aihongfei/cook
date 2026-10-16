@@ -30,6 +30,7 @@ import {
   dateKey,
   dateOnly,
   isAllowedTransition,
+  listWindowDays,
   mealKeyOf,
   nextActionsFor,
   parseMealDate,
@@ -46,6 +47,7 @@ import {
   DINER_COUNT_MAX,
   FREE_DISH_NAME_MAX,
   ORDER_DAY_SPAN,
+  LIST_DAY_SPAN,
   revivedStatus,
   visibleToMember,
 } from '../src/modules/orders/orders.rules'
@@ -268,6 +270,29 @@ test('dayWindow 给的是「哪一天」标量 + 星期，且不返回 Date（�
 test('dayWindow 跨月按日历递进（不是加毫秒）', () => {
   const endOfMonth = new Date('2026-10-30T09:30:00.000Z')
   assert.deepEqual(dayWindow(3, endOfMonth).map(day => day.value), ['2026-10-30', '2026-10-31', '2026-11-01'])
+})
+
+/*
+ * 列表窗口（2026-10-16 用户定：「这块永远就展示今明后三天的菜单，其余历史的都放入历史中」）。
+ *
+ * 它与**能安排**的窗口是两件事，所以是两个常量：能安排 7 天（备菜计划要排满一周），
+ * 列表只画 3 天。写成同一个数就会出现"备菜计划第 4 天的行没有列表可回"或者
+ * "列表画了 7 天、用户说的收窗根本没发生"。`beyondCount` 数的正是 4～7 天那一段。
+ */
+test('列表窗口是 3 天，与能安排的 7 天分开（改成一个数就同时坏一处）', () => {
+  assert.equal(LIST_DAY_SPAN, 3)
+  assert.notEqual(LIST_DAY_SPAN, ORDER_DAY_SPAN)
+  assert.ok(LIST_DAY_SPAN < ORDER_DAY_SPAN, '列表比能安排的范围窄：更远的餐归备菜计划与历史')
+  const window = listWindowDays(now)
+  assert.deepEqual(window, { from: '2026-10-12', to: '2026-10-14' }, '窗口两端都是「哪一天」标量')
+})
+
+test('listWindowDays 的 to 就是能点的第 3 天：第 4 天起只算进 beyondCount', () => {
+  const { from, to } = listWindowDays(now)
+  // 三天之外离得最近的那一天（第 4 天）必须**在窗口之外**，否则收窗等于没收
+  const beyond = dayWindow(ORDER_DAY_SPAN, now)[LIST_DAY_SPAN].value
+  assert.ok(beyond > to, `${beyond} 应落在列表窗口（到 ${to}）之外`)
+  assert.equal(from, dayWindow(ORDER_DAY_SPAN, now)[0].value, '窗口起点与第一天一致')
 })
 
 test('看几天：默认 3 天、上限 7 天，非法值直接拒', () => {
