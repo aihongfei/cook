@@ -18,6 +18,34 @@
   padding-left: 0;
 }
 
+/*
+ * 「页头不动、只滚主体」这一版（D-091）把 `.recipes-page` 拆成两份用：
+ * - `--fixed`：返回键 / 标题 / 搜索框 / 品类与菜系两组 tab。它们都落在 `.page__fixed` 里。
+ *   底部那 24px 收成 10px——它原来是"这一页到页面底"的留白，页头现在不贴底了，留一条缝就够；
+ * - `--body`：只剩卡片那一片。**横向内边距必须留着**：`.recipes-grid` / `.recipes-count` /
+ *   加载与空态全都靠这一层给栏距（它们搬出了 `.recipes-page` 就失去了它），
+ *   纵向留白交给 `.page__body` 自己那一份。
+ *
+ * ⚠️ `width: 100%` **不是**多余的一行（用户 2026-10-16：「拖动时宽度变窄了」）。
+ * `.page__body` 是个 flex 列，而这一层带着上面那句 `margin: 0 auto`——
+ * 在 flex 里，交叉轴上的 auto 外边距会**顶掉 `stretch`**，于是这一层塌成"内容多宽就多宽"
+ * （`fit-content`）而不是撑满。宽屏下它比可用宽度窄一截（实测 1280 宽时网格只有 476px，
+ * 本该 728px）；更要命的是跟手拖动时会挂上邻页、内容一变宽窄**当场变一次**，
+ * 看起来就是"一拖宽度就变窄"。写死 100% 之后宽度只由容器决定，与里面挂了什么无关。
+ */
+.recipes-page--fixed {
+  padding-bottom: 10px;
+}
+
+.recipes-page--body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 .recipes-heading {
   /* ⚠️ 这里**不能写 position**：写了插画就锚在这条标题带上、跟着它往下排，
      变成"装饰压住搜索框"或者"为了不压而撑高标题带"（两个坑都踩过，见 ui.scss 文件头那段） */

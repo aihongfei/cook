@@ -67,54 +67,70 @@ export default function RecipeListPage() {
       : []),
   ]
   return (
-    <Page>
-      <div className="recipes-page">
-        <header className="recipes-heading">
-          <CornerArt name="recipes" />
-          <Link to="/kitchen" className="page-back">← 厨房</Link>
-          <h1>菜谱小书</h1>
-          <p>一菜一味，把日子煮得暖暖的</p>
-        </header>
-        <form className="recipes-search" role="search" onSubmit={(event) => {
-          event.preventDefault()
-          if (!composing) updateSearch({ q: input }, true)
-        }}>
-          <input
-            type="search"
-            aria-label="搜索菜名、食材、口味或标签"
-            placeholder="搜菜名、食材、口味、标签…"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onCompositionStart={() => setComposing(true)}
-            onCompositionEnd={() => setComposing(false)}
-            enterKeyHint="search"
-          />
-          <button type="submit">搜索</button>
-        </form>
-        <section className="recipes-filters" aria-label="菜谱筛选">
-          <div className="recipes-filters__heading"><span>按口味翻一翻</span><button type="button" onClick={reset}>清除搜索与筛选</button></div>
-          {filters.isPending && <RecipeStatus title="分类加载中…" loading />}
-          {filters.isError && <RecipeStatus title="筛选分类加载失败" onRetry={() => { void filters.refetch() }}>{recipeErrorMessage(filters.error)}</RecipeStatus>}
-          {filters.data && <>
-            <span className="recipes-filters__label">品类</span>
-            <FilterTabs
-              items={categoryTabs}
-              activeKey={category}
-              onChange={(key) => { preferences.setCategory(key); updateSearch({ category: key }) }}
+    /*
+     * 「页头不动、只滚主体」+ 卡片整屏左右滑（D-091，用户 2026-10-16：
+     * 「厨房页菜谱小书和订单页包括其他的有滚动的都要改，只能滚动主题内容」「整屏滑动」）。
+     *
+     * 固定区里是这一页的**开关与搜索**：标题、搜索框、品类与菜系两组 tab。
+     * 它们是"换一屏菜"的东西——翻到第 30 道想换品类，不该先滚回顶上（这正是这一批的诉求）。
+     * 下面只剩网格（以及它自己的计数、加载与空态）。
+     */
+    <Page
+      fixed={(
+        <div className="recipes-page recipes-page--fixed">
+          <header className="recipes-heading">
+            <CornerArt name="recipes" />
+            <Link to="/kitchen" className="page-back">← 厨房</Link>
+            <h1>菜谱小书</h1>
+            <p>一菜一味，把日子煮得暖暖的</p>
+          </header>
+          <form className="recipes-search" role="search" onSubmit={(event) => {
+            event.preventDefault()
+            if (!composing) updateSearch({ q: input }, true)
+          }}>
+            <input
+              type="search"
+              aria-label="搜索菜名、食材、口味或标签"
+              placeholder="搜菜名、食材、口味、标签…"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onCompositionStart={() => setComposing(true)}
+              onCompositionEnd={() => setComposing(false)}
+              enterKeyHint="search"
             />
-            <span className="recipes-filters__label">菜系</span>
-            <FilterTabs
-              items={[{ key: '', title: '全部菜系' }, ...Array.from(new Set([...filters.data.cuisines, ...(cuisine ? [cuisine] : [])])).map((key) => ({ key, title: key }))]}
-              activeKey={cuisine}
-              onChange={(key) => { preferences.setCuisine(key); updateSearch({ cuisine: key }) }}
-            />
-          </>}
-        </section>
-        {/* 栅格是"品类"那一组的翻页面（见上面那段注释）：左右划动＝换一个品类 */}
+            <button type="submit">搜索</button>
+          </form>
+          <section className="recipes-filters" aria-label="菜谱筛选">
+            <div className="recipes-filters__heading"><span>按口味翻一翻</span><button type="button" onClick={reset}>清除搜索与筛选</button></div>
+            {filters.isPending && <RecipeStatus title="分类加载中…" loading />}
+            {filters.isError && <RecipeStatus title="筛选分类加载失败" onRetry={() => { void filters.refetch() }}>{recipeErrorMessage(filters.error)}</RecipeStatus>}
+            {filters.data && <>
+              <span className="recipes-filters__label">品类</span>
+              <FilterTabs
+                items={categoryTabs}
+                activeKey={category}
+                onChange={(key) => { preferences.setCategory(key); updateSearch({ category: key }) }}
+              />
+              <span className="recipes-filters__label">菜系</span>
+              <FilterTabs
+                items={[{ key: '', title: '全部菜系' }, ...Array.from(new Set([...filters.data.cuisines, ...(cuisine ? [cuisine] : [])])).map((key) => ({ key, title: key }))]}
+                activeKey={cuisine}
+                onChange={(key) => { preferences.setCuisine(key); updateSearch({ cuisine: key }) }}
+              />
+            </>}
+          </section>
+        </div>
+      )}
+    >
+      <div className="recipes-page recipes-page--body">
+        {/* 栅格是"品类"那一组的翻页面（见下面那段注释）：左右划动＝换一个品类。
+            整屏（`fill`）：短品类也占满这一屏，滑起来才像翻页而不是"卡片自己在动"，
+            同时**内容不足一屏时不留下可滚的空白**（用户 2026-10-16 那两条要求本是一件事）。 */}
         <SwipePager
           keys={categoryTabs.map((tab) => tab.key)}
           activeKey={category}
           onChange={(key) => { preferences.setCategory(key); updateSearch({ category: key }) }}
+          fill
           renderPanel={(key) => <CategoryPanel q={q} cuisine={cuisine} category={key} />}
         />
       </div>

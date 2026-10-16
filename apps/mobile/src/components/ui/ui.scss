@@ -706,6 +706,52 @@
 }
 
 /*
+ * 可滑的段控（`SwipeSegmented`，用户 2026-10-16「段控也能滑」）。
+ *
+ * 几何：滑块是**绝对定位的一格宽**，位置只有 `paint()` 手写的那一条 transform 决定。
+ * 两处刻意的：
+ * - 宽度用 `calc` 从容器宽度推出来（`--segments` 是格数，组件给），
+ *   而不是量 DOM——转屏、分屏、字号变化都不用重算（与 `.swipe-pager` 用百分比同理）；
+ * - 位移里的 `index * var(--segment-gap)` 是**格与格之间的间隙**：百分比只能走到"一格宽"，
+ *   间隙得自己加（`gap` 就写在这一层，改它两边一起变）。
+ *
+ * `.segmented--swipe .segmented__item` 把原来的实心底色让给滑块
+ * （白字压橙底这件事没变，只是那层橙底换了个人画）。
+ * `overflow: hidden` 是因为橡皮筋那一段（到头继续拉，见 `SWIPE_RESISTANCE`）滑块会探出去一点，
+ * 探出圆角容器看着像"掉出来一块"。
+ */
+.segmented--swipe {
+  --segment-gap: 8px;
+  position: relative;
+  gap: var(--segment-gap);
+  overflow: hidden;
+}
+
+.segmented--swipe .segmented__item {
+  position: relative;
+  z-index: 1;
+}
+
+/*
+ * 把实心底色让给滑块。这里写全 `.is-active` 是**故意的**：
+ * `.segmented__item.is-active`（shared.scss）与它同权重，谁后到谁赢——
+ * 靠导入顺序定输赢的样式迟早会翻车（这一份的导入顺序还跟着页面走）。
+ */
+.segmented--swipe .segmented__item.is-active {
+  background: none;
+}
+
+.segmented--swipe .segmented__thumb {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 5px;
+  width: calc((100% - 10px - (var(--segments, 2) - 1) * var(--segment-gap)) / var(--segments, 2));
+  background: #e9a15e;
+  border-radius: 14px;
+}
+
+/*
  * 跟手翻页（`SwipePager`）。
  *
  * 三层各管一件事：

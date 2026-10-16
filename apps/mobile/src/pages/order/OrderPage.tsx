@@ -6,6 +6,7 @@ import { useNotifications } from '@/api/notifications'
 import { onTabRetap } from '@/lib/tab-retap'
 import { SelectIcon } from '@/components/icons/TabIcons'
 import SwipePager from '@/components/ui/SwipePager'
+import SwipeSegmented from '@/components/ui/SwipeSegmented'
 import { useLongPress } from '@/lib/long-press'
 import CheckInUploadSheet from '@/pages/checkins/components/CheckInUploadSheet'
 import ConfirmMenuSheet from './components/ConfirmMenuSheet'
@@ -386,489 +387,508 @@ export default function OrderPage() {
               tone: 'danger' as const,
             }
 
-  return (
-    <Page>
-      <div className="pscreen">
-        <PageHeader title="家宴点菜单" subtitle="记录大家想吃什么，也记录每顿饭的回应" art="order" />
+  /*
+   * 页头 / 段控 / 筛选行 / 两个入口行都交给 `fixed`（D-091，用户 2026-10-16
+   * 「滑动时只滑动主题内容，tab 和操作区域不能动」）：它们是**页面级**的东西——
+   * 滚到第 20 张卡时想换个状态、或进「点单历史」，不该先滚回顶上。
+   *
+   * 段控（全家点菜单 / 只看我的）也在这一块里，因为它**自己也要能滑**
+   * （用户 2026-10-16 在"订单手势"那题上选的一边就是「段控也能滑」）：
+   * 手势认的是"划在谁身上"，它若落在下面那个 `SwipePager` 里，同一次划动会被两边抢。
+   */
+  const chrome = (
+    <div className="pscreen">
+      <PageHeader title="家宴点菜单" subtitle="记录大家想吃什么，也记录每顿饭的回应" art="order" />
 
-        <div className="segmented">
-          <button
-            type="button"
-            className={['segmented__item', scope === 'family' && 'is-active']
-              .filter(Boolean)
-              .join(' ')}
-            onClick={() => setScope('family')}
-          >
-            全家点菜单
-          </button>
-          <button
-            type="button"
-            className={['segmented__item', scope === 'mine' && 'is-active']
-              .filter(Boolean)
-              .join(' ')}
-            onClick={() => setScope('mine')}
-          >
-            只看我的
-          </button>
-        </div>
+      <SwipeSegmented
+        label="看谁的点单"
+        items={[
+          { key: 'family', title: '全家点菜单' },
+          { key: 'mine', title: '只看我的' },
+        ]}
+        activeKey={scope}
+        onChange={(key) => setScope(key as 'family' | 'mine')}
+      />
 
-        {/*
-          选择模式的操作条（用户 2026-10-15：「底部或上部有批量操作的功能」）。
-          放**上部**：底栏是 Tab、右下角还有 AI 悬浮球，再多一层会跟它们抢位置
-          （本项目在"提示被弹层盖住"上踩过一次，见 R-059）——而选择模式一进来，
-          眼睛本来就在顶部那条。
-        */}
-        {selecting ? (
-          <div className="pick-bar">
-            <div className="pick-bar__row">
-              <button type="button" className="pick-bar__exit" onClick={exitSelect}>
-                退出
-              </button>
-              <span className="pick-bar__count">已选 {picked.length} 餐</span>
-              <button
-                type="button"
-                className="pick-bar__all"
-                onClick={() => {
-                  const all = (orders.data?.cards ?? []).map((card) => card.mealKey)
-                  setPicked(picked.length === all.length ? [] : all)
-                }}
-              >
-                {picked.length === (orders.data?.cards?.length ?? 0) ? '取消全选' : '全选'}
-              </button>
-              <button
-                type="button"
-                className="pick-bar__go"
-                disabled={picked.length === 0 || blockedMeals.length > 0 || clearMealItems.isPending}
-                onClick={askClear}
-              >
-                {clearMealItems.isPending ? '正在退…' : '退菜'}
-              </button>
-            </div>
-            {/*
-              有「做好了」的餐被选中时，为什么退不动要写在这条操作条**自己身上**
-              （D-066：点不动又不解释最糟）。放在同一个卡片里、虚线之上：
-              它是这一条操作的附注，不是页面上另外一段话（用户 2026-10-15 的间隙反馈）。
-            */}
-            {blockedMeals.length > 0 && (
-              <p className="pick-bar__tip">
-                {blockedMeals.map((meal) => `${meal.date} ${meal.mealLabel}`).join('、')}
-                已经「做好了」，成品不再是能改的东西——要改记录去点单历史。
-              </p>
-            )}
-          </div>
-        ) : (
-          family.data && orders.data && (
-            <div className="order-filter">
-              <Chips items={chips} value={filter} onChange={setFilter} />
-              {/*
-                多选的**显式入口**：长按是手势，第一次用的人找不到（见 enterSelect 那段说明）。
-                用户 2026-10-15 两次给位置：「多选按钮位置不对」（当时是筛选行里一枚文字胶囊，
-                看着像第 4 个 chip）→ 先搬去页头 → 看过之后定稿：**放这一行最右边、改成图标**
-                （「多选按钮位置放到全部那行的右侧，改成图标吧，注意左右空白间隙」）。
-
-                所以它与 chips **同一行但不在滚动区里**：chips 那截自己横着滚、它与页面右栏距对齐
-                （见 `.order-filter` / `.order-multi` 的样式注释）。只在列表里真有卡时出现——
-                没菜的时候给这个按钮是空的；选择模式里这一行整个换成操作条，它自然退场。
-              */}
-              {!selecting && (orders.data.cards.length > 0) && (
-                <button
-                  type="button"
-                  className="order-multi"
-                  aria-label="多选"
-                  title="多选"
-                  onClick={() => enterSelect()}
-                >
-                  <SelectIcon width={19} height={19} />
-                </button>
-              )}
-            </div>
-          )
-        )}
-
-        {/* 两个整行入口并排一行：都是"进另一个地方"的动作，各占半行。
-            说明文字随之改短——半行宽度放不下原来那句长说明。 */}
-        {family.data && (
-          <div className="order-shortcuts">
-            {/* 点单历史（F3-09）：列表只看得到最近 60 张卡（约一个月，见 R-19），
-                更早的点单在这一页往前翻。做成一行入口而不是又一个 Tab：
-                它是"偶尔回看"，不是每天要用的那一屏。 */}
-            <Link className="order-history-link" to="/order/history" state={{ from: location.pathname }}>
-              <span className="order-history-link__icon">📖</span>
-              <span className="order-history-link__text">
-                点单历史
-                <small>翻翻最近吃过的</small>
-              </span>
-              <span className="order-history-link__arrow">›</span>
-            </Link>
-
-            {/* 自己写一道（F3-10）：菜谱库里没有的菜（家里自己常做的、今天就想吃的）也能点。
-                放在筛选之下、卡片之上：它是"加点什么"的动作，与浏览已有单子不是一回事。 */}
-            <button type="button" className="order-freedish" onClick={openFreeDish}>
-              <span className="order-freedish__icon">✍️</span>
-              <span className="order-freedish__text">
-                自己写一道
-                <small>写个名字就能点</small>
-              </span>
-              <span className="order-freedish__arrow">›</span>
+      {/*
+        选择模式的操作条（用户 2026-10-15：「底部或上部有批量操作的功能」）。
+        放**上部**：底栏是 Tab、右下角还有 AI 悬浮球，再多一层会跟它们抢位置
+        （本项目在"提示被弹层盖住"上踩过一次，见 R-059）——而选择模式一进来，
+        眼睛本来就在顶部那条。它也在固定区：选了 5 餐、滚到下面去挑第 6 餐时，
+        「已选 N 餐 / 退菜」得一直看得见。
+      */}
+      {selecting ? (
+        <div className="pick-bar">
+          <div className="pick-bar__row">
+            <button type="button" className="pick-bar__exit" onClick={exitSelect}>
+              退出
             </button>
-          </div>
-        )}
-
-        {!family.isPending && !family.data && (
-          <div className="order-empty">
-            <p>点菜单是给家里人一起用的。</p>
-            <Link className="recipe-button" to="/family" state={{ from: location.pathname }}>
-              去创建或加入家庭
-            </Link>
-          </div>
-        )}
-
-        {family.data && orders.isPending && (
-          <div className="order-status">
-            <RecipeStatus title="正在翻点菜单…" loading />
-          </div>
-        )}
-        {family.data && orders.isError && (
-          <div className="order-status">
-            <RecipeStatus
-              title="点菜单暂时打不开"
-              onRetry={() => {
-                void orders.refetch()
+            <span className="pick-bar__count">已选 {picked.length} 餐</span>
+            <button
+              type="button"
+              className="pick-bar__all"
+              onClick={() => {
+                const all = (orders.data?.cards ?? []).map((card) => card.mealKey)
+                setPicked(picked.length === all.length ? [] : all)
               }}
             >
-              {apiErrorMessage(orders.error)}
-            </RecipeStatus>
+              {picked.length === (orders.data?.cards?.length ?? 0) ? '取消全选' : '全选'}
+            </button>
+            <button
+              type="button"
+              className="pick-bar__go"
+              disabled={picked.length === 0 || blockedMeals.length > 0 || clearMealItems.isPending}
+              onClick={askClear}
+            >
+              {clearMealItems.isPending ? '正在退…' : '退菜'}
+            </button>
           </div>
-        )}
+          {/*
+            有「做好了」的餐被选中时，为什么退不动要写在这条操作条**自己身上**
+            （D-066：点不动又不解释最糟）。放在同一个卡片里、虚线之上：
+            它是这一条操作的附注，不是页面上另外一段话（用户 2026-10-15 的间隙反馈）。
+          */}
+          {blockedMeals.length > 0 && (
+            <p className="pick-bar__tip">
+              {blockedMeals.map((meal) => `${meal.date} ${meal.mealLabel}`).join('、')}
+              已经「做好了」，成品不再是能改的东西——要改记录去点单历史。
+            </p>
+          )}
+        </div>
+      ) : (
+        family.data && orders.data && (
+          <div className="order-filter">
+            <Chips items={chips} value={filter} onChange={setFilter} />
+            {/*
+              多选的**显式入口**：长按是手势，第一次用的人找不到（见 enterSelect 那段说明）。
+              用户 2026-10-15 两次给位置：「多选按钮位置不对」（当时是筛选行里一枚文字胶囊，
+              看着像第 4 个 chip）→ 先搬去页头 → 看过之后定稿：**放这一行最右边、改成图标**
+              （「多选按钮位置放到全部那行的右侧，改成图标吧，注意左右空白间隙」）。
 
-        {family.data && orders.data && orders.data.cards.length === 0 && (
-          <EmptyState
-            title={filter === 'ALL' ? '还没有人点菜' : '这个状态下没有点单'}
-            desc={
-              filter === 'ALL'
-                ? '翻到想吃的菜，点「想吃这道」，家里人就能看到；也可以自己写一道。'
-                : '换个状态看看。'
-            }
-          />
-        )}
+              所以它与 chips **同一行但不在滚动区里**：chips 那截自己横着滚、它与页面右栏距对齐
+              （见 `.order-filter` / `.order-multi` 的样式注释）。只在列表里真有卡时出现——
+              没菜的时候给这个按钮是空的；选择模式里这一行整个换成操作条，它自然退场。
+            */}
+            {!selecting && (orders.data.cards.length > 0) && (
+              <button
+                type="button"
+                className="order-multi"
+                aria-label="多选"
+                title="多选"
+                onClick={() => enterSelect()}
+              >
+                <SelectIcon width={19} height={19} />
+              </button>
+            )}
+          </div>
+        )
+      )}
 
-        {/*
-          「该备菜」那条在列表顶上单独说一句（用户 2026-10-14：「还是没有通知的角标啊」）。
-          它**没有卡可标**——说的正是"某一餐还空着"，空着才没有点单卡；但它的红点恰恰
-          亮在订单这一支，所以列表里一处标记都没有时用户会觉得"通知没做出来"。
-          那条提醒本来"点进去是备菜页"（`to` 由后端给），在这里也给同一个去处。
-        */}
-        {prepNotice && (
-          <Link className="order-notice" to={prepNotice.to} state={{ from: location.pathname }}>
-            <span className="order-notice__icon">🥬</span>
-            <span className="order-notice__text">
-              {prepNotice.title}
-              {prepNotice.body && <small>{prepNotice.body}</small>}
+      {/* 两个整行入口并排一行：都是"进另一个地方"的动作，各占半行。
+          说明文字随之改短——半行宽度放不下原来那句长说明。 */}
+      {family.data && (
+        <div className="order-shortcuts">
+          {/* 点单历史（F3-09）：列表只看得到最近 60 张卡（约一个月，见 R-19），
+              更早的点单在这一页往前翻。做成一行入口而不是又一个 Tab：
+              它是"偶尔回看"，不是每天要用的那一屏。 */}
+          <Link className="order-history-link" to="/order/history" state={{ from: location.pathname }}>
+            <span className="order-history-link__icon">📖</span>
+            <span className="order-history-link__text">
+              点单历史
+              <small>翻翻最近吃过的</small>
             </span>
-            <span className="order-notice__arrow">›</span>
+            <span className="order-history-link__arrow">›</span>
           </Link>
-        )}
 
-        {/*
-          卡片列表这一块**能左右跟手翻页**（用户 2026-10-15：「类似这种 tab 页（全部、已安排、
-          已做好）……需要能左右滑动切换」，随后又要求「要跟随手指拖动，滑到中间时，两个页是都能看见的」）。
-          筛选胶囊那一行自己会横滚、带着 `data-no-swipe`，在它上面划动一律不接
-          （那是"看后面的选项"，不是换筛选）。
-          一页就是"某个状态下的那几张卡"：数据是同一份（`counts`/卡片一次性取回），
-          所以邻页当场就画得出来，不会有"翻到一半是空的"。
-        */}
-        <SwipePager
-          keys={chips.map((chip) => chip.id)}
-          activeKey={filter}
-          onChange={setFilter}
-          renderPanel={(status) => {
-            const all = orders.data?.cards ?? []
-            const cards = status === 'ALL' ? all : all.filter((card) => card.status === status)
-            return cards.map((card) => {
-          const cardBadges = badgesOfMeal(badges, card.mealKey)
-          return (
-          /*
-           * 整张卡可点，进**这一餐的详情**（用户 2026-10-15：「订单里卡片增加下详情吧，
-           * 可以点击进去看详细的」）。
-           *
-           * 卡片**不是** `<button>`：里面还有一堆真按钮（撤回、改人数、存组合、流转…），
-           * 按钮套按钮是无效 HTML、点内层还会连带触发外层。所以外层只挂一个点击处理，
-           * 遇到内层可交互元素就**放行不跳**（`closest` 一次判定，不必给每个内层按钮
-           * 各加一句 stopPropagation——那种写法每加一个按钮就漏一个）。
-           *
-           * 同时把标题区做成真 `<Link>`：整卡 onClick 只对鼠标/触摸成立，
-           * 键盘与读屏需要那个链接才进得去（与打卡卡片可点那次同一条理由，见 CheckInPage）。
-           */
-          <article
-            className={['order-card', 'order-card--link', cardBadges.length > 0 && 'is-unread']
-              .filter(Boolean)
-              .join(' ')}
-            key={card.mealKey}
-            // 再点一次「订单」Tab 时靠它找这张卡（见上面那段 jumpTo 的说明）
-            data-meal-key={card.mealKey}
-            onPointerDown={(event) => {
-              pressedKey.current = card.mealKey
-              longPress.handlers.onPointerDown(event)
-            }}
-            onPointerMove={longPress.handlers.onPointerMove}
-            onPointerUp={() => {
-              pressedKey.current = null
-              longPress.handlers.onPointerUp()
-            }}
-            onPointerCancel={longPress.handlers.onPointerCancel}
-            onPointerLeave={() => {
-              pressedKey.current = null
-              longPress.handlers.onPointerLeave()
-            }}
-            onContextMenu={longPress.handlers.onContextMenu}
-            /*
-              选择模式下这张卡是一个**复选框**：`role` + `aria-checked` 让读屏也念得出
-              "已选/未选"（只画一个 ✓ 的方块对读屏等于没有）。
-            */
-            role={selecting ? 'checkbox' : undefined}
-            aria-checked={selecting ? picked.includes(card.mealKey) : undefined}
-            onClick={(event) => {
-              const target = event.target as HTMLElement
-              /*
-                **长按抬起时浏览器会补一次 click**：不吐掉的话，"长按选中"会被紧接着的
-                这次点击立刻取消（表现为"按半天选不上"）。这一句必须在最前面。
-              */
-              if (longPress.consumeClick()) return
-              if (target.closest('button, a, input, select, textarea')) return
-              if (selecting) {
-                togglePick(card.mealKey)
-                return
-              }
-              navigate(`/order/${card.mealKey}`, { state: { from: location.pathname } })
+          {/* 自己写一道（F3-10）：菜谱库里没有的菜（家里自己常做的、今天就想吃的）也能点。
+              放在筛选之下、卡片之上：它是"加点什么"的动作，与浏览已有单子不是一回事。 */}
+          <button type="button" className="order-freedish" onClick={openFreeDish}>
+            <span className="order-freedish__icon">✍️</span>
+            <span className="order-freedish__text">
+              自己写一道
+              <small>写个名字就能点</small>
+            </span>
+            <span className="order-freedish__arrow">›</span>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+
+  return (
+    /*
+     * 「页头不动、只滚主体」+ 卡片整屏左右滑（D-091，用户 2026-10-16）。
+     * `fixed` 那一块见上面 `chrome`；这里只剩**这一页的内容**。
+     */
+    <Page fixed={chrome}>
+      {!family.isPending && !family.data && (
+        <div className="order-empty">
+          <p>点菜单是给家里人一起用的。</p>
+          <Link className="recipe-button" to="/family" state={{ from: location.pathname }}>
+            去创建或加入家庭
+          </Link>
+        </div>
+      )}
+
+      {family.data && orders.isPending && (
+        <div className="order-status">
+          <RecipeStatus title="正在翻点菜单…" loading />
+        </div>
+      )}
+      {family.data && orders.isError && (
+        <div className="order-status">
+          <RecipeStatus
+            title="点菜单暂时打不开"
+            onRetry={() => {
+              void orders.refetch()
             }}
           >
-            {/*
-              右上角的"有新消息"角标（用户 2026-10-14：「卡片没有看到哪条是通知的啊，
-              考虑加下角标之类的」）。
+            {apiErrorMessage(orders.error)}
+          </RecipeStatus>
+        </div>
+      )}
 
-              三个决定：
-              - **用角标，不用卡片里的一行小标**：角标挂右上角、压着卡片描边，扫一列卡片
-                时一眼就能挑出哪张不一样（第一版把标记放在标题行里，和状态戳挤在一起，
-                用户根本没注意到——在他看来那张卡与别的没什么区别）；
-              - **文案是后端那条的 `tag`**（"选好了""做好了"），不在这里另写一张表，
-                否则后端加了新类别而前端不知道（与"去处由后端给"同一条规矩）；
-              - **一餐最多两条，并排写在一颗角标里**（`A · B`），不叠两颗——
-                右上角只有一个位置，叠起来会互相盖住。
-            */}
-            {cardBadges.length > 0 && (
-              <span className="order-card__corner">{cardBadges.join(' · ')}</span>
-            )}
+      {/*
+        「该备菜」那条在列表顶上单独说一句（用户 2026-10-14：「还是没有通知的角标啊」）。
+        它**没有卡可标**——说的正是"某一餐还空着"，空着才没有点单卡；但它的红点恰恰
+        亮在订单这一支，所以列表里一处标记都没有时用户会觉得"通知没做出来"。
+        那条提醒本来"点进去是备菜页"（`to` 由后端给），在这里也给同一个去处。
+
+        它留在**内容**里（不在固定区）：说的正是"这个列表里某一餐空着"，
+        跟着卡片走才对得上（用户定的固定区是"页头 + tab + 页面级操作行"）。
+      */}
+      {prepNotice && (
+        <Link className="order-notice" to={prepNotice.to} state={{ from: location.pathname }}>
+          <span className="order-notice__icon">🥬</span>
+          <span className="order-notice__text">
+            {prepNotice.title}
+            {prepNotice.body && <small>{prepNotice.body}</small>}
+          </span>
+          <span className="order-notice__arrow">›</span>
+        </Link>
+      )}
+
+      {/*
+        卡片列表这一块**能左右跟手翻页**（用户 2026-10-15：「类似这种 tab 页（全部、已安排、
+        已做好）……需要能左右滑动切换」，随后又要求「要跟随手指拖动，滑到中间时，两个页是都能看见的」），
+        现在是**整屏**（`fill`，用户 2026-10-16：「整屏滑动，并高度要自适应，菜谱没有超出屏幕时
+        不要空白滑动」）。
+        筛选胶囊那一行自己会横滚、带着 `data-no-swipe`，在它上面划动一律不接
+        （那是"看后面的选项"，不是换筛选）——它现在在固定区，标记仍然生效（手势认的是划在谁身上）。
+        一页就是"某个状态下的那几张卡"：数据是同一份（`counts`/卡片一次性取回），
+        所以邻页当场就画得出来，不会有"翻到一半是空的"。
+
+        空态**每一页各画自己那一份**（原来是画在翻页区外面、按当前筛选写死）：
+        跟手拖到一半时，邻页也得说出它自己"有没有东西"——共用一句会在那一刻说错话。
+      */}
+      {family.data && orders.data && (
+      <SwipePager
+        keys={chips.map((chip) => chip.id)}
+        activeKey={filter}
+        onChange={setFilter}
+        fill
+        renderPanel={(status) => {
+          const all = orders.data?.cards ?? []
+          const cards = status === 'ALL' ? all : all.filter((card) => card.status === status)
+          if (cards.length === 0) {
+            return (
+              <div className="order-panel__empty">
+                <EmptyState
+                  title={status === 'ALL' ? '还没有人点菜' : '这个状态下没有点单'}
+                  desc={
+                    status === 'ALL'
+                      ? '翻到想吃的菜，点「想吃这道」，家里人就能看到；也可以自己写一道。'
+                      : '换个状态看看。'
+                  }
+                />
+              </div>
+            )
+          }
+          return cards.map((card) => {
+        const cardBadges = badgesOfMeal(badges, card.mealKey)
+        return (
+        /*
+         * 整张卡可点，进**这一餐的详情**（用户 2026-10-15：「订单里卡片增加下详情吧，
+         * 可以点击进去看详细的」）。
+         *
+         * 卡片**不是** `<button>`：里面还有一堆真按钮（撤回、改人数、存组合、流转…），
+         * 按钮套按钮是无效 HTML、点内层还会连带触发外层。所以外层只挂一个点击处理，
+         * 遇到内层可交互元素就**放行不跳**（`closest` 一次判定，不必给每个内层按钮
+         * 各加一句 stopPropagation——那种写法每加一个按钮就漏一个）。
+         *
+         * 同时把标题区做成真 `<Link>`：整卡 onClick 只对鼠标/触摸成立，
+         * 键盘与读屏需要那个链接才进得去（与打卡卡片可点那次同一条理由，见 CheckInPage）。
+         */
+        <article
+          className={['order-card', 'order-card--link', cardBadges.length > 0 && 'is-unread']
+            .filter(Boolean)
+            .join(' ')}
+          key={card.mealKey}
+          // 再点一次「订单」Tab 时靠它找这张卡（见上面那段 jumpTo 的说明）
+          data-meal-key={card.mealKey}
+          onPointerDown={(event) => {
+            pressedKey.current = card.mealKey
+            longPress.handlers.onPointerDown(event)
+          }}
+          onPointerMove={longPress.handlers.onPointerMove}
+          onPointerUp={() => {
+            pressedKey.current = null
+            longPress.handlers.onPointerUp()
+          }}
+          onPointerCancel={longPress.handlers.onPointerCancel}
+          onPointerLeave={() => {
+            pressedKey.current = null
+            longPress.handlers.onPointerLeave()
+          }}
+          onContextMenu={longPress.handlers.onContextMenu}
+          /*
+            选择模式下这张卡是一个**复选框**：`role` + `aria-checked` 让读屏也念得出
+            "已选/未选"（只画一个 ✓ 的方块对读屏等于没有）。
+          */
+          role={selecting ? 'checkbox' : undefined}
+          aria-checked={selecting ? picked.includes(card.mealKey) : undefined}
+          onClick={(event) => {
+            const target = event.target as HTMLElement
+            /*
+              **长按抬起时浏览器会补一次 click**：不吐掉的话，"长按选中"会被紧接着的
+              这次点击立刻取消（表现为"按半天选不上"）。这一句必须在最前面。
+            */
+            if (longPress.consumeClick()) return
+            if (target.closest('button, a, input, select, textarea')) return
+            if (selecting) {
+              togglePick(card.mealKey)
+              return
+            }
+            navigate(`/order/${card.mealKey}`, { state: { from: location.pathname } })
+          }}
+        >
+          {/*
+            右上角的"有新消息"角标（用户 2026-10-14：「卡片没有看到哪条是通知的啊，
+            考虑加下角标之类的」）。
+
+            三个决定：
+            - **用角标，不用卡片里的一行小标**：角标挂右上角、压着卡片描边，扫一列卡片
+              时一眼就能挑出哪张不一样（第一版把标记放在标题行里，和状态戳挤在一起，
+              用户根本没注意到——在他看来那张卡与别的没什么区别）；
+            - **文案是后端那条的 `tag`**（"选好了""做好了"），不在这里另写一张表，
+              否则后端加了新类别而前端不知道（与"去处由后端给"同一条规矩）；
+            - **一餐最多两条，并排写在一颗角标里**（`A · B`），不叠两颗——
+              右上角只有一个位置，叠起来会互相盖住。
+          */}
+          {cardBadges.length > 0 && (
+            <span className="order-card__corner">{cardBadges.join(' · ')}</span>
+          )}
+          {/*
+            选择模式下的勾选方块（用户 2026-10-15：「按住显示单选框」）。挂在**左上角**：
+            右上角是未读角标的位置（D-082），两个挤在一起会互相盖住。
+            `aria-hidden`：状态已经由卡片的 role/aria-checked 说了，这里只是给眼睛看的。
+          */}
+          {selecting && (
+            <span
+              className={['order-card__pick', picked.includes(card.mealKey) && 'is-on']
+                .filter(Boolean)
+                .join(' ')}
+              aria-hidden="true"
+            >
+              {picked.includes(card.mealKey) ? '✓' : ''}
+            </span>
+          )}
+          <div className="order-card__head">
             {/*
-              选择模式下的勾选方块（用户 2026-10-15：「按住显示单选框」）。挂在**左上角**：
-              右上角是未读角标的位置（D-082），两个挤在一起会互相盖住。
-              `aria-hidden`：状态已经由卡片的 role/aria-checked 说了，这里只是给眼睛看的。
+              选择模式下标题区**不能是链接**：这时候点整张卡的意思是"勾选它"，
+              留着一个会跳走的链接等于在最需要多选的时候把人带走。
             */}
-            {selecting && (
-              <span
-                className={['order-card__pick', picked.includes(card.mealKey) && 'is-on']
-                  .filter(Boolean)
-                  .join(' ')}
-                aria-hidden="true"
-              >
-                {picked.includes(card.mealKey) ? '✓' : ''}
-              </span>
-            )}
-            <div className="order-card__head">
-              {/*
-                选择模式下标题区**不能是链接**：这时候点整张卡的意思是"勾选它"，
-                留着一个会跳走的链接等于在最需要多选的时候把人带走。
-              */}
-              {selecting ? (
-                <span className="order-card__headlink">
-                  <span className="order-card__date">
-                    {card.date} · {card.mealLabel}
-                  </span>
-                  <span className="order-card__who">{card.orderers.join(' · ')} 点的</span>
-                </span>
-              ) : (
-              <Link
-                className="order-card__headlink"
-                to={`/order/${card.mealKey}`}
-                state={{ from: location.pathname }}
-              >
+            {selecting ? (
+              <span className="order-card__headlink">
                 <span className="order-card__date">
                   {card.date} · {card.mealLabel}
                 </span>
                 <span className="order-card__who">{card.orderers.join(' · ')} 点的</span>
-              </Link>
-              )}
-              <span className={['stamp', STATUS_TONE[card.status]].filter(Boolean).join(' ')}>
-                {card.statusLabel}
               </span>
-              {/*
-                选择模式下**不画那个 ›**：它说的是"点进去"，而这时候点卡是勾选。
-                一个指错方向的箭头比没有箭头糟（D-066 那条"点不动的东西一个不留"的同一族）。
-              */}
-              {!selecting && (
-                <span className="order-card__arrow" aria-hidden="true">
-                  ›
-                </span>
-              )}
-            </div>
-
-            <div className="order-card__dishes">
-              {card.dishes.map((line) => (
-                <div className="order-card__dish" key={`${line.recipeId ?? line.name}`}>
-                  <div className="order-card__dish-name">
-                    {line.name}
-                    {line.count > 1 && <b className="order-card__count">×{line.count}</b>}
-                  </div>
-                  {/* 谁交代了什么，挨着那道菜显示——备注是随菜传的（F3-05） */}
-                  {line.notes.map((note) => (
-                    <div className="order-card__dish-note" key={`${note.nickname}-${note.text}`}>
-                      {note.nickname}：{note.text}
-                    </div>
-                  ))}
-                  {/*
-                    退掉一道菜。口径 2026-10-15 放开（用户：「批量操作…退菜这种的」）：
-                    **到「正在做」为止都能退**（原来只在「待确认」给，后端 `canRemoveItem` 同样校验）。
-
-                    列表上仍然只画**我点过的那几道**（`mineItemIds`）：这张卡上的菜是**合并过的**
-                    （`番茄炒蛋 ×2` 可能两个人都点了），而列表里没有"每份是谁的"这层信息——
-                    退别人的那一份要看清是谁的，那是详情页的活（那里按人分组，弹窗也会点名）。
-                    只是少一道菜而不是退整桌时，也走详情页。
-                  */}
-                  {line.mineItemIds.length > 0 && card.status !== 'DONE' && !selecting && (
-                    <button
-                      type="button"
-                      className="order-card__withdraw"
-                      onClick={() =>
-                        setPending({
-                          kind: 'withdraw',
-                          card,
-                          dishName: line.name,
-                          itemId: line.mineItemIds[line.mineItemIds.length - 1],
-                        })
-                      }
-                    >
-                      退掉我这份
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="order-card__foot">
-              <span>
-                共 {card.dishCount} 道 · {card.ordererCount} 人点了
-                {card.mineCount > 0 && `（含我点的 ${card.mineCount} 份）`}
+            ) : (
+            <Link
+              className="order-card__headlink"
+              to={`/order/${card.mealKey}`}
+              state={{ from: location.pathname }}
+            >
+              <span className="order-card__date">
+                {card.date} · {card.mealLabel}
               </span>
-              <span>{formatSubmittedAt(card.submittedAt)}</span>
-            </div>
-
-            {/* 确认留痕（M4 / F4-05）：谁把这一版菜单定下来的。**纯信息，不是可点元素**——
-                它没有能做的事（要改状态走下面的动作按钮），做成按钮只会让人白点一次。 */}
-            {card.confirmedBy && card.confirmedAt && (
-              <p className="order-card__confirmed">
-                🔒 {card.confirmedBy.nickname} {formatConfirmedAt(card.confirmedAt)} 定下这餐
-              </p>
+              <span className="order-card__who">{card.orderers.join(' · ')} 点的</span>
+            </Link>
             )}
-
+            <span className={['stamp', STATUS_TONE[card.status]].filter(Boolean).join(' ')}>
+              {card.statusLabel}
+            </span>
             {/*
-              这一排是"顺手能做的小事"：就餐人数、存成常用组合、再点一次。
-              （用户 2026-10-14：「这三行按钮优化下，现在不太好看，不一定一个按钮一行」——
-              原先三个各自 `display:block; width:100%`，左对齐的一列文字，看着像清单条目
-              而不是按钮。现在排成**一行小药丸**，放不下就自己折行。）
-
-              三个按钮的判据各自独立，注释见各自下面那几段。
-
-              就餐人数（M4 / F4-05）：含没点菜只吃饭的家人，所以和"N 人点了"分开显示。
-              能到这一餐的人才看得到；没定就写"还没定"，别显示 0。
-
-              ⚠️ 那个「· 改」的判据是**改人数这件事自己**（`menu.manage`），不是
-              "有没有下一步按钮"。原来写的是 `card.nextActions.length > 0`，在 2026-10-15
-              放开「做好了」给吃货（D-075）之后就成了**假入口**：吃货在一餐"准备中"时
-              `nextActions` 有 DONE，于是看到一个「· 改」，点下去 403
-              （后端 `setDiners` 要 MENU_MANAGE）——这正是本项目最不能接受的那种东西
-              （看起来能点，点了没用还不知道为什么）。
-              任何"用 A 现象当 B 能力代理"的判据都会在权限调整时这样裂开，所以这里
-              回到**它自己那一项能力**：前端据此显示/隐藏，判定仍然只由后端下。
-            */}
-            {/*
-              选择模式下**收起三行动作**（改人数/存组合/再点一次）与成品照、流转按钮：
-              这时候整张卡只表达一件事——"选我"。留着它们既误导（点下去会跳出多选），
-              也会在窄屏上把勾选状态挤得看不见。
+              选择模式下**不画那个 ›**：它说的是"点进去"，而这时候点卡是勾选。
+              一个指错方向的箭头比没有箭头糟（D-066 那条"点不动的东西一个不留"的同一族）。
             */}
             {!selecting && (
-            <>
-            <div className="order-card__tools">
-              <button
-                type="button"
-                className="order-card__diners"
-                disabled={!can(family.data, CAPABILITY.MENU_MANAGE)}
-                onClick={() => setDinersFor(card)}
-              >
-                🍚{' '}
-                {card.dinerCount
-                  ? `${card.dinerCount} 人吃（${card.ordererCount} 人点了）`
-                  : '还没定几个人吃'}
-                {can(family.data, CAPABILITY.MENU_MANAGE) && ' · 改'}
-              </button>
-
-              {/* 存成常用组合（M4 / F4-04）：刚把这一餐配齐时"下次也照这样点"的念头最强，
-                  顺手存下来成本最低（组合页只管用与删，不从那里新建）。 */}
-              {card.dishes.some((line) => line.recipeId) && (
-                <button type="button" className="order-card__combo" onClick={() => setComboFor(card)}>
-                  ⭐ 存成常用组合
-                </button>
-              )}
-
-              {/* 再点一次（F3-06）：只出现在**定局的那一餐**（做好了 / 已取消 / 日子过去了，
-                  判据在后端 `canRepeat`）。跟它并排的「存成常用组合」是另一件事：
-                  那个是"想常做"，这个是"就照这桌再来一顿"。 */}
-              {card.canRepeat && card.dishCount > 0 && (
-                <button type="button" className="order-card__repeat" onClick={() => setRepeatFor(card)}>
-                  🔁 再点一次
-                </button>
-              )}
-            </div>
-
-            {/* 成品照（F9-08）：只有做好的那一餐才给这个入口——照片是"做出来了"的证据。
-                已传过的显示张数，并给一个"去看看"的入口（照片都在打卡墙那一餐下） */}
-            {card.status === 'DONE' && (
-              <div className="order-card__photos">
-                {card.photoCount > 0 && (
-                  <Link className="order-card__photo-link" to="/checkins" state={{ from: '/order' }}>
-                    已传 {card.photoCount} 张成品照，去看看 →
-                  </Link>
-                )}
-                <button type="button" className="order-card__photo" onClick={() => setUploadMealKey(card.mealKey)}>
-                  📷 {card.photoCount > 0 ? '再传一张' : '上传这餐的成品照'}
-                </button>
-              </div>
+              <span className="order-card__arrow" aria-hidden="true">
+                ›
+              </span>
             )}
+          </div>
 
-            {card.nextActions.length > 0 && (
-              <div className="order-card__actions">
-                {card.nextActions.map((action) => (
-                  <button
-                    key={action.status}
-                    type="button"
-                    className={[
-                      'order-card__action',
-                      action.status === 'CANCELED' ? 'order-card__action--danger' : 'is-primary',
-                    ].join(' ')}
-                    disabled={updateStatus.isPending}
-                    onClick={() => onAction(card, action)}
-                  >
-                    {action.label}
-                  </button>
+          <div className="order-card__dishes">
+            {card.dishes.map((line) => (
+              <div className="order-card__dish" key={`${line.recipeId ?? line.name}`}>
+                <div className="order-card__dish-name">
+                  {line.name}
+                  {line.count > 1 && <b className="order-card__count">×{line.count}</b>}
+                </div>
+                {/* 谁交代了什么，挨着那道菜显示——备注是随菜传的（F3-05） */}
+                {line.notes.map((note) => (
+                  <div className="order-card__dish-note" key={`${note.nickname}-${note.text}`}>
+                    {note.nickname}：{note.text}
+                  </div>
                 ))}
+                {/*
+                  退掉一道菜。口径 2026-10-15 放开（用户：「批量操作…退菜这种的」）：
+                  **到「正在做」为止都能退**（原来只在「待确认」给，后端 `canRemoveItem` 同样校验）。
+
+                  列表上仍然只画**我点过的那几道**（`mineItemIds`）：这张卡上的菜是**合并过的**
+                  （`番茄炒蛋 ×2` 可能两个人都点了），而列表里没有"每份是谁的"这层信息——
+                  退别人的那一份要看清是谁的，那是详情页的活（那里按人分组，弹窗也会点名）。
+                  只是少一道菜而不是退整桌时，也走详情页。
+                */}
+                {line.mineItemIds.length > 0 && card.status !== 'DONE' && !selecting && (
+                  <button
+                    type="button"
+                    className="order-card__withdraw"
+                    onClick={() =>
+                      setPending({
+                        kind: 'withdraw',
+                        card,
+                        dishName: line.name,
+                        itemId: line.mineItemIds[line.mineItemIds.length - 1],
+                      })
+                    }
+                  >
+                    退掉我这份
+                  </button>
+                )}
               </div>
+            ))}
+          </div>
+
+          <div className="order-card__foot">
+            <span>
+              共 {card.dishCount} 道 · {card.ordererCount} 人点了
+              {card.mineCount > 0 && `（含我点的 ${card.mineCount} 份）`}
+            </span>
+            <span>{formatSubmittedAt(card.submittedAt)}</span>
+          </div>
+
+          {/* 确认留痕（M4 / F4-05）：谁把这一版菜单定下来的。**纯信息，不是可点元素**——
+              它没有能做的事（要改状态走下面的动作按钮），做成按钮只会让人白点一次。 */}
+          {card.confirmedBy && card.confirmedAt && (
+            <p className="order-card__confirmed">
+              🔒 {card.confirmedBy.nickname} {formatConfirmedAt(card.confirmedAt)} 定下这餐
+            </p>
+          )}
+
+          {/*
+            这一排是"顺手能做的小事"：就餐人数、存成常用组合、再点一次。
+            （用户 2026-10-14：「这三行按钮优化下，现在不太好看，不一定一个按钮一行」——
+            原先三个各自 `display:block; width:100%`，左对齐的一列文字，看着像清单条目
+            而不是按钮。现在排成**一行小药丸**，放不下就自己折行。）
+
+            三个按钮的判据各自独立，注释见各自下面那几段。
+
+            就餐人数（M4 / F4-05）：含没点菜只吃饭的家人，所以和"N 人点了"分开显示。
+            能到这一餐的人才看得到；没定就写"还没定"，别显示 0。
+
+            ⚠️ 那个「· 改」的判据是**改人数这件事自己**（`menu.manage`），不是
+            "有没有下一步按钮"。原来写的是 `card.nextActions.length > 0`，在 2026-10-15
+            放开「做好了」给吃货（D-075）之后就成了**假入口**：吃货在一餐"准备中"时
+            `nextActions` 有 DONE，于是看到一个「· 改」，点下去 403
+            （后端 `setDiners` 要 MENU_MANAGE）——这正是本项目最不能接受的那种东西
+            （看起来能点，点了没用还不知道为什么）。
+            任何"用 A 现象当 B 能力代理"的判据都会在权限调整时这样裂开，所以这里
+            回到**它自己那一项能力**：前端据此显示/隐藏，判定仍然只由后端下。
+          */}
+          {/*
+            选择模式下**收起三行动作**（改人数/存组合/再点一次）与成品照、流转按钮：
+            这时候整张卡只表达一件事——"选我"。留着它们既误导（点下去会跳出多选），
+            也会在窄屏上把勾选状态挤得看不见。
+          */}
+          {!selecting && (
+          <>
+          <div className="order-card__tools">
+            <button
+              type="button"
+              className="order-card__diners"
+              disabled={!can(family.data, CAPABILITY.MENU_MANAGE)}
+              onClick={() => setDinersFor(card)}
+            >
+              🍚{' '}
+              {card.dinerCount
+                ? `${card.dinerCount} 人吃（${card.ordererCount} 人点了）`
+                : '还没定几个人吃'}
+              {can(family.data, CAPABILITY.MENU_MANAGE) && ' · 改'}
+            </button>
+
+            {/* 存成常用组合（M4 / F4-04）：刚把这一餐配齐时"下次也照这样点"的念头最强，
+                顺手存下来成本最低（组合页只管用与删，不从那里新建）。 */}
+            {card.dishes.some((line) => line.recipeId) && (
+              <button type="button" className="order-card__combo" onClick={() => setComboFor(card)}>
+                ⭐ 存成常用组合
+              </button>
             )}
-            </>
+
+            {/* 再点一次（F3-06）：只出现在**定局的那一餐**（做好了 / 已取消 / 日子过去了，
+                判据在后端 `canRepeat`）。跟它并排的「存成常用组合」是另一件事：
+                那个是"想常做"，这个是"就照这桌再来一顿"。 */}
+            {card.canRepeat && card.dishCount > 0 && (
+              <button type="button" className="order-card__repeat" onClick={() => setRepeatFor(card)}>
+                🔁 再点一次
+              </button>
             )}
-          </article>
-          )
-            })
-          }}
-        />
-      </div>
+          </div>
+
+          {/* 成品照（F9-08）：只有做好的那一餐才给这个入口——照片是"做出来了"的证据。
+              已传过的显示张数，并给一个"去看看"的入口（照片都在打卡墙那一餐下） */}
+          {card.status === 'DONE' && (
+            <div className="order-card__photos">
+              {card.photoCount > 0 && (
+                <Link className="order-card__photo-link" to="/checkins" state={{ from: '/order' }}>
+                  已传 {card.photoCount} 张成品照，去看看 →
+                </Link>
+              )}
+              <button type="button" className="order-card__photo" onClick={() => setUploadMealKey(card.mealKey)}>
+                📷 {card.photoCount > 0 ? '再传一张' : '上传这餐的成品照'}
+              </button>
+            </div>
+          )}
+
+          {card.nextActions.length > 0 && (
+            <div className="order-card__actions">
+              {card.nextActions.map((action) => (
+                <button
+                  key={action.status}
+                  type="button"
+                  className={[
+                    'order-card__action',
+                    action.status === 'CANCELED' ? 'order-card__action--danger' : 'is-primary',
+                  ].join(' ')}
+                  disabled={updateStatus.isPending}
+                  onClick={() => onAction(card, action)}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          )}
+          </>
+          )}
+        </article>
+        )
+          })
+        }}
+      />
+      )}
 
       {uploadMealKey && (
         <CheckInUploadSheet

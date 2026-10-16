@@ -519,7 +519,7 @@ it('切换「只看我的」按 scope 重新取数（两个视角各自一片缓
   })
   renderOrder()
 
-  fireEvent.click(await screen.findByRole('button', { name: '只看我的' }))
+  fireEvent.click(await screen.findByRole('tab', { name: '只看我的' }))
   const get = apiClient.get as unknown as { mock: { calls: unknown[][] } }
   await waitFor(() =>
     expect(
@@ -1089,7 +1089,7 @@ it('那条提醒的卡被筛选挡住时：放开筛选再滚（用户要的是"
   renderOrder()
   await screen.findByText('2026-10-13 · 晚餐')
 
-  fireEvent.click(screen.getByRole('button', { name: '只看我的' }))
+  fireEvent.click(screen.getByRole('tab', { name: '只看我的' }))
   await waitFor(() => expect(screen.queryByText('2026-10-12 · 午餐')).toBeNull())
 
   emitTabRetap('/order')
@@ -1353,9 +1353,10 @@ it('列表上往左划 → 切到下一个状态筛选（「全部」→「待�
   mockGet({ boards: { family: twoCards() } })
   renderOrder()
 
+  await screen.findByText('2026-10-13 · 晚餐')
+  // 翻页区只在**有数据**时才有（加载中那一段不该是一块能划的空白，D-091）
   const area = document.querySelector('.swipe-pager') as HTMLElement
   expect(area).toBeTruthy()
-  await screen.findByText('2026-10-13 · 晚餐')
 
   swipe(area, 340, 140)
 
@@ -1394,4 +1395,98 @@ it('在筛选胶囊那一行上划动**不换筛选**（那一行自己横着滚
 
   const active = document.querySelector('.chip.is-active')
   expect(active?.textContent?.trim().startsWith('全部')).toBe(true)
+})
+
+/*
+ * 2026-10-16（D-091 / R-72）「页头不动、只滚主体」+「段控也能滑」。
+ *
+ * 这一批改造最容易悄悄坏掉的两件事，各自钉一条：
+ * ① 段控与 tab 行**必须落在 `SwipePager` 外面**——那套手势认的是"划在谁身上"，
+ *    放进去就会同一次划动被两边抢（用户在"订单手势"那题上选的一边正是"段控也能滑"）；
+ * ② 段控自己划得动（左右各一格），并且**在它上面划不会顺带换筛选**。
+ */
+it('页头区固定、翻页区只包卡片：段控与筛选行都在 SwipePager 外面（否则两个手势会抢）', async () => {
+  mockGet({ boards: { family: twoCards() } })
+  renderOrder()
+  await screen.findByText('2026-10-13 · 晚餐')
+
+  const fixed = document.querySelector('.page__fixed') as HTMLElement
+  const body = document.querySelector('.page__body') as HTMLElement
+  expect(fixed).toBeTruthy()
+  expect(body).toBeTruthy()
+
+  // ① 页头三样（标题、段控、筛选行）都在固定区里
+  expect(fixed.querySelector('.page-head, .ptitle, h1')).toBeTruthy()
+  const segmented = fixed.querySelector('.segmented') as HTMLElement
+  const filterRow = fixed.querySelector('.order-filter') as HTMLElement
+  expect(segmented).toBeTruthy()
+  expect(filterRow).toBeTruthy()
+  // …而两个入口行（点单历史 / 自己写一道）也在固定区（页面级操作行）
+  expect(fixed.querySelector('.order-shortcuts')).toBeTruthy()
+
+  // ② 翻页区在主体里，而且**只包卡片**：段控 / 筛选行 / 操作行一个都不在里面
+  const pager = body.querySelector('.swipe-pager') as HTMLElement
+  expect(pager).toBeTruthy()
+  expect(pager.querySelector('.segmented')).toBeNull()
+  expect(pager.querySelector('.chips')).toBeNull()
+  expect(pager.querySelector('.order-shortcuts')).toBeNull()
+  // 卡片确实在里面（不然上面那几条"不在里面"等于没验）
+  expect(pager.querySelector('.order-card')).toBeTruthy()
+})
+
+/** 在一段控件自己身上划动（`swipe` 那个是给翻页区的：移动事件派在 `.swipe-pager` 上） */
+function swipeSelf(el: Element, fromX: number, toX: number, dy = 4) {
+  fireEvent.touchStart(el, { touches: [{ clientX: fromX, clientY: 200 }] })
+  for (let step = 1; step <= 4; step += 1) {
+    const x = fromX + ((toX - fromX) * step) / 4
+    fireEvent.touchMove(el, { touches: [{ clientX: x, clientY: 200 + (dy * step) / 4 }] })
+  }
+  fireEvent.touchEnd(el, { changedTouches: [{ clientX: toX, clientY: 200 + dy }] })
+}
+
+it('段控往左划 → 切到「只看我的」（用户 2026-10-16：段控也能滑）', async () => {
+  mockGet({ boards: { family: twoCards(), mine: boardFixture([], { scope: 'mine' }) } })
+  renderOrder()
+  await screen.findByText('2026-10-13 · 晚餐')
+
+  const segmented = document.querySelector('.segmented') as HTMLElement
+  expect(segmented).toBeTruthy()
+  // 起手按在左边那一格上（真实手指就是这么落的）；走 110px > 400*0.22（翻页阈值按控件宽算）
+  const first = segmented.querySelector('.segmented__item') as HTMLElement
+  swipeSelf(first, 140, 30)
+
+  await waitFor(() => {
+    const active = document.querySelector('.segmented__item.is-active')
+    expect(active?.textContent?.trim()).toBe('只看我的')
+  })
+})
+
+it('在段控上划动不会顺带换筛选（两个开关各管各的）', async () => {
+  mockGet({ boards: { family: twoCards(), mine: boardFixture([], { scope: 'mine' }) } })
+  renderOrder()
+  await screen.findByText('2026-10-13 · 晚餐')
+
+  const segmented = document.querySelector('.segmented') as HTMLElement
+  swipeSelf(segmented.querySelector('.segmented__item') as HTMLElement, 140, 30)
+
+  await waitFor(() => {
+    expect(document.querySelector('.segmented__item.is-active')?.textContent?.trim()).toBe('只看我的')
+  })
+  // 筛选还停在「全部」。要等一手：换 scope 之后那一份数据在新 key 下还要取一次，
+  // 「只看我的」这一刻可能还没到（筛选行随数据一起出来）
+  await waitFor(() => {
+    expect(document.querySelector('.chip.is-active')?.textContent?.trim().startsWith('全部')).toBe(true)
+  })
+})
+
+it('段控是 tablist：读屏念得出"这组开关在换什么"，当前那一格是选中态', async () => {
+  mockGet({ boards: { family: twoCards() } })
+  renderOrder()
+  await screen.findByText('2026-10-13 · 晚餐')
+
+  const group = screen.getByRole('tablist', { name: '看谁的点单' })
+  expect(group).toBeTruthy()
+  const active = screen.getByRole('tab', { name: '全家点菜单' })
+  expect(active.getAttribute('aria-selected')).toBe('true')
+  expect(screen.getByRole('tab', { name: '只看我的' }).getAttribute('aria-selected')).toBe('false')
 })

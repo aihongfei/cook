@@ -1,5 +1,23 @@
 /* 点菜单（M3 / F3-01~F3-05）：卡片主体沿用 shared.scss 的 .order-card，这里只加本轮新增的部分 */
 
+/*
+ * 翻页区里那一页没有卡时的空态（D-091）。
+ *
+ * 空态是**每一页各画自己那一份**（跟手拖到一半时邻页也得说出它自己有没有东西），
+ * 所以它落在 `.swipe-pager__panel` 里——那一页在 `fill` 模式下是"至少一屏高"的
+ * （见 ui.scss 的 `.swipe-pager--fill`）。这里让它把那一屏吃满并居中：
+ * 否则一句"还没有人点菜"孤零零贴在顶上，看着像下面还有内容没加载出来
+ * （与 `.page__body > .empty-state:only-child` 同一条理由，只是隔了一层）。
+ */
+.order-panel__empty {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding-bottom: 40px;
+}
+
 /* 还没加入家庭时的引导（点菜是家庭内的协作，一个人点没意义） */
 .order-empty {
   margin: 18px var(--spacing-page) 0;
