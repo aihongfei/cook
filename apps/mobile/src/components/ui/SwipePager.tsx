@@ -100,6 +100,25 @@ interface Gesture {
 /** 抬手之后那次 click 的吐掉期限（同 `long-press.ts` 的理由：那次 click 可能压根不来） */
 const SWALLOW_CLICK_MS = 1500
 
+/**
+ * 交还指针捕获（**只有真的接管过才交还**）。
+ *
+ * `releasePointerCapture` 对"没被捕获的指针"会抛 `NotFoundError`，而"到底捕获上没上"
+ * 在 jsdom 与老 WebView 里都问不出来——所以只信自己那个 ref（见 `capturedPointer`）。
+ * 忽略异常是这个项目在"清理代码"上一贯的做法：收尾不该把主流程带崩（与长按那边的
+ * `stopWatch` 同一态度）。
+ */
+function releaseCapture(el: Element, captured: { current: number | null }) {
+  const id = captured.current
+  if (id === null) return
+  captured.current = null
+  try {
+    el.releasePointerCapture?.(id)
+  } catch {
+    // 已经自己丢了（例如指针被系统收走）——没什么要做的
+  }
+}
+
 export default function SwipePager({
   keys,
   activeKey,
@@ -317,11 +336,27 @@ export default function SwipePager({
   }, [start, move, end])
 
   // 鼠标/触控板（开发时在桌面浏览器里试）：同一条状态机，只是不用拦默认行为
+  /**
+   * 鼠标这一路**已经接管**的那个指针（见 `onPointerMove` 里为什么不能提前接管）。
+   * 放 ref 不放 state：它是手势期间的事实，变它不该触发重渲染。
+   */
+  const capturedPointer = useRef<number | null>(null)
+
+  /**
+   * ⚠️ **不在这里 `setPointerCapture`**——那是 2026-10-16 用户报「滚动里面的卡片都不能点击了」的根因。
+   *
+   * 指针捕获不只改派 `pointermove`：按规范，**配对的鼠标事件（`mousedown`/`mouseup`）也会被改派到捕获元素上**。
+   * 于是浏览器算出的 `click` 目标变成"按下处与抬起处的**最近公共祖先**"——
+   * 按下在卡片里、抬起落在这一层 → **click 的目标就是这一层**，卡片的 `onClick`、链接的默认跳转
+   * 一个都不会触发。用户看到的就是"卡片点不动了"（真机用鼠标/触控板、桌面浏览器都能复现）。
+   *
+   * 所以捕获推迟到**确认这是一次划动**的那一刻（`onPointerMove` 里）：
+   * 只是点一下（位移没到 `SWIPE_LOCK_DX`）就永远不接管，click 照旧落在卡片上；
+   * 真的划起来了才接管，于是手指/指针划出这一层也还收得到后续事件（这是当初接管的原因）。
+   */
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.pointerType !== 'mouse' || event.button !== 0) return
-      // jsdom 与老 WebView 里可能没有这个方法（拿不到捕获也不影响后面那几步：事件仍会冒泡到这一层）
-      event.currentTarget.setPointerCapture?.(event.pointerId)
       start(event.clientX, event.clientY, event.target as Element | null)
     },
     [start],
@@ -330,20 +365,31 @@ export default function SwipePager({
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.pointerType !== 'mouse') return
       move(event.clientX, event.clientY, () => event.preventDefault())
+      // 判定成"在翻页"之后才接管（`move` 里改的状态，这里读它）
+      if (gesture.current?.status === 'horizontal' && capturedPointer.current === null) {
+        // jsdom 与老 WebView 里可能没有这个方法（拿不到捕获也不影响后面那几步：事件仍会冒泡到这一层）
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+        capturedPointer.current = event.pointerId
+      }
     },
     [move],
   )
   const onPointerUp = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.pointerType !== 'mouse') return
+      releaseCapture(event.currentTarget, capturedPointer)
       end(event.clientX)
     },
     [end],
   )
-  const onPointerCancel = useCallback(() => {
-    if (!gesture.current) return
-    end(gesture.current.lastX)
-  }, [end])
+  const onPointerCancel = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      releaseCapture(event.currentTarget, capturedPointer)
+      if (!gesture.current) return
+      end(gesture.current.lastX)
+    },
+    [end],
+  )
 
   /** 拖动之后紧跟着的那一次 click 不是点击（见 end 里那段），在这一层拦住 */
   const onClickCapture = useCallback((event: { preventDefault: () => void; stopPropagation: () => void }) => {

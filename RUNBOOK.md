@@ -5285,3 +5285,55 @@ const fire = (type, x, y, el) => el.dispatchEvent(new TouchEvent(type, {
   会一直停在起点（我第一遍就因此误判"滑块没动"）。要看最终位置就等一次显式
   `waitForTimeout`，或者直接读 `getComputedStyle(el).transform` 那个 matrix——
   **矩阵是算出来的真值，不受动画有没有跑完影响**。
+
+## R-086 修「点不动」这类问题时怎么一次找对（D-094 / R-76 配套，✅ 已验证，2026-10-16）
+
+### 一、先做这三步，别先怀疑 z-index
+
+用户报「滚动里面的卡片都不能点击了」。我按下面这个顺序查，
+**前两步都把我往错处带**，第三步才定案：
+
+| 步骤 | 做法 | 得到什么 | 能不能收手 |
+| --- | --- | --- | --- |
+| ① 量遮挡 | 沿卡片扫一圈 `document.elementsFromPoint(x, y)`，看有没有东西盖在上面 | 栈顶就是卡片自己的元素、没有遮罩 | **不能**——只证明"没有覆盖层"，不证明事件会到卡片 |
+| ② 派合成 click | `el.dispatchEvent(new MouseEvent('click', {bubbles:true}))` | 正常跳转，看着像"其实能点" | **不能**——合成事件不带指针捕获那一套，**这类 bug 用它永远复现不出来** |
+| ③ 记真输入的目标 | 用真输入点一次，捕获阶段记 `pointerdown` / `mouseup` / `click` 的 **target** | 按下在 `order-card__date`、**`mouseup` 与 `click` 落在 `swipe-pager`** | **定案** |
+
+真正的机关：`setPointerCapture` 不只改派 `pointermove`，**配对的鼠标事件也一起改派**，
+于是浏览器算出的 click 目标是"按下处与抬起处的最近公共祖先" = 那个捕获者。
+
+### 二、判据
+
+```js
+const log = []
+for (const t of ['pointerdown','mouseup','click'])
+  document.addEventListener(t, (e) => log.push({
+    t, target: (e.target?.className || e.target?.tagName || '').toString().slice(0, 40),
+    trusted: e.isTrusted,
+  }), true)
+// 然后**用真输入**点一下（Playwright 的 locator.click / cua.click，不要用 dispatchEvent）
+```
+
+- **`trusted` 必须是 `true`**——合成事件测不出这一类；
+- 三个事件的目标**不一致**（按下在里层、抬起在外层）→ 就是捕获被提前接管了；
+- 三个一致却仍没反应 → 换方向查（`preventDefault` / `stopPropagation` / 长按的吞 click）。
+
+### 三、别用 `locator.click()` 判"能不能点"
+
+这次排查里 `locator.click()` 在**所有**页面（包括我没改过的）都超时，
+因为它的可操作性检查（稳定/可见/可接收事件）在这个应用里过不去——
+这是**工具的限制，不是 bug 的证据**。判"能不能点"用 `cua.click({x, y})`（坐标真输入）
+或 `tab.click({x, y})`，它们直接派发真事件、不做那套检查。
+
+### 四、修完要回过头验两半
+
+改的是"接管时机"，所以**两个方向都要验**（缺一个就可能按下葫芦起瓢）：
+
+- **点击**：真输入逐个点——卡片进详情、段控换格、分页 tab 换页、多选进选择模式。
+  跨页都要点（这次坏的是共享组件，四个页面一起坏）；
+- **划动**：真触摸划——段控上划只换 scope、翻页区上划只换筛选。
+  捕获推迟之后划动仍要能划出这一层（当初接管的理由）。
+
+### 五、相关
+
+`DECISIONS.md` **D-094**、`RISKS.md` **R-76**、`RUNBOOK.md` R-081（用触摸验手势时容易漏掉鼠标那一半）。

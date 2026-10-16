@@ -67,6 +67,35 @@ it('滑块在：位移＝格号 × 100% 再加格间隙（百分比只走"一格
   expect(thumb().style.transform).toContain('translate3d(calc(0% + 0 * var(--segment-gap, 8px)')
 })
 
+/*
+ * 指针捕获的**时机**（用户 2026-10-16：「滚动里面的卡片都不能点击了」，R-076）。
+ *
+ * 段控自己也是按钮，所以同一个坑在这里的表现是"**点某一格换不了**"：
+ * `pointerdown` 就 `setPointerCapture` 会把配对的 `mouseup` 改派到本层，
+ * 浏览器算出的 click 目标于是变成这一层——那一格自己的 onClick 不会触发。
+ */
+it('点一下不接管指针捕获，真的划起来才接管', () => {
+  const spy = vi.fn()
+  ;(HTMLElement.prototype as unknown as { setPointerCapture: unknown }).setPointerCapture = spy
+  try {
+    render(<Harness />)
+
+    fireEvent.pointerDown(root(), { pointerType: 'mouse', button: 0, clientX: 300, clientY: 200 })
+    fireEvent.pointerMove(root(), { pointerType: 'mouse', clientX: 296, clientY: 200 })
+    fireEvent.pointerUp(root(), { pointerType: 'mouse', clientX: 296, clientY: 200 })
+    // 走 4px：这是"点一下"，不该接管
+    expect(spy).not.toHaveBeenCalled()
+
+    fireEvent.pointerDown(root(), { pointerType: 'mouse', button: 0, clientX: 300, clientY: 200 })
+    // 走够 8px → 判定成换格，这一刻接管
+    fireEvent.pointerMove(root(), { pointerType: 'mouse', clientX: 286, clientY: 200 })
+    expect(spy).toHaveBeenCalledTimes(1)
+    fireEvent.pointerUp(root(), { pointerType: 'mouse', clientX: 200, clientY: 200 })
+  } finally {
+    delete (HTMLElement.prototype as unknown as { setPointerCapture?: unknown }).setPointerCapture
+  }
+})
+
 it('点某一格照旧能切（滑动是加的那一条路，不是唯一的路）', async () => {
   const onChange = vi.fn()
   render(<Harness onChange={onChange} />)

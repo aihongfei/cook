@@ -71,6 +71,20 @@ interface Gesture {
 /** 抬手之后那次 click 的吐掉期限（不吐的话，划过去会被紧跟着的点击再切回来） */
 const SWALLOW_CLICK_MS = 1500
 
+/**
+ * 交还指针捕获（只有真的接管过才交还；理由与写法见 `SwipePager` 里同名那个函数）。
+ */
+function releaseCapture(el: Element, captured: { current: number | null }) {
+  const id = captured.current
+  if (id === null) return
+  captured.current = null
+  try {
+    el.releasePointerCapture?.(id)
+  } catch {
+    // 已经自己丢了——没什么要做的
+  }
+}
+
 export default function SwipeSegmented({
   items,
   activeKey,
@@ -255,10 +269,20 @@ export default function SwipeSegmented({
   }, [start, move, end])
 
   // 鼠标/触控板（开发时在桌面浏览器里试）
+  /**
+   * 鼠标这一路**已经接管**的那个指针。放 ref 不放 state：手势期间的事实，变它不该触发重渲染。
+   *
+   * ⚠️ 与 `SwipePager` 里同一处坑、同一份修法（用户 2026-10-16：「滚动里面的卡片都不能点击了」）：
+   * **在 pointerdown 就 `setPointerCapture` 会让 click 落到这一层上**——捕获会把配对的
+   * `mouseup` 也改派过来，于是浏览器算出的 click 目标变成"按下处与抬起处的最近公共祖先"。
+   * 段控自己也是按钮：那样一来**点某一格就换不了**（正是"点了没反应"）。
+   * 所以接管推迟到确认"这是在划"的那一刻（`onPointerMove` 里读 `move` 改的状态）。
+   */
+  const capturedPointer = useRef<number | null>(null)
+
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.pointerType !== 'mouse' || event.button !== 0) return
-      event.currentTarget.setPointerCapture?.(event.pointerId)
       start(event.clientX, event.clientY)
     },
     [start],
@@ -267,20 +291,29 @@ export default function SwipeSegmented({
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.pointerType !== 'mouse') return
       move(event.clientX, event.clientY, () => event.preventDefault())
+      if (gesture.current?.status === 'horizontal' && capturedPointer.current === null) {
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+        capturedPointer.current = event.pointerId
+      }
     },
     [move],
   )
   const onPointerUp = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.pointerType !== 'mouse') return
+      releaseCapture(event.currentTarget, capturedPointer)
       end(event.clientX)
     },
     [end],
   )
-  const onPointerCancel = useCallback(() => {
-    if (!gesture.current) return
-    end(gesture.current.lastX)
-  }, [end])
+  const onPointerCancel = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      releaseCapture(event.currentTarget, capturedPointer)
+      if (!gesture.current) return
+      end(gesture.current.lastX)
+    },
+    [end],
+  )
 
   /** 划动之后那一次 click 在这一层拦住（见 end 里那段） */
   const onClickCapture = useCallback((event: { preventDefault: () => void; stopPropagation: () => void }) => {

@@ -1062,3 +1062,63 @@ Capacitor 处理带 `capture` 的 file input 时**先用它判有没有相机**�
 
 `DECISIONS.md` **D-093**、`apps/mobile/src/lib/no-image-drag.ts`、
 `apps/mobile/src/styles/index.scss`（`img, a` 那一段）、`RISKS.md` R-081（同族的"手势被抢"）。
+
+## R-76 指针捕获**要在认定"这是在划"之后**才接管：提前接管会让 click 改派到捕获者，卡片与按钮全都点不动（✅ 已定规矩，2026-10-16；配套 D-094）
+
+### 一、风险本身
+
+`setPointerCapture` 看着只是"让 pointermove 都送到我这儿"，但它按规范**连配对的鼠标事件
+（`mousedown`/`mouseup`）一起改派到捕获元素上**。于是浏览器在算 `click` 目标时，
+按下处（卡片里）与抬起处（捕获者）的**最近公共祖先**是那个捕获者——
+**click 变成落在容器上**，卡片自己的 `onClick`、里面链接的默认跳转一个都不触发。
+
+用户看到的是"**卡片都不能点击了**"，而屏幕上一点异常都没有：卡片在、没有遮罩、点击不报错。
+
+### 二、为什么容易再犯
+
+- 它**只在真输入（鼠标/触控板）下发生**：手指那条路走的是另一套 `touch*` 监听，不碰指针捕获。
+  用触摸事件验手势时永远复现不出来——本项目验跟手翻页正是走触摸（R-081）；
+- **合成事件复现不出来**：`dispatchEvent(new MouseEvent('click'))` 不带指针捕获那一套，
+  怎么点都是通的；
+- **跨页**：坏的是共享组件，所有用它的页面一起坏，于是很像"工具坏了"而不是"代码错了"；
+- 症状是"点不动"，人第一反应是查 z-index / 覆盖层——而命中测试（`elementsFromPoint`）
+  会显示"栈顶就是卡片"，把人往错的方向带。
+
+### 三、判别要点
+
+遇到"点不动"，**先打这三个事件的目标**（真输入，`isTrusted === true`）：
+
+```js
+for (const t of ['pointerdown','mouseup','click'])
+  document.addEventListener(t, (e) => log.push({ t, target: e.target.className, trusted: e.isTrusted }), true)
+```
+
+- 按下在卡片、`mouseup`/`click` 却在**外层容器**上 → 就是这个原因（某处提前 `setPointerCapture`）；
+- 三个都落在卡片、却仍没反应 → 那是别的问题（去看 `preventDefault` / `stopPropagation` / 长按吐掉）。
+
+判据里 **`isTrusted` 必须为真**：合成事件测不出这一类。
+
+### 四、怎么修
+
+**捕获推迟到"判定成手势"的那一刻**：`pointerdown` 只 `start()`，等 `pointermove` 里
+判定成 horizontal 了才 `setPointerCapture`。两半都要有：
+
+- 点一下（位移没到 `SWIPE_LOCK_DX`）**永远不接管** → click 照旧落在卡片上；
+- 真的划起来**必须接管** → 划出这一层还收得到后续 `move`（这是当初接管的理由）。
+
+交还只信自己记录的指针 id（`releasePointerCapture` 对没捕获的指针会抛 `NotFoundError`，
+而"捕获上没上"在 jsdom 与老 WebView 里问不出来），忽略异常。
+
+**搜索一下还有谁在 `pointerdown` 里接管**：`setPointerCapture` 全仓库只有两处
+（`SwipePager` / `SwipeSegmented`），两处同一形态，改就一起改。
+
+### 五、怎么测
+
+单测派发 `pointerDown` + **小幅** `pointerMove`（不到 8px）→ 断言 `setPointerCapture` **没被调用**；
+再派发一次走够 8px 的 → 断言**被调用一次**（且之后不再重复）。
+**先红后绿**：把捕获退回"按下就接管"，第一条立刻红——它真的在管这件事。
+
+### 六、相关
+
+`DECISIONS.md` **D-094**、`apps/mobile/src/components/ui/SwipePager.tsx`（`capturedPointer` 那段）、
+`SwipeSegmented.tsx`（同一处坑）、`RISKS.md` R-081（用触摸验手势时漏掉的那一半）。

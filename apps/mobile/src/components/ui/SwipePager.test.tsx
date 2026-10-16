@@ -235,6 +235,57 @@ it('拖动之后紧跟着的那一次 click 被吞掉（松手不该顺手点进
   expect(clicked).toHaveBeenCalledTimes(1)
 })
 
+/*
+ * 指针捕获的**时机**（用户 2026-10-16 报「滚动里面的卡片都不能点击了」，R-076）。
+ *
+ * 这组用例盯的是同一个坑的两半：
+ * - **点一下不该接管**：`pointerdown` 就 `setPointerCapture` 会让配对的 `mouseup` 也改派到本层，
+ *   于是浏览器算出的 click 目标变成"按下处与抬起处的最近公共祖先"= 这一层，
+ *   卡片自己的 onClick 与链接的默认跳转一个都不触发——表现就是"卡片点不动了"；
+ * - **真的划起来必须接管**：划出这一层之后还要收得到后续 move（这是当初接管的理由），
+ *   所以判定成 horizontal 的那一刻必须补上。
+ *
+ * jsdom 没有真的指针捕获，所以这两条只能看"**有没有调** `setPointerCapture`"——
+ * 而这一点恰好就是 bug 的全部：真浏览器里多调一次就足以让 click 改道。
+ */
+it('点一下**不**接管指针捕获（否则 click 会被改派到这一层，卡片就点不动了）', () => {
+  const spy = vi.fn()
+  // jsdom 的 Element 上没有这个方法的实现，补一个间谍
+  ;(HTMLElement.prototype as unknown as { setPointerCapture: unknown }).setPointerCapture = spy
+  try {
+    render(<Harness />)
+
+    fireEvent.pointerDown(root(), { pointerType: 'mouse', button: 0, clientX: 300, clientY: 400 })
+    // 还没走够 8px：这是"点一下"，不是"翻页"
+    fireEvent.pointerMove(root(), { pointerType: 'mouse', clientX: 296, clientY: 400 })
+    fireEvent.pointerUp(root(), { pointerType: 'mouse', clientX: 296, clientY: 400 })
+
+    expect(spy).not.toHaveBeenCalled()
+  } finally {
+    delete (HTMLElement.prototype as unknown as { setPointerCapture?: unknown }).setPointerCapture
+  }
+})
+
+it('真的划起来**才**接管指针捕获（划出这一层还要收得到后续 move）', () => {
+  const spy = vi.fn()
+  ;(HTMLElement.prototype as unknown as { setPointerCapture: unknown }).setPointerCapture = spy
+  try {
+    render(<Harness />)
+
+    fireEvent.pointerDown(root(), { pointerType: 'mouse', button: 0, clientX: 300, clientY: 400 })
+    // 走够 8px → 判定成翻页，这一刻接管
+    fireEvent.pointerMove(root(), { pointerType: 'mouse', clientX: 288, clientY: 400 })
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    // 之后每次 move 不再重复接管
+    fireEvent.pointerMove(root(), { pointerType: 'mouse', clientX: 200, clientY: 400 })
+    expect(spy).toHaveBeenCalledTimes(1)
+    fireEvent.pointerUp(root(), { pointerType: 'mouse', clientX: 100, clientY: 400 })
+  } finally {
+    delete (HTMLElement.prototype as unknown as { setPointerCapture?: unknown }).setPointerCapture
+  }
+})
+
 it('鼠标也能拖（开发时在桌面浏览器里试的那条路）', () => {
   const onSwitched = vi.fn()
   render(<Harness onSwitched={onSwitched} />)
