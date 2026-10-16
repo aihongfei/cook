@@ -74,6 +74,29 @@ export async function requestPermission(): Promise<NotifyPermission> {
 const INEXACT = { isExactNotification: false } as const
 
 /**
+ * 本文件的提醒排在哪个通知渠道（Android 8+）。
+ *
+ * ## 为什么必须显式指定（2026-10-16）
+ *
+ * 不指定时插件会把它落到自己那个叫 `default` 的渠道上——而那个渠道在系统设置里的
+ * **名字**就是 "Default"、说明栏是空的。vivo 开放平台那条要求是"把所有**正在使用的
+ * 本地通知渠道**登记备案"，一个叫 "Default" 的渠道根本说不清它发什么；
+ * 用户到系统设置里看到它也不知道该不该关。
+ *
+ * 所以：本文件的提醒（到点做饭、东西快过期）走 `meal_reminders`（"做饭与到期提醒"），
+ * "别人做了什么"那类走 `family_events`（"家里的事"）——两个渠道由
+ * `android/app/src/main/java/com/yushan/cook/NotifyChannels.java` **一处建齐**，
+ * 这里只引用它的 id。
+ *
+ * ## 名字为什么写死在这里
+ *
+ * 渠道 id 是一个**跨语言约定**（Java 侧建、JS 侧用），与 `capacitor.config.ts` 里那个
+ * runner label、后端的 `REALTIME_PATH` 是同一类东西。多一层"从原生读回来"不会让它更安全，
+ * 只会多一个能坏的地方。**这两处必须一致**（改一处就要改另一处）。
+ */
+const MEAL_REMINDERS_CHANNEL = 'meal_reminders'
+
+/**
  * 整批重排（先撤掉旧的，再排新的）。
  *
  * 调用方负责：**只在权限已给时调用**（否则插件会自己弹权限框）。
@@ -90,6 +113,8 @@ export async function rescheduleAll(reminders: LocalReminder[]): Promise<number>
       title: reminder.title,
       // 插件的 `body` 是必填 string：没有第二句时给空串（通知栏只显示标题那一行）
       body: reminder.body ?? '',
+      // 落到「做饭与到期提醒」那个渠道（不写就会掉进插件的 default，见上面那段）
+      channelId: MEAL_REMINDERS_CHANNEL,
       schedule: { at: reminder.at, allowWhileIdle: true },
       ...INEXACT,
       // 点开跳到哪儿（`localNotificationActionPerformed` 里读回来）

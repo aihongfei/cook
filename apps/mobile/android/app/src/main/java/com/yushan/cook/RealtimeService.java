@@ -87,8 +87,12 @@ public class RealtimeService extends Service {
     public static final String EXTRA_API_BASE = "apiBase";
     public static final String EXTRA_USER_ID = "userId";
 
-    /** 常驻通知（前台服务必须有它，否则系统随时会收走服务） */
-    private static final String LIVE_CHANNEL_ID = "realtime_link";
+    /**
+     * 常驻通知那条的 id（前台服务必须有它，否则系统随时会收走服务）。
+     *
+     * 渠道走 `NotifyChannels.LIVE_LINK`（"实时连接"）——渠道的创建/删除**全部**收在
+     * `NotifyChannels` 一处，这里不再自己建（2026-10-16 合并；理由见那边文件头）。
+     */
     private static final int LIVE_NOTIFICATION_ID = 910001;
 
     /** 与那段调度器代码共用的那份存储（见文件头） */
@@ -280,7 +284,8 @@ public class RealtimeService extends Service {
     private void postNotifications(JSONArray items) {
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) return;
-        ensureDefaultChannel(manager);
+        // 渠道建齐（幂等）；退役的那个 "default" 也在这里被删掉，见 NotifyChannels
+        NotifyChannels.ensure(this);
 
         for (int index = 0; index < items.length(); index += 1) {
             JSONObject item = items.optJSONObject(index);
@@ -295,7 +300,7 @@ public class RealtimeService extends Service {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) flags |= PendingIntent.FLAG_IMMUTABLE;
             PendingIntent pending = PendingIntent.getActivity(this, id, open, flags);
 
-            Notification notification = new NotificationCompat.Builder(this, "default")
+            Notification notification = new NotificationCompat.Builder(this, NotifyChannels.FAMILY_EVENTS)
                     .setContentTitle(title)
                     .setContentText(text)
                     .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
@@ -377,19 +382,12 @@ public class RealtimeService extends Service {
     // ------------------------------------------------------------------ 常驻通知与收尾
 
     private Notification liveNotification() {
-        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (manager.getNotificationChannel(LIVE_CHANNEL_ID) == null) {
-                /*
-                 * 常驻通知**最低优先级、无声无息**：它是一个"连接还活着"的说明，
-                 * 不是提醒。用户真正要看的是家里发生的事（那些走 default 通道、有声）。
-                 */
-                NotificationChannel channel = new NotificationChannel(
-                        LIVE_CHANNEL_ID, "实时连接", NotificationManager.IMPORTANCE_MIN);
-                channel.setDescription("让家里的事立刻到达（不响、不打扰）");
-                manager.createNotificationChannel(channel);
-            }
-        }
+        /*
+         * 渠道由 `NotifyChannels` 统一管（建齐三个 + 删掉退役的，见那边文件头）。
+         * 这里在建之前**再叫一次**是必要的：本服务可能由系统在应用进程之外单独唤起
+         * （`START_STICKY` 之后的重启），那一刻 `MainActivity` 没有跑过。
+         */
+        NotifyChannels.ensure(this);
 
         Intent open = new Intent(this, MainActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -397,7 +395,7 @@ public class RealtimeService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) flags |= PendingIntent.FLAG_IMMUTABLE;
         PendingIntent pending = PendingIntent.getActivity(this, LIVE_NOTIFICATION_ID, open, flags);
 
-        return new NotificationCompat.Builder(this, LIVE_CHANNEL_ID)
+        return new NotificationCompat.Builder(this, NotifyChannels.LIVE_LINK)
                 .setContentTitle("家里的事会立刻告诉你")
                 .setContentText("正在保持连接")
                 .setSmallIcon(getApplicationInfo().icon)
@@ -405,16 +403,6 @@ public class RealtimeService extends Service {
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .setContentIntent(pending)
                 .build();
-    }
-
-    private void ensureDefaultChannel(NotificationManager manager) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-        if (manager.getNotificationChannel("default") != null) return;
-        // 与那段调度器代码用的是同一个通道 id（那边也是 "default"），用户看到的是同一种通知
-        NotificationChannel channel = new NotificationChannel(
-                "default", "家里的事", NotificationManager.IMPORTANCE_DEFAULT);
-        channel.setDescription("家里人做了什么");
-        manager.createNotificationChannel(channel);
     }
 
     private void stopEverything() {

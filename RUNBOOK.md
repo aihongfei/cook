@@ -5842,3 +5842,100 @@ document.querySelector('.my-recipes').parentElement.className // "page__fixed"
 
 `DECISIONS.md` **D-101**、`RISKS.md` **R-83 / R-78**、
 `apps/mobile/src/pages/recipes/recipes.scss`、`apps/mobile/src/pages/recipes/MyRecipesPage.test.tsx`。
+
+## R-094 查「这台手机上我们有哪些通知渠道、名字对不对」怎么查（D-102 / R-84 配套，✅ 已验证，2026-10-16）
+
+### 一、什么时候用这个
+
+- 改通知渠道（换名字、换 id、增删渠道）；
+- 要去厂商开放平台**备案本地通知渠道**（vivo / 荣耀 / 小米都有这一项）；
+- 用户说"通知声音不对""通知收不到""系统设置里那个开关是干什么的"。
+
+### 二、把渠道列出来（**必须按包名过滤**）
+
+```bash
+adb shell dumpsys notification --noredact > /tmp/notif.txt
+# 只看我们那个包名下的渠道：
+awk '/AppSettings: com.yushan.cook/{p=1; next} p&&/NotificationChannel\{/{print} p&&/AppSettings:/&&!/com.yushan.cook/{exit}' /tmp/notif.txt \
+  | grep -oE "mId='[^']*', mName=[^,]*, mDescription=[^,]*, mImportance=[0-9]+.*mDeleted=[a-z]*" \
+  | sed "s/, mBypassDnd.*mDeleted=/ | deleted=/"
+```
+
+⚠️ **不要**直接 `grep "mId='default'"`：系统里几十个应用都有叫 `default` 的渠道
+（本次就先用错了一次，看到"default 还在"，其实那是别的应用的）。**必须按包名切段**。
+
+正常输出（2026-10-16 实测）：
+
+```
+mId='family_events', mName=家里的事, mDescription=hasDescription , mImportance=3 | deleted=false
+mId='realtime_link', mName=实时连接, mDescription=hasDescription , mImportance=2 | deleted=false
+mId='meal_reminders', mName=做饭与到期提醒, mDescription=hasDescription , mImportance=3 | deleted=false
+mId='default', mName=Default, mDescription=hasDescription , mImportance=3 | deleted=true
+```
+
+### 三、`deleted=true` **不等于**删干净了（R-84 的坑）
+
+那个标记只说明"这个渠道有墓碑记录、当前被标记删除"。要确认它**不会回来**，两件事都要做：
+
+1. **重启应用再看一次**（`adb shell am force-stop com.yushan.cook` → 重新启动 → 再 dump）；
+2. **想清楚谁会把它建回来**：
+
+```bash
+grep -rn "NotificationChannel(" apps/mobile/node_modules/@capacitor/*/android/ 2>/dev/null
+```
+
+本次的定案点就是第二条：`background-runner` 在**每次巡查**的路径上重新构造
+`Notifications(context)`（约 15 分钟一次），所以"删了又回来"是必然的
+——最后靠 pnpm 补丁不让它建（见 `patches/@capacitor__background-runner.patch`）。
+
+### 四、验"通知真的落在新渠道上"（不能只看渠道列表）
+
+渠道建对了 ≠ 通知会走它。要**真发一条**再看它落在哪个 channel：
+
+```bash
+# ① 应用压到后台（前台的话原生那条不弹，见 D-099 八）
+adb shell input keyevent KEYCODE_HOME
+# ② 另一个账号做一件事（见 R-089 / R-091 的脚本，或直接打 API）
+# ③ 看通知记录里的 channel
+adb shell dumpsys notification --noredact > /tmp/n2.txt
+awk '/pkg=com.yushan.cook/{p=1} p&&/channel=/{print; p=0}' /tmp/n2.txt | head -3
+```
+
+本次实测（决定性的一行）：
+
+```
+NotificationRecord(... pkg=com.yushan.cook ... channel=family_events ...)
+              android.title=String (家人乙打卡了：渠道验收打卡)
+```
+
+### 五、一个**不是渠道问题**的现象：重装之后通知全都不响
+
+`adb install -r`（甚至全新安装）之后，**Android 13+ 的 `POST_NOTIFICATIONS` 运行期权限会回到未授予**
+——与渠道一点关系都没有，但表现完全一样（通知不出现）。本次就在这上面先走了一次弯路。
+
+```bash
+# 判据
+adb shell dumpsys package com.yushan.cook | grep -A 1 "POST_NOTIFICATIONS: granted"   # granted=false
+adb shell cmd appops get com.yushan.cook POST_NOTIFICATION                            # ignore
+# 修（测试环境直接授；真实用户是应用里那次 requestPermission 弹框）
+adb shell pm grant com.yushan.cook android.permission.POST_NOTIFICATIONS
+```
+
+**记住这条顺序**：装完先给通知权限，再验通知；不然会把"权限没给"误判成"渠道配错了"。
+
+### 六、改渠道时**必须**同时看一眼的三处（id 是跨语言约定）
+
+| 文件 | 作用 |
+| --- | --- |
+| `android/app/src/main/java/com/yushan/cook/NotifyChannels.java` | **唯一**创建处（权威） |
+| `src/lib/local-notify.ts` | 做饭/到期那类提醒排程时指定 `meal_reminders` |
+| `public/runners/patrol.js` | 后台那段代码（不能 import，只能自带一份）指定 `family_events` |
+
+三处不一致的表现是"**有的手机上渠道名字对、有的不对**"（谁先建谁说了算），
+以及"通知落在那个名字难看的旧渠道上"。
+
+### 七、相关
+
+`DECISIONS.md` **D-102**（三个渠道清单 + 为什么分两个）、`RISKS.md` **R-84**、
+`apps/mobile/patches/@capacitor__background-runner.patch`、
+`RUNBOOK.md` **R-091**（实时通知怎么验，本文件的第四节与它配套）。

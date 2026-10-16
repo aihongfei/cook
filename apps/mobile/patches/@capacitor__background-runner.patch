@@ -1,0 +1,83 @@
+diff --git a/android/src/main/java/io/ionic/backgroundrunner/plugin/api/Notifications.kt b/android/src/main/java/io/ionic/backgroundrunner/plugin/api/Notifications.kt
+index 9eb28f334cfcc4eafcb16bbfef839e3a5cc48f59..12eaaebcb91be77211bfc62ff5822d982648cb1b 100644
+--- a/android/src/main/java/io/ionic/backgroundrunner/plugin/api/Notifications.kt
++++ b/android/src/main/java/io/ionic/backgroundrunner/plugin/api/Notifications.kt
+@@ -33,12 +33,31 @@ class Notifications(context: Context) : NotificationsAPI {
+         this.manager = NotificationManagerCompat.from(context)
+         this.config = CapConfig.loadDefault(context)
+ 
++        /*
++         * 【本项目补丁 2026-10-16】不再建 `badge` 那个渠道，`default` 也换成我们自己的那条。
++         *
++         * 原版这里会建两个渠道：`default`（名字就叫 "Default"）与 `badge`。原因是我们
++         * 在 vivo 开放平台要走"本地通知分类备案"，**要求把所有正在使用的渠道登记备案**，
++         * 而一个叫 "Default" 的渠道说不清发什么、用户到系统设置里看到也不知道该不该关；
++         * `badge` 更是从没发过东西（本项目从不调 `setBadge` / `clearBadge`）。
++         *
++         * 为什么必须打补丁、不能只在自己代码里删：**这个类每次巡查（约 15 分钟）都会被
++         * 重新构造一次**（`BackgroundRunner.kt` 里 `api.initNotificationsAPI(Notifications(context))`），
++         * 于是那两个渠道会被反复建回来。删不干净，只能不让它建。
++         *
++         * 改动只有两处：
++         * 1. 不调 `createBadgeNotificationChannel()`（`setBadge`/`clearBadge` 保留但本仓库不用；
++         *    真要用了得先把渠道建回来）；
++         * 2. `defaultNotificationChannelID` 从 `"default"` 改成 `"family_events"`，
++         *    并在 `createNotificationChannel()` 里给它一个说得清的名字与说明
++         *    ——这三样必须与 `apps/mobile/android/app/src/main/java/com/yushan/cook/NotifyChannels.java`
++         *    里那一份**完全一致**（渠道的名字是"创建那一次"定的，谁先建谁说了算）。
++         */
+         this.createNotificationChannel()
+-        this.createBadgeNotificationChannel()
+     }
+     companion object {
+         const val notificationIntentKey = "LocalNotificationId"
+-        const val defaultNotificationChannelID = "default"
++        const val defaultNotificationChannelID = "family_events"
+         const val defaultBadgeNotificationChannelID = "badge"
+     }
+ 
+@@ -126,19 +145,35 @@ class Notifications(context: Context) : NotificationsAPI {
+ 
+     private fun createNotificationChannel() {
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+-            val name: CharSequence = "Default"
+-            val description = "Default"
++            /*
++             * 【本项目补丁 2026-10-16】名字与说明改成「家里的事」那一套。
++             *
++             * 原版是 name="Default" / description="Default"——系统设置里就显示成那样，
++             * 用户看不懂、备案表也写不清（见 init 里那段说明）。
++             *
++             * ⚠️ **这三段文字必须与 `NotifyChannels.java` 里 `FAMILY_EVENTS` 那条一模一样**：
++             * 渠道的名字/说明由"创建那一次"决定，两边写了不同的，谁先建谁说了算，
++             * 结果就是"有的手机上叫家里的事、有的叫 Default"。
++             */
++            val name: CharSequence = "家里的事"
++            val description = "谁点了菜、谁传了打卡、谁动了冰箱这类家里的消息"
+             val importance = NotificationManager.IMPORTANCE_DEFAULT
+             val channel = NotificationChannel(defaultNotificationChannelID, name, importance)
+             channel.description = description
+-            val audioAttributes = AudioAttributes.Builder()
+-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+-                .setUsage(AudioAttributes.USAGE_ALARM)
+-                .build()
++            /*
++             * 系统默认提示音：不自己指定音效（与另一条渠道同一条口径，跟着用户手机走）。
++             * 先问配置（本项目没配 sound，所以这里通常拿到 null），拿不到就用系统默认
++             * ——与 `NotifyChannels.java` 那边等价。
++             */
+             val soundUri = this.getDefaultSoundUrl(context)
+-            if (soundUri != null) {
+-                channel.setSound(soundUri, audioAttributes)
+-            }
++                ?: android.provider.Settings.System.DEFAULT_NOTIFICATION_URI
++            channel.setSound(
++                soundUri,
++                AudioAttributes.Builder()
++                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
++                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
++                    .build()
++            )
+ 
+             val notificationManager = context.getSystemService(
+                 NotificationManager::class.java

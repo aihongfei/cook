@@ -1475,3 +1475,57 @@ document.querySelector('.my-recipes').parentElement.className  // "page__fixed"
 `DECISIONS.md` **D-101**、`RISKS.md` **R-78**（同一族的测试版）、
 `apps/mobile/src/pages/recipes/recipes.scss`（`.my-recipes__grid` / `.my-recipes__status` 两处注释）、
 `apps/mobile/src/pages/recipes/MyRecipesPage.test.tsx`（那两条守卫）。
+
+## R-84 通知渠道：**第三方插件会在自己的路径上反复把渠道建回来**——只在自己代码里删是删不掉的（用户 2026-10-16 要走 vivo 备案时暴露，✅ 已定规矩，2026-10-16；配套 D-102）
+
+### 一、风险本身
+
+起因是 vivo 要求"把所有**正在使用的本地通知渠道**登记备案"，而我们当时那两个渠道是这样的：
+`default`（系统设置里就叫 "Default"、说明栏空）与 `badge`（从来没发过任何东西）。
+要改名前先试了"在自己代码里 `deleteNotificationChannel` 掉"，**看起来成功了**
+——`dumpsys` 里那一行变成 `mDeleted=true`。但它**会被建回来**，而且来自两条不同的路：
+
+| 渠道 | 谁建 | 什么时候建 |
+| --- | --- | --- |
+| `default` | `@capacitor/local-notifications` | 插件 `load()`（应用每次启动，`super.onCreate` 里） |
+| `default` + `badge` | `@capacitor/background-runner` | **每次巡查都重新构造 `Notifications(context)`**（约 15 分钟一次） |
+
+第二条最阴：它不是"启动时建一次"，而是**每 15 分钟建一次**。所以"删完那一刻查是对的"
+完全不能证明它没事——几分钟后它自己就回来了，而那时没人会再查一遍。
+
+### 二、为什么容易再犯
+
+- **`dumpsys` 的 `mDeleted=true` 会被误读成"删掉了"**：它其实是"这个渠道有墓碑记录、
+  当前被标记删除"，同样的输出在"已被永久删除"和"删了又被别人建回来"两种情况下都可能出现
+  ——**必须隔一段时间/重启后再看一次**才能区分；
+- **渠道是"谁先建谁说了算"**：我们代码里写的新名字，只要插件先建过同名 id，
+  我们的 `createNotificationChannel` 就是**静默无效**的（系统按 id 认，名字以第一次为准）；
+- **这是依赖的行为，不是我们的代码**：翻自己的仓库怎么都看不出来，
+  得去读 `node_modules` 里那两个插件的 Kotlin 源码。
+
+### 三、判别要点
+
+- **看到 `mDeleted=true` 不要就此收工**：① 重启应用再看一次；② 看别的东西会不会重建它
+  （`grep -rn "NotificationChannel(" node_modules/@capacitor/*/android/`）；
+- **谁先建谁说了算** → 要换名字就**换 id**（旧 id 删掉），不要指望用同名 id 覆盖名字；
+- **判断"插件会不会反复建"**：在插件里找那个建渠道的类**是怎样被实例化的**。
+  本次就是这一条定案的：`BackgroundRunner.kt` 里 `api.initNotificationsAPI(Notifications(context))`
+  在**每次执行**的路径上（不是 `load()` 之类的启动钩子）。
+
+### 四、怎么修（这一版采用的）
+
+对插件打 **pnpm 补丁**（`patches/@capacitor__background-runner.patch`），让它：
+不建 `badge`；`defaultNotificationChannelID` 改成 `family_events` 并配上正经名字与说明。
+插件那份保留 `setBadge`/`clearBadge` 两个方法（本项目不用），并在补丁注释里写明
+"真要用了得先把渠道建回来"。
+
+**为什么打补丁而不是继续删**：删要跟在**对方的每一次创建**之后，而对方的创建散在
+两个插件的三条路径上（启动、每次巡查）——那种"追着删"迟早漏一条，
+而漏了的表现是"渠道莫名其妙回来了"，极难归因。
+
+### 五、相关
+
+`DECISIONS.md` **D-102**（三个渠道的清单与理由）、
+`apps/mobile/android/app/src/main/java/com/yushan/cook/NotifyChannels.java`（唯一创建处）、
+`apps/mobile/patches/@capacitor__background-runner.patch`、
+`RUNBOOK.md` **R-094**（怎么 dump 渠道、怎么区分"删掉了"与"又被建回来了"）。

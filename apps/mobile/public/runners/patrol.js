@@ -129,6 +129,20 @@ function tick(resolve) {
               id: item.notifyId,
               title: item.title,
               body: item.body || '',
+              /*
+               * 走「家里的事」那个渠道（2026-10-16）。
+               *
+               * **必须指定**：不写就会落到插件自己那个叫 `default` 的渠道上，
+               * 而它在系统设置里的名字就是 "Default"、说明栏空——vivo 要求
+               * "把所有正在使用的本地通知渠道登记备案"，那种名字说不清发什么；
+               * 用户看到也不知道该不该关。
+               *
+               * 这里**不能 import**（这段代码跑在独立的 JS 引擎里，见文件头），
+               * 所以这个 id 是**第三份拷贝**：`NotifyChannels.java`（建）、
+               * `lib/local-notify.ts`（做饭提醒用另一个）、以及这里。
+               * 三处必须一致；改一处就要改三处。
+               */
+              channelId: 'family_events',
               // 排到"此刻"：插件的这条路径就是走系统闹钟（见 Notifications.kt），
               // 给当前时刻等于立刻弹
               scheduleAt: new Date(),

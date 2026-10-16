@@ -4054,3 +4054,101 @@ myRecipesParent: page__fixed
   **加载块落点**也都是 `top 222`（改前「原创的」是 208——比另外两支高 14px，那一层壳缺失）；
 - **顺带排查了同形状的其它规则**：全站只有 `.recipes-page .page-back` 还是后代选择器，
   已在浏览器里确认它仍匹配得到（那一页的两块都还带 `.recipes-page`），不是死规则。
+
+## D-102 通知渠道收拢成三个、名字说人话：`family_events` / `meal_reminders` / `realtime_link`（M10 / F10-08 配套，用户 2026-10-16 在 vivo 开放平台看到要求后要求改，✅ 已交付）
+
+### 一、起因：vivo 的一条备案要求，正好打在我们身上
+
+用户在 vivo 开放平台看到两条消息，问「你的意思是这个我过不去吗」。看截图后要分清两件事：
+
+1. **「推送权限：受限 / 审核中」**——那是**厂商推送通道**（要走 vivo 自己的 SDK 与服务器）。
+   它只关系到**一个场景**：进程被杀之后还要秒级收到。我们的实时通知（D-099）**不走它**，
+   三层兜底里的两层（前台 WebSocket、后台前台服务的长连接）都是自建连接。
+   而且截图上的状态是**审核中**——那是"还没有结论"，不是被拒。
+   （调研结论仍按 `RESEARCH.md` 七：个人开发者 + 不上架，正式推送权限难拿，所以不在那儿投入集成成本。）
+2. **「请在规定时间内完成 vivo 本地通知分类的接入……将所有正在使用的本地通知渠道在平台登记备案」**
+   ——**这一条管的才是我们**。我们全部通知都是**本地通知**（App 自己弹），一个厂商通道都没用。
+
+所以本决策处理的是第 2 条：**把渠道整理成"能填进备案表、用户也看得懂"的样子。**
+
+### 二、改之前的真实情况（模拟器上 dump 出来的）
+
+| 渠道 id | 系统设置里显示的名字 | 谁建的 | 实际发什么 |
+| --- | --- | --- | --- |
+| `default` | **Default**（说明栏空） | `@capacitor/local-notifications` 初始化 | **所有东西**：别人点了菜、传了打卡、到点做饭、东西过期…… |
+| `badge` | **Badge**（说明栏说 "Badge"） | `@capacitor/background-runner` | **从来没发过任何一条**（本项目从不调 `setBadge`/`clearBadge`） |
+| `realtime_link` | 实时连接 | 本项目 `RealtimeService` | 常驻的"正在保持连接" |
+
+两个问题：**备案填不清**（"Default 发什么？"——什么都发）、**用户看不懂**
+（到系统设置里看到 "Default""Badge"，不知道那是干什么的、该不该关）。
+
+### 三、三条 Android 硬规矩决定了只能"新建 + 删旧"
+
+1. **渠道 id 建出来不能改**；名字与说明也是**由创建那一次定的**，之后代码里改无效
+   ——系统的设计是"用户看到的设置不能被应用偷偷改掉"；
+2. 所以要换名字，只能**用一个新 id 新建**，再把旧的 `deleteNotificationChannel` 掉；
+3. 而**第三方插件会自己建**：`local-notifications` 在 `load()` 里建 `default`；
+   `background-runner` 更是**每次巡查（约 15 分钟）都重新构造一次 `Notifications` 类**、
+   每次都把 `default` 与 `badge` 建回来。
+
+第 3 条决定了"只在自己代码里删"是**做不到的**（删了又会被建回来），
+所以对 `background-runner` 打了 **pnpm 补丁**（`patches/@capacitor__background-runner.patch`）：
+不建 `badge`，并把它的 `defaultNotificationChannelID` 改成 `family_events` 配上正经名字。
+
+### 四、改完之后的三个渠道（**这就是备案要填的清单**）
+
+| 渠道 id | 名字 | 重要性 | 发什么 |
+| --- | --- | --- | --- |
+| `family_events` | **家里的事** | 默认（有声） | 谁点了菜 / 撤了菜 / 改了人数 / 取消了这一餐；谁往冰箱放了、改了、拿走了；谁传了打卡、谁评论了；谁加入/退出家庭、改了家庭设置或角色；谁新建/改了/删了自家菜谱 |
+| `meal_reminders` | **做饭与到期提醒** | 默认（有声） | 到点该做饭了（饭点前一小时）；冰箱里有东西快过期/已经过期 |
+| `realtime_link` | **实时连接** | 最低（静音） | 那条常驻的"正在保持连接"（前台服务必需，否则系统会随手收走服务） |
+
+退役的 `default`：**主动删除**（`NotifyChannels.ensure` 每次启动删一遍；
+插件在它自己的 `load()` 里还会建，我们的删除紧随其后，见 `MainActivity` 的注释）。
+`badge`：靠补丁**不让它出生**。
+
+### 五、两个渠道为什么分开（而不是都塞一个里面）
+
+`family_events` 与 `meal_reminders` 的**用途不同**：前者是"**谁做了什么**"（有互动意味，
+看到可能想回一句或去做点什么），后者是"**时间到了该干活**"。分开之后用户想静音其中一类时
+不必连另一类一起关掉——这也正是 Android 渠道机制存在的意义。项目里这两类本来就是分开算的
+（M10 的"状态型"与"事件型"，见 D-097）。
+
+### 六、用户改过的东西一个字都不覆盖
+
+`NotifyChannels.create()` 里"已存在就一个字都不改"：用户在系统设置里把「家里的事」调成静音、
+或者关掉，那是他的选择，下次启动**不能**改回来（那正是渠道机制要防的事）。
+
+### 七、渠道 id 是"跨语言约定"，三处必须一致
+
+`family_events` 这个字符串出现在**三个**地方，它们必须一致：
+
+- `android/app/src/main/java/com/yushan/cook/NotifyChannels.java`（**建**，唯一权威）；
+- `src/lib/local-notify.ts`（做饭提醒用它建的**另一个**渠道 `meal_reminders`）；
+- `public/runners/patrol.js`（那段后台代码**不能 import**，只能自己写一份 `family_events`）。
+
+这与 `REALTIME_PATH`、`capacitor.config.ts` 里那个 runner label 是同一类东西
+——**不为此加一层"从原生读回来"**（那只会多一个能坏的地方），而是三处都写清"改一处要改三处"。
+
+### 八、验收（2026-10-16，真装真测）
+
+- **全新安装**（`adb uninstall` 后重装，避免残留）后 `dumpsys` 查到的渠道：
+  `family_events`（家里的事，重要性 3）/ `meal_reminders`（做饭与到期提醒，3）/
+  `realtime_link`（实时连接，2）**三个都在、名字都对**；
+  `default` 是 `mDeleted=true`（只剩系统内部墓碑，设置里不显示）；**`badge` 彻底不存在**；
+- **重启应用后 `default` 没有复活**（`mDeleted=true` 复验）——补丁 + 删除都生效
+  （那一轮巡查会重建的两个渠道已经被补丁挡住）；
+- **通知真的落到新渠道**：应用**压到后台**，另一个账号传打卡 →
+  `RealtimeLink: patrol fetched: 2 new`，`dumpsys` 里那条通知是
+  `android.title=String (家人乙打卡了：渠道验收打卡)` 且 **`channel=family_events`**；
+- 前端 **808/808**、`tsc -b` 0 错、lint 18 warnings / 0 errors。
+
+### 九、改动清单（便于复查）
+
+- 新增 `NotifyChannels.java`：三个渠道**唯一**的创建处 + 退役渠道的删除（幂等）；
+- `MainActivity.onCreate`：`super` **之后**调 `NotifyChannels.ensure`
+  （必须在之后——插件在 `super` 里建那个 `default`）；
+- `RealtimeService`：不再自己建渠道，改用 `NotifyChannels.*`；
+- `lib/local-notify.ts`：排程时显式 `channelId: 'meal_reminders'`；
+- `public/runners/patrol.js`：显式 `channelId: 'family_events'`；
+- `patches/@capacitor__background-runner.patch`：不建 `badge`、`default` → `family_events` 并配名字。

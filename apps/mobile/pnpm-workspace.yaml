@@ -3,3 +3,5 @@ allowBuilds:
   '@parcel/watcher': true
   '@scarf/scarf': false
   '@capacitor/background-runner': true
+patchedDependencies:
+  '@capacitor/background-runner': patches/@capacitor__background-runner.patch
