@@ -1120,11 +1120,20 @@ async function main() {
     intoDone.status === 409,
     `${intoDone.status} ${intoDone.body?.message ?? ''}`,
   )
-  const doneTargetAfter = await callWithRetry('GET', '/orders', { token: repeatMama.token })
+  /*
+   * ⚠️ 这一餐要用**详情接口**读，不能用列表 `GET /orders`。
+   *
+   * `DONE_TARGET` 是第 4 天，而 D-107（2026-10-16）之后列表只铺今明后三天
+   * （`LIST_DAY_SPAN`）——它在列表里根本没有卡片，`.find(...)` 返回 undefined，
+   * 断言会拿到 `dishCount=undefined` 并**误报成"菜进去了"**。
+   * 窗口之外的餐按设计走详情（`GET /orders/:mealKey`，见 R-097 与 orders.controller 那条注释）。
+   * 这条与"点菜窗口 7 天"是两件事：能安排的范围（`ORDER_DAY_SPAN`）没变，变的是列表画多长。
+   */
+  const doneTargetAfter = await callWithRetry('GET', `/orders/${DONE_TARGET}`, { token: repeatMama.token })
   check(
     '加不进去时**一道都不该进去**（整桌要么都进、要么都不进）',
-    doneTargetAfter.body?.cards?.find(card => card.mealKey === DONE_TARGET)?.dishCount === 1,
-    `dishCount=${doneTargetAfter.body?.cards?.find(card => card.mealKey === DONE_TARGET)?.dishCount}`,
+    doneTargetAfter.status === 200 && doneTargetAfter.body?.dishCount === 1,
+    `${doneTargetAfter.status} dishCount=${doneTargetAfter.body?.dishCount}`,
   )
 
   // ---------- 点单历史（F3-09 / D-035）：解决 R-19 的"60 张上限之外看不见" ----------

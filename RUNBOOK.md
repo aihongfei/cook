@@ -4637,6 +4637,30 @@ APKSIGNER=$(ls "$HOME/Library/Android/sdk/build-tools"/*/apksigner | tail -1)
 - **容器自证**：`cook-api-1` 里 `dist/modules/realtime/` 存在、`app.module.js` 含 `RealtimeModule`、通知服务含 `recordChange`。
 - **APK**：当日重出的服务器版（`release/御膳-服务器版-20261016.apk`）四条核对已过（§五），含实时通道、三渠道与长按多选等全部前端改动。
 
+### 八、2026-10-16 第二次复跑记录（发现页补内容那两笔，**无新迁移**）
+
+- **落后范围**：3 笔（`c4dc843` 点菜单收成三天、`d81ce8e` 发现页补内容、`8caaba9` 时令卡片样式）。
+  哈希比对显示**缺 2 个新文件**（`discover-page.rules.ts` 与其测试）＋ 10 个文件落后
+  （订单窗口、发现页三个接口、菜谱的 `tag` 参数）。⚠️ 新文件在比对里是 `MISSING` 而不是"哈希不同"：
+  只看"哪些文件哈希不一样"会漏掉要新建的那两个。
+- **无新迁移**：`6276a3a..HEAD` 没动 `services/api/prisma`，日志里照旧是 `23 migrations found` /
+  `All migrations have been successfully applied.`。**没迁移不等于没部署**，别拿它当选据。
+- **公网实测**：七套照跑 47/33/**145**/70/67/25/22；另加一次发现页专项（临时脚本，用完即删）——
+  `occasions` 免登录 200 且四词数字 74/46/33/33 与本地一致；`seasonal` 未登录 401、
+  登录后 `count=38` 且与 `/recipes?tag=秋季,秋季菜谱,秋季养生` 的 `total` **同一个数**；
+  `report` 对新家庭是 `null`；`decide?occasion=宴请` 连挑 **4 道互不相同且每道都真带「宴请」标签**；
+  `occasion=早餐` → 400；`/discover/flip` → 404（已下线）。
+- **一处旧断言被这次上线暴露**（不是代码错，是断言读法过时）：`verify-orders-http.cjs` 里
+  「加不进去时一道都不该进去」用 **列表** 读第 4 天那一餐，而 `c4dc843` 之后列表只铺今明后三天
+  （`LIST_DAY_SPAN`）——那餐在列表里根本没有卡片，`.find()` 拿到 `undefined`，断言**误报成
+  "菜进去了"**（`dishCount=undefined`）。改成走**详情接口** `GET /orders/:mealKey`（R-097 定的
+  窗口外读法）后 145/145。**教训**：改窗口那一次只更新了新写的 R-097，没有回头扫"还有谁用列表
+  读窗口外的餐"——**旧验收脚本是改口径时最容易漏改的一处**，因为它不在 `src` 里。
+- **容器自证与逐字节**：`docker inspect cook-api-1` 的 `.Image` = 刚构建的 `dbda8f50fd42`（21:35:08，
+  上一个镜像 `8856f0ce135f` 变悬空）；传完修好的脚本后 **211 个文件逐字节一致**。
+- **这一版仍不进 APK**：三笔改的都是后端与网页，服务器版 APK 用的仍是当日那份（前端资源在
+  `assets/public` 里由 APK 自带）——**要手机上也看到新的时令卡片，得重出 APK**（§五）。
+
 ## R-076 抽屉的「开了关、关了再开」怎么验（R-66 配套，✅ 已验证，2026-10-14）
 
 配套：`RISKS.md` **R-66**（为什么"替我关掉"的 helper 不能当 `onClose`；为什么常驻挂载的测试永远验不出这件事）。
