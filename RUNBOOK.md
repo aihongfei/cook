@@ -4661,6 +4661,43 @@ APKSIGNER=$(ls "$HOME/Library/Android/sdk/build-tools"/*/apksigner | tail -1)
 - **这一版仍不进 APK**：三笔改的都是后端与网页，服务器版 APK 用的仍是当日那份（前端资源在
   `assets/public` 里由 APK 自带）——**要手机上也看到新的时令卡片，得重出 APK**（§五）。
 
+### 九、2026-10-16 第三次复跑（图标那一笔，**只重出 APK、不进后端**）
+
+用户：「打包一下apk吧」。这一笔是 `52f328f`（全站图标换成手绘水彩图，D-111），
+**只动前端与文档**——`git show --name-only 52f328f | grep -c '^services/'` = **0**，
+所以**没有重新部署后端**（R-075 第六节第 1 条反过来也成立：不需要部署时就别去动它）。
+
+- **标记串换成这一版的**（要挑"新版本刚加上、又绝不会出现在旧包里的"）：
+  `icon--trail` / `icon--lead` / `icon--white`（JS 里 2/2/1 处、CSS 里各 1 处）。
+  ⚠️ **别拿 `icons/tick.png` 这类图片路径当标记串**——会得到 0，因为路径是模板字符串
+  拼的（`/img/icons/${name}.png`），字面量根本不在产物里。**查图标要看资产目录**：
+  `unzip -l app-release.apk | grep -c "assets/public/img/icons/.*\.png"` = **48**。
+- **老的符号确实清干净了**：`❯❯` `🍽` `📷` `✅` `↻` `↗` `⌃` `⌄` 在 JS 里**全是 0**；
+  `🍳` 剩 1 处，逐字查出来是 `FALLBACK_AVATARS`——**头像白名单**（后端校验的用户数据，
+  D-111 第八节明确保留），不是漏网。
+- **四条核对**：公网地址 1 / 回环 0 / 新标记串齐 / CORS `http://localhost` 照旧，
+  签名 `apksigner` = CN=Yushan、SHA-256 `5cdba7b7…`（与前两次同一个签名）；
+  原生侧 `classes.dex` 里 `RealtimeService`/`NotifyChannels` 各 2 处、三渠道名齐、
+  `runners/patrol.js` 里是 `family_events`。
+- **装机实测（Medium_Phone_API_37.0，撤掉 `adb reverse` 走真公网）**：
+  注册新账号 `apk10162244` / Mama → 直接进厨房页、权限弹窗自动出现（F10-05 那条设计）、
+  菜谱图正常、**服务器库里查到这条账号**（`avatar 🐼`、`createdAt 2026-10-16T14:50:46Z`）——
+  决定性证据（`docker exec cook-api-1 node /app/q.mjs`，脚本从本机 `cat | ssh` 过去再 `docker cp`，
+  **别在 ssh 里手拼三层引号**，试了两次都对不上）。
+  五个 Tab 与「我的」页逐个截图：图标全部正常、区块标题那对「❯❯」、列表行的 `›`、
+  相机/一家三口/辣椒/铃/盘子都在。
+- **返回键两条判据复验**：根页面（我的）按一次 → **回厨房**（Tab 根页先回厨房），
+  再按一次 → `mCurrentFocus` 变 launcher（退出）。与 D-105/D-109 定的"最多两下、不误退"一致。
+- ⚠️ **一个新账号看到的两处"空"，都是设计不是回归**（都当场查了出处，免得下次又当 bug 修）：
+  ① **时令精选整块不画**——`SeasonalPicks` 有 `if (!family.isPending && !family.data) return null`，
+  后端 `seasonal()` 也 `throw NotFoundException('先加入家庭，才有这一季的菜')`，**前后端一致**；
+  ② **推荐卡片报「这道菜谱没有找到」**——后端 `recommend()` 对没家庭的人故意返 404
+  （`先加入家庭，才能给你挑你家的菜`），但前端 `recipes.ts` 把**任何** 404 都映射成
+  "这道菜谱没有找到，去菜谱大全看看吧"（那句话是给 `/recipes/:id` 用的）。
+  **报告而不顺手改**：这是 `ff084bc` 就在的文案错配，与本次改动无关，按"只改任务范围内的内容"留给用户定。
+- **产物**：`release/御膳-服务器版-20261016-icons.apk`（28MB，与原始产物 sha256 同一个
+  `0a9754a2…`；`release/` 在 `.gitignore` 里，二进制不入库）。
+
 ## R-076 抽屉的「开了关、关了再开」怎么验（R-66 配套，✅ 已验证，2026-10-14）
 
 配套：`RISKS.md` **R-66**（为什么"替我关掉"的 helper 不能当 `onClose`；为什么常驻挂载的测试永远验不出这件事）。
