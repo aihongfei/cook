@@ -396,9 +396,11 @@
   pointer-events: none;
 }
 
+/* 悬浮球上那张脸（2026-10-16 由 🍳 换成手绘水彩锅）：21px 的字形度量删掉，
+   尺寸交给 `<Icon name="pan" size={21}>`；这一层只管它是行的锚点 */
 .ai-ball__face {
-  font-size: 21px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
 }
 
 .ai-ball__hint {

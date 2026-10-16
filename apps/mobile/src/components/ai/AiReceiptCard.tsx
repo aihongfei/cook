@@ -1,3 +1,4 @@
+import Icon from '@/components/icons/Icon'
 import { DotLoading } from 'antd-mobile'
 import type { AiReceipt } from '@/api/ai'
 
@@ -28,7 +29,7 @@ export default function AiReceiptCard({ items, undoing, onUndo }: AiReceiptCardP
         {/* 卡片是"已经写进去了"的证据，所以它用的是完成态的说法，不是"要不要"。
             文案不说"冰箱"：v1 只有冰箱这一档，但回执机制是通用的（将来收藏、口味按同一档接）——
             写死"冰箱"的话，下一条接进来时这张卡就在说谎了。 */}
-        <span className="ai__receipt-mark" aria-hidden>✅</span>
+        <span className="ai__receipt-mark" aria-hidden><Icon name="check" size={15} /></span>
         <span className="ai__receipt-lead">已经帮你办好了</span>
       </div>
       <ul className="ai__receipt-list">

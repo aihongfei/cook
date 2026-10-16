@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import Icon from '@/components/icons/Icon'
 import { useQuery } from '@tanstack/react-query'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
@@ -571,7 +572,7 @@ function RecipeForm({ id, recipe, carry }: { id: string; recipe?: RecipeDetail; 
                 disabled={form.ingredients.length <= 1}
                 onClick={() => dropRow('ingredients', index)}
               >
-                ×
+                <Icon name="close" size={13} />
               </button>
             </div>
           ))}
@@ -580,7 +581,7 @@ function RecipeForm({ id, recipe, carry }: { id: string; recipe?: RecipeDetail; 
             className="recipe-form__add"
             onClick={() => patch('ingredients', [...form.ingredients, emptyIngredient()])}
           >
-            ＋ 加一条配料
+            <Icon name="plus" size={14} className="icon--lead" /> 加一条配料
           </button>
         </div>
 
@@ -603,7 +604,7 @@ function RecipeForm({ id, recipe, carry }: { id: string; recipe?: RecipeDetail; 
                 disabled={form.steps.length <= 1}
                 onClick={() => dropRow('steps', index)}
               >
-                ×
+                <Icon name="close" size={13} />
               </button>
             </div>
           ))}
@@ -612,7 +613,7 @@ function RecipeForm({ id, recipe, carry }: { id: string; recipe?: RecipeDetail; 
             className="recipe-form__add"
             onClick={() => patch('steps', [...form.steps, ''])}
           >
-            ＋ 加一步
+            <Icon name="plus" size={14} className="icon--lead" /> 加一步
           </button>
         </div>
 

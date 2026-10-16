@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Icon from '@/components/icons/Icon'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { apiErrorMessage } from '@/api/client'
@@ -205,7 +206,7 @@ export default function RecipeDetailPage() {
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  打开原视频 ↗
+                  打开原视频 <Icon name="arrow-up-right" size={12} className="icon--trail" />
                 </a>
               ) : (
                 <p>暂无视频，先跟着文字步骤做吧</p>
@@ -234,7 +235,7 @@ export default function RecipeDetailPage() {
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  查看原始菜谱 ↗
+                  查看原始菜谱 <Icon name="arrow-up-right" size={12} className="icon--trail" />
                 </a>
               )}
             </section>

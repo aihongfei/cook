@@ -188,8 +188,13 @@ it('已收藏是实心红心、未收藏是空心，且都在链接之外（点�
     </QueryClientProvider>,
   )
 
+  /*
+   * 实心/空心在 2026-10-16 之前是 `❤`/`♡` 两个字符，现在是**两张图**
+   * （`heart.png` / `heart-outline.png`）。所以判据从 textContent 换成图片地址——
+   * 只看 textContent 的话两颗心都是空串，"实心还是空心"根本没被验到。
+   */
   const heart = await screen.findByRole('button', { name: '取消收藏番茄炒蛋' })
-  expect(heart.textContent).toBe('❤')
+  expect(heart.querySelector('img')?.getAttribute('src')).toBe('/img/icons/heart.png')
   expect(heart.getAttribute('aria-pressed')).toBe('true')
   // 心在 <a> 之外：放进去点击会冒泡到链接上，变成"想收藏却进了详情页"
   expect(heart.closest('a')).toBeNull()
@@ -211,6 +216,6 @@ it('未收藏时是空心 ♡（同一个按钮的两种状态）', async () => 
   )
 
   const heart = await screen.findByRole('button', { name: '收藏番茄炒蛋' })
-  expect(heart.textContent).toBe('♡')
+  expect(heart.querySelector('img')?.getAttribute('src')).toBe('/img/icons/heart-outline.png')
   expect(heart.getAttribute('aria-pressed')).toBe('false')
 })

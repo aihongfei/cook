@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { apiErrorMessage } from '@/api/client'
 import { can, useFamily } from '@/api/family'
 import { useAddOrderItem, useOrderOptions } from '@/api/orders'
@@ -174,7 +175,7 @@ export default function DishCard({
           className={['dish-card__pick', select?.picked && 'is-on'].filter(Boolean).join(' ')}
           aria-hidden="true"
         >
-          {select?.picked ? '✓' : ''}
+          {select?.picked && <Icon name="tick" size={12} white />}
         </span>
       )}
 
@@ -192,7 +193,7 @@ export default function DishCard({
           aria-label={favorited ? `取消收藏${dish.name}` : `收藏${dish.name}`}
           onClick={onToggleFavorite}
         >
-          {favorited ? '❤' : '♡'}
+          <Icon name={favorited ? 'heart' : 'heart-outline'} size={17} />
         </button>
       )}
 
@@ -226,7 +227,7 @@ export default function DishCard({
             state={{ from: `${location.pathname}${location.search}`, ...(plan ? { plan } : {}) }}
             aria-label={`查看${dish.name}做法`}
           >
-            看做法 →
+            看做法<Icon name="arrow-right" size={13} className="icon--trail" />
           </Link>
 
           {/* 不能点菜时不画按钮（没加入家庭 / 角色没有 `order.create`）：给个按钮让用户白点一次、

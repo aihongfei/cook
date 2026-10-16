@@ -170,7 +170,7 @@ it('菜单还没定时说清为什么是空的并给出路（去备菜计划）'
   renderList()
 
   expect(await screen.findByText(/这几天还没有定下来的菜单，所以没什么要买的/)).toBeTruthy()
-  expect(screen.getByRole('link', { name: '去备菜计划 →' })).toBeTruthy()
+  expect(screen.getByRole('link', { name: '去备菜计划' })).toBeTruthy()
   expect(screen.queryByRole('checkbox')).toBeNull()
 })
 

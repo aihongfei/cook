@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { useFavoriteStatus, useToggleFavorite } from '@/api/favorites'
 import { recipeErrorMessage, recipeListUrl, useRecipeFilters } from '@/api/recipes'
 import { useRecommendations } from '@/api/recommend'
@@ -81,7 +82,7 @@ export default function KitchenPage() {
       )}
       {recommendations.data?.fridgeEmpty && recommendations.data.items.length > 0 && (
         <button type="button" className="kitchen-recommend__why" onClick={() => navigate('/fridge', { state: { from: '/kitchen' } })}>
-          记一下冰箱里有什么，推荐会跟着变 →
+          记一下冰箱里有什么，推荐会跟着变<Icon name="arrow-right" size={13} className="icon--trail" />
         </button>
       )}
       <SeasonalBanner />

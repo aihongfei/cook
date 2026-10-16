@@ -1,3 +1,4 @@
+import Icon from '@/components/icons/Icon'
 import './ui.scss'
 
 interface SectionTitleProps {
@@ -12,12 +13,12 @@ export default function SectionTitle({ title, more, onMoreClick }: SectionTitleP
   return (
     <div className="section-title">
       <div className="section-title__text">
-        <span className="section-title__orn">❯❯</span>
+        <Icon name="chevron-double" size={13} />
         {title}
       </div>
       {more && (
         <button type="button" className="section-title__more" onClick={onMoreClick}>
-          {more} <span>→</span>
+          {more} <Icon name="arrow-right" size={12} />
         </button>
       )}
     </div>

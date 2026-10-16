@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { useFamily } from '@/api/family'
 import { pickReason, useFamilyPicks, type FamilyPick } from '@/api/discover'
 import RecipeImage from '@/pages/recipes/components/RecipeImage'
@@ -75,7 +76,7 @@ export default function FamilyPicks() {
         <p className="picks__empty">
           一家人一起点过、做过几顿之后，这里会排出你们家的常点菜。
           <Link className="picks__link-text" to="/family" state={{ from: location.pathname }}>
-            去创建或加入家庭 →
+            去创建或加入家庭<Icon name="arrow-right" size={13} className="icon--trail" />
           </Link>
         </p>
       </section>

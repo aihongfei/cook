@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import PageHeader from '@/components/ui/PageHeader'
 import Page from '@/components/ui/Page'
 import { useTodaySession } from '@/stores/today-session'
@@ -92,13 +93,13 @@ export default function DiscoverPage() {
               }}
             >
               <span className="today__shake-emoji" aria-hidden>
-                🎲
+                {<Icon name="dice" size={16} />}
               </span>
               <span className="today__shake-text">摇一桌</span>
             </button>
             <button type="button" className="today__decide" onClick={startToday}>
               <span className="today__decide-emoji" aria-hidden>
-                ✨
+                {<Icon name="sparkle" size={16} />}
               </span>
               <span className="today__decide-text">帮我决定</span>
             </button>
@@ -109,7 +110,7 @@ export default function DiscoverPage() {
           <div className="today__ask">
             <span className="today__ask-text">下厨上的问题想问问人？</span>
             <button type="button" className="today__ask-link" onClick={() => setSheet('chat')}>
-              点这里问 AI →
+              点这里问 AI<Icon name="arrow-right" size={13} className="icon--trail" />
             </button>
           </div>
         </section>
@@ -148,13 +149,13 @@ export default function DiscoverPage() {
         <div className="discover-tools">
           <Link className="discover-tool" to="/combos" state={{ from: location.pathname }}>
             <span className="discover-tool__icon" aria-hidden>
-              🧩
+              <Icon name="puzzle" size={15} />
             </span>
             常用组合
           </Link>
           <Link className="discover-tool" to="/prep" state={{ from: location.pathname }}>
             <span className="discover-tool__icon" aria-hidden>
-              🗓
+              <Icon name="calendar" size={15} />
             </span>
             备菜计划
           </Link>

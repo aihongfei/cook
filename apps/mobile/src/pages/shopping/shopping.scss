@@ -393,9 +393,11 @@
   min-width: 0;
 }
 
-.shop__covered-arrow {
+/* 2026-10-16：文字符号换成手绘水彩图（见 `components/icons/Icon.tsx`），给字形用的度量作废 */
+  .shop__covered-arrow {
+  display: flex;
   flex: 0 0 auto;
-  color: var(--color-ink-3);
+  align-items: center;
 }
 
 .shop__covered-list-card {

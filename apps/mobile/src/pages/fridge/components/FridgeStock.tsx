@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Icon from '@/components/icons/Icon'
 import { useFridge, type FridgeItem, type FridgeZone, type FridgeZoneGroup } from '@/api/fridge'
 import { useFridgeView } from '@/stores/fridge-view'
 import { findPresetByName, ingredientImage } from '../ingredients'
@@ -35,7 +36,7 @@ function ItemRow({ item, onOpen }: { item: FridgeItem; onOpen: () => void }) {
             <img src={image} alt="" aria-hidden loading="lazy" />
           ) : (
             // 没有对应图（用户自己打的字）：给中性占位，**不假装知道那是什么**
-            <span className="fitem__pic-none" aria-hidden>🍽</span>
+            <span className="fitem__pic-none" aria-hidden><Icon name="plate" size={20} /></span>
           )}
         </span>
         <span className="fitem__body">
@@ -180,10 +181,10 @@ export default function FridgeStock({ enabled }: { enabled: boolean }) {
          */}
         <span className="stock__add-row">
           <button type="button" className="stock__add" onClick={() => setAdding(true)}>
-            ＋ 记一样
+            <Icon name="plus" size={14} className="icon--lead" /> 记一样
           </button>
           <button type="button" className="stock__scan" onClick={() => setScanning(true)}>
-            📷 拍照
+            <Icon name="camera" size={14} className="icon--lead" /> 拍照
           </button>
         </span>
       </div>

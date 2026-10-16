@@ -9,6 +9,7 @@ import { useCooked } from '@/api/cooked'
 import { useNotifications } from '@/api/notifications'
 import { useTasteFamily } from '@/api/taste'
 import { useRecipes } from '@/api/recipes'
+import Icon from '@/components/icons/Icon'
 import Heatmap from '@/components/ui/Heatmap'
 import PageHeader from '@/components/ui/PageHeader'
 import NotifyStatusRow from './NotifyStatus'
@@ -207,7 +208,7 @@ export default function MinePage() {
         */}
         <SectionTitle title="我的菜" />
         <Link className="me-entry" to="/recipes/mine" state={{ from: '/mine' }}>
-          <span className="me-entry__icon">🍽️</span>
+          <span className="me-entry__icon"><Icon name="plate" size={18} /></span>
           <span className="me-entry__text">
             我的菜谱
             <small>{myDishesSub}</small>
@@ -217,7 +218,7 @@ export default function MinePage() {
             这一行亮一个数——这一页是通往"我的菜谱"的唯一入口（用户 2026-10-16 要求）。
           */}
           {rows.recipe > 0 && <span className="me-badge" aria-label={`${rows.recipe} 条新变化`}>{rows.recipe > 9 ? '9+' : rows.recipe}</span>}
-          <span className="me-entry__arrow">›</span>
+          <span className="me-entry__arrow"><Icon name="chevron-right" size={14} /></span>
         </Link>
 
         {/*
@@ -246,7 +247,8 @@ export default function MinePage() {
                 不在这张卡片上再加一颗圆点：同一件事两个标记，用户会以为有两件事。
               */}
               <Link className="me-checkin__more" to="/checkins" state={{ from: '/mine' }}>
-                去打卡墙看看{rows.checkin > 0 && <b className="me-checkin__count">{rows.checkin > 9 ? '9+' : rows.checkin}</b>} →
+                去打卡墙看看{rows.checkin > 0 && <b className="me-checkin__count">{rows.checkin > 9 ? '9+' : rows.checkin}</b>}
+                <Icon name="arrow-right" size={12} className="icon--trail" />
               </Link>
             </div>
             <Heatmap grid={checkins.data.mine} emptyHint="还没有打卡照片：做了一道好菜就拍一张。" />
@@ -254,14 +256,14 @@ export default function MinePage() {
         ) : (
           <div className="rows" style={{ marginTop: 0 }}>
             <div className="row">
-              <div className="row__icon">📷</div>
+              <div className="row__icon"><Icon name="camera" size={20} /></div>
               <div className="row__main">
                 打卡与家庭相册
                 <div className="row__sub">
                   {family.isPending ? '正在读取…' : family.data ? '统计加载中…' : '先创建或加入家庭，才能和家人一起打卡'}
                 </div>
               </div>
-              <span className="row__arrow">›</span>
+              <span className="row__arrow"><Icon name="chevron-right" size={14} /></span>
             </div>
           </div>
         )}
@@ -274,22 +276,22 @@ export default function MinePage() {
             都由浏览器原生语义兜住，不必自己复刻一份 role/tabIndex/keydown。
           */}
           <Link className="row" to="/family" state={{ from: '/mine' }}>
-            <div className="row__icon">👨‍👩‍👧</div>
+            <div className="row__icon"><Icon name="family" size={20} /></div>
             <div className="row__main">
               家庭共享与成员
               <div className="row__sub">{familySub}</div>
             </div>
             {/* 有人加入/退出、角色变了、改了设置（用户 2026-10-16 要求） */}
             {rows.family > 0 && <span className="me-badge" aria-label={`${rows.family} 条新变化`}>{rows.family > 9 ? '9+' : rows.family}</span>}
-            <span className="row__arrow">›</span>
+            <span className="row__arrow"><Icon name="chevron-right" size={14} /></span>
           </Link>
           <Link className="row" to="/taste" state={{ from: '/mine' }}>
-            <div className="row__icon">🌶️</div>
+            <div className="row__icon"><Icon name="chili" size={20} /></div>
             <div className="row__main">
               口味、忌口与过敏
               <div className="row__sub">{tasteText(taste.data)}</div>
             </div>
-            <span className="row__arrow">›</span>
+            <span className="row__arrow"><Icon name="chevron-right" size={14} /></span>
           </Link>
           {/*
             消息提醒（M10 / F10-04）：**原来是"还没做"的占位行，现在接上真入口**。
@@ -306,7 +308,7 @@ export default function MinePage() {
           */}
           <NotifyStatusRow />
           <Link className="row" to="/notifications" state={{ from: '/mine' }}>
-            <div className="row__icon">🔔</div>
+            <div className="row__icon"><Icon name="bell" size={20} /></div>
             <div className="row__main">
               家庭消息提醒
               <div className="row__sub">
@@ -315,7 +317,7 @@ export default function MinePage() {
                   : '菜单、饭好了、订单、冰箱、打卡、家人、菜谱'}
               </div>
             </div>
-            <span className="row__arrow">›</span>
+            <span className="row__arrow"><Icon name="chevron-right" size={14} /></span>
           </Link>
         </div>
 

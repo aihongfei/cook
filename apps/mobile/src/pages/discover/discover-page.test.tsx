@@ -114,7 +114,7 @@ it('时令精选：标题与道数来自后端，那一行走的是**标签精�
   expect(await screen.findByText('秋日时令')).toBeTruthy()
   expect(screen.getByText('天凉了，这些正当时')).toBeTruthy()
 
-  const more = screen.getByRole('link', { name: '38 道 ›' })
+  const more = screen.getByRole('link', { name: '38 道' })
   /*
    * 关键那一条：`?tag=` 而不是 `?q=`。两者今天返回的**是同一批菜**（实测过），
    * 但判据不同：`q` 命中"文本里出现过这两个字"（菜名、食材名都算），

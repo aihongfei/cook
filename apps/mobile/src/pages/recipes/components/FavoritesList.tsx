@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { apiErrorMessage } from '@/api/client'
 import { useFavorites, useToggleFavorite } from '@/api/favorites'
 import EmptyState from '@/components/ui/EmptyState'
@@ -88,7 +89,7 @@ export default function FavoritesList({ from, emptyTo = '/recipes' }: { from: st
               disabled={toggle.isPending}
               onClick={() => unfavorite(dish.id, dish.name)}
             >
-              ❤
+              <Icon name="heart" size={17} />
             </button>
             <Link
               className="fav-card__link"

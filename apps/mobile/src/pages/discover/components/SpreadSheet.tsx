@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { DotLoading } from 'antd-mobile'
 import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
@@ -173,7 +174,7 @@ export default function SpreadSheet({ visible, onClose }: { visible: boolean; on
         <div className="decide__none">
           <p className="decide__none-text">{result.reason || '这会儿配不出来'}</p>
           <Link className="decide__link" to="/recipes" state={{ from: '/discover' }} onClick={onClose}>
-            去菜谱小书里加几道 →
+            去菜谱小书里加几道<Icon name="arrow-right" size={13} className="icon--trail" />
           </Link>
         </div>
       )}
@@ -187,7 +188,7 @@ export default function SpreadSheet({ visible, onClose }: { visible: boolean; on
               <p className="decide__hint">
                 冰箱里还没记东西，这一桌只按家里的口味和平时爱吃的配。
                 <Link className="decide__link" to="/fridge" state={{ from: '/discover' }} onClick={onClose}>
-                  去记两样 →
+                  去记两样 <Icon name="arrow-right" size={13} className="icon--trail" />
                 </Link>
               </p>
             )}
@@ -282,7 +283,7 @@ export default function SpreadSheet({ visible, onClose }: { visible: boolean; on
                 shake(diners)
               }}
             >
-              再摇一桌 ↻
+              再摇一桌 <Icon name="refresh" size={13} className="icon--trail" />
             </button>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import Icon from '@/components/icons/Icon'
 import { isSupported, readNotifyStatus } from '@/lib/local-notify'
 import { notifyStatusText } from '@/lib/local-notify.rules'
 import { nativeSupported, nativeLinkRunning } from '@/api/realtime-native'
@@ -60,7 +61,7 @@ export default function NotifyStatusRow() {
 
   return (
     <div className="row row--status">
-      <div className="row__icon">📣</div>
+      <div className="row__icon"><Icon name="bell" size={20} /></div>
       <div className="row__main">
         手机提醒
         <div className={['row__sub', view.tone === 'warn' && 'row__sub--warn'].filter(Boolean).join(' ')}>

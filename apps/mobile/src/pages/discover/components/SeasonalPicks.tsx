@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { useFamily } from '@/api/family'
 import { useSeasonal } from '@/api/discover-page'
 import RecipeImage from '@/pages/recipes/components/RecipeImage'
@@ -55,7 +56,7 @@ export default function SeasonalPicks() {
             to={`/recipes?tag=${encodeURIComponent(board.tagQuery)}`}
             state={{ from: location.pathname }}
           >
-            {board.count} 道 ›
+            {board.count} 道 <Icon name="chevron-right" size={13} className="icon--trail" />
           </Link>
         )}
       </div>

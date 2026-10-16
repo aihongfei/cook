@@ -205,6 +205,6 @@ it('没加入家庭时给引导，并且不请求备菜接口', async () => {
   renderPrep()
 
   expect(await screen.findByText(/先创建家庭或用邀请码加入/)).toBeTruthy()
-  expect(screen.getByText('去创建或加入家庭 →')).toBeTruthy()
+  expect(screen.getByText('去创建或加入家庭')).toBeTruthy()
   expect(get).not.toHaveBeenCalledWith('/orders/plan', expect.anything())
 })

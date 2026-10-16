@@ -361,7 +361,7 @@ it('返回入口按来源显示：从厨房进来就回厨房', async () => {
   mockGet({ family: familyFixture() })
   renderFamily({ pathname: '/family', state: { from: '/kitchen' } })
 
-  const back = await screen.findByRole('link', { name: '← 返回厨房' })
+  const back = await screen.findByRole('link', { name: '返回厨房' })
   expect(back.getAttribute('href')).toBe('/kitchen')
 })
 
@@ -369,7 +369,7 @@ it('返回入口默认回"我的"（直接输地址进来时也走得回去）',
   mockGet({ family: familyFixture() })
   renderFamily()
 
-  const back = await screen.findByRole('link', { name: '← 返回我的' })
+  const back = await screen.findByRole('link', { name: '返回我的' })
   expect(back.getAttribute('href')).toBe('/mine')
 })
 
@@ -377,7 +377,7 @@ it('来源不在白名单时不乱跳，仍回"我的"', async () => {
   mockGet({ family: familyFixture() })
   renderFamily({ pathname: '/family', state: { from: 'https://evil.example.com' } })
 
-  expect((await screen.findByRole('link', { name: '← 返回我的' })).getAttribute('href')).toBe(
+  expect((await screen.findByRole('link', { name: '返回我的' })).getAttribute('href')).toBe(
     '/mine',
   )
 })

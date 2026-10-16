@@ -8,6 +8,7 @@ import ConfirmMenuSheet from './components/ConfirmMenuSheet'
 import DinerCountSheet from './components/DinerCountSheet'
 import RepeatMealSheet from './components/RepeatMealSheet'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import Icon from '@/components/icons/Icon'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
@@ -235,12 +236,12 @@ export default function OrderDetailPage() {
                   两件事可能是两个人，所以分两行说，而不是合成一句"妈妈定的" */}
               {card.confirmedBy && card.confirmedAt && (
                 <p className="od-hero__stamp">
-                  🔒 {card.confirmedBy.nickname} {formatClock(card.confirmedAt)} 定下这餐
+                  {<Icon name="lock" size={13} />} {card.confirmedBy.nickname} {formatClock(card.confirmedAt)} 定下这餐
                 </p>
               )}
               {card.doneBy && card.doneAt && (
                 <p className="od-hero__stamp od-hero__stamp--done">
-                  🍲 {card.doneBy.nickname} {formatClock(card.doneAt)} 标了「做好了」
+                  {<Icon name="pot" size={14} />} {card.doneBy.nickname} {formatClock(card.doneAt)} 标了「做好了」
                 </p>
               )}
 
@@ -265,7 +266,7 @@ export default function OrderDetailPage() {
                     to="/recipes"
                     state={{ from: location.pathname, plan: { date: card.date, meal: card.meal, label: `这一餐（${card.date.slice(5)} ${card.mealLabel}）` } }}
                   >
-                    ＋ 再加一道
+                    <Icon name="plus" size={14} className="icon--lead" /> 再加一道
                   </Link>
                 )}
                 <button
@@ -274,12 +275,12 @@ export default function OrderDetailPage() {
                   disabled={!can(family.data, CAPABILITY.MENU_MANAGE)}
                   onClick={() => setDinersFor(card)}
                 >
-                  🍚 {card.dinerCount ? `${card.dinerCount} 人吃` : '还没定几个人吃'}
+                  {<Icon name="rice" size={14} />} {card.dinerCount ? `${card.dinerCount} 人吃` : '还没定几个人吃'}
                   {can(family.data, CAPABILITY.MENU_MANAGE) && ' · 改'}
                 </button>
                 {card.canRepeat && card.dishCount > 0 && (
                   <button type="button" className="order-card__repeat" onClick={() => setRepeatFor(card)}>
-                    🔁 再点一次
+                    {<Icon name="refresh" size={14} />} 再点一次
                   </button>
                 )}
               </div>
@@ -317,7 +318,7 @@ export default function OrderDetailPage() {
                           */}
                           <span className="od-line__name-text">{line.name}</span>
                           <span className="od-line__name-arrow" aria-hidden="true">
-                            ›
+                            <Icon name="chevron-right" size={14} />
                           </span>
                         </Link>
                       ) : (
@@ -370,11 +371,11 @@ export default function OrderDetailPage() {
                 <div className="order-card__photos">
                   {card.photoCount > 0 && (
                     <Link className="order-card__photo-link" to="/checkins" state={{ from: location.pathname }}>
-                      已传 {card.photoCount} 张成品照，去看看 →
+                      已传 {card.photoCount} 张成品照，去看看<Icon name="arrow-right" size={13} className="icon--trail" />
                     </Link>
                   )}
                   <button type="button" className="order-card__photo" onClick={() => setUploadOpen(true)}>
-                    📷 {card.photoCount > 0 ? '再传一张' : '上传这餐的成品照'}
+                    {<Icon name="camera" size={14} />} {card.photoCount > 0 ? '再传一张' : '上传这餐的成品照'}
                   </button>
                 </div>
               )}

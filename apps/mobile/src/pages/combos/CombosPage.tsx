@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { apiErrorMessage } from '@/api/client'
 import { useCombos, useDeleteCombo, type Combo } from '@/api/combos'
 import { useFamily } from '@/api/family'
@@ -65,7 +66,7 @@ export default function CombosPage() {
               组合是家里人一起用的。先创建家庭或用邀请码加入，再回来把常点的几组存下来。
             </p>
             <Link className="combos__link" to="/family" state={{ from: location.pathname }}>
-              去创建或加入家庭 →
+              去创建或加入家庭<Icon name="arrow-right" size={13} className="icon--trail" />
             </Link>
           </section>
         ) : (

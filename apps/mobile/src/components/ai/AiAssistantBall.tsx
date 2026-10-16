@@ -1,3 +1,4 @@
+import Icon from '@/components/icons/Icon'
 import { useAiAssistantSession } from '@/stores/ai-assistant-session'
 
 /**
@@ -26,7 +27,7 @@ export default function AiAssistantBall() {
           拇指落点就跟着飘（±3px 足够点空），自动化也永远等不到它"稳定"。
           外层静止、里面的图案轻轻上下，动感一样在，点起来却是死的。 */}
       <span className="ai-ball__inner">
-        <span className="ai-ball__face" aria-hidden>🍳</span>
+        <span className="ai-ball__face" aria-hidden><Icon name="pan" size={21} /></span>
         <span className="ai-ball__hint">AI</span>
       </span>
     </button>

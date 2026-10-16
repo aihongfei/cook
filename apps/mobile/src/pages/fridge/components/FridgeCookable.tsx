@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { useCookable, useFridge, type CookableDish } from '@/api/fridge'
 import RecipeImage from '@/pages/recipes/components/RecipeImage'
 import RecipeStatus from '@/pages/recipes/components/RecipeStatus'
@@ -321,7 +322,7 @@ export default function FridgeCookable({ enabled }: { enabled: boolean }) {
               >
                 <span className="cook__card-more-count">{data.total}</span>
                 <span className="cook__card-more-text">道能做</span>
-                <span className="cook__card-more-go">看全部 ›</span>
+                <span className="cook__card-more-go">看全部 <Icon name="chevron-right" size={12} className="icon--trail" /></span>
               </Link>
             </li>
           )}

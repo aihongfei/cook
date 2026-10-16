@@ -119,9 +119,10 @@ it('自己打的字也认：命中别名就出图，认不出就给中性占位'
   expect(document.querySelector('.fridge-sheet__name-pic')?.getAttribute('src')).toBe('/img/ingredients/tomato.png')
 
   fireEvent.change(name, { target: { value: '外婆做的酱' } })
+  // 认不出就不出食材图，只给一张通用盘子占位（2026-10-16 由 🍽 换成图片）
   const pic = document.querySelector('.fridge-sheet__name-pic')
   expect(pic?.tagName).toBe('SPAN')
-  expect(pic?.textContent).toBe('🍽')
+  expect(pic?.querySelector('img')?.getAttribute('src')).toBe('/img/icons/plate.png')
 })
 
 it('搜内置食材：按名字或别名都能搜到，搜不到就说"直接写"', async () => {

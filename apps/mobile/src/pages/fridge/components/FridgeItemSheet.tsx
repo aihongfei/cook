@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import Icon from '@/components/icons/Icon'
 import { apiErrorMessage } from '@/api/client'
 import { FRIDGE_ZONES, type FridgeItem, type FridgeZone } from '@/api/fridge'
 import { useAddFridgeItem, useRemoveFridgeItem, useUpdateFridgeItem } from '@/api/fridge'
@@ -167,7 +168,7 @@ export default function FridgeItemSheet({
           {matched ? (
             <img className="fridge-sheet__name-pic" src={ingredientImage(matched.id)} alt="" aria-hidden />
           ) : (
-            <span className="fridge-sheet__name-pic fridge-sheet__name-pic--none" aria-hidden>🍽</span>
+            <span className="fridge-sheet__name-pic fridge-sheet__name-pic--none" aria-hidden><Icon name="plate" size={24} /></span>
           )}
           <input
             className="fridge-sheet__input"

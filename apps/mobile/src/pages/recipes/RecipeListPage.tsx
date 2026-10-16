@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { useFavoriteStatus, useToggleFavorite } from '@/api/favorites'
 import { recipeErrorMessage, useRecipeFilters as useFilterOptions, useRecipes } from '@/api/recipes'
 import Chips from '@/components/ui/Chips'
@@ -140,7 +141,7 @@ export default function RecipeListPage() {
                     onClick={() => updateSearch({ tag: '' })}
                     aria-label={`去掉标签筛选：${tagLabels.join('、')}`}
                   >
-                    {tagLabels.join('、')} <span aria-hidden>×</span>
+                    {tagLabels.join('、')} <Icon name="close" size={12} />
                   </button>
                 </div>
               </div>

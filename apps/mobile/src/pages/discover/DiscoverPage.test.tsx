@@ -153,7 +153,7 @@ it('问答入口（问 AI）还在，且打得开', async () => {
   renderDiscover()
 
   expect(await screen.findByText(/问 AI/)).toBeTruthy()
-  fireEvent.click(screen.getByRole('button', { name: '点这里问 AI →' }))
+  fireEvent.click(screen.getByRole('button', { name: '点这里问 AI' }))
   expect(await screen.findByText(/拿不准的都能问/)).toBeTruthy()
 })
 
@@ -175,10 +175,17 @@ it('发现页不再有那三格假数字，本周菜单也整卡删掉（D-040 /
    * 所以搬成页面底部一行两枚工具胶囊（`.discover-tools`）。
    */
   expect(document.querySelector('.weekplan')).toBeNull()
-  const tools = [...document.querySelectorAll('.discover-tool')].map((tool) =>
-    tool.textContent?.replace(/\s+/g, ''),
-  )
-  expect(tools).toEqual(['🧩常用组合', '🗓备菜计划'])
+  /*
+   * 图标是**图片**（2026-10-16 用户：「不要用符号图标了」），所以 `textContent` 里
+   * 一个字都没有——文字只剩标题，图案在 `<img>` 上。两样都要断言：
+   * 光看文字的话，图标整个丢了这条也是绿的。
+   */
+  const tools = [...document.querySelectorAll('.discover-tool')]
+  expect(tools.map((tool) => tool.textContent?.replace(/\s+/g, ''))).toEqual(['常用组合', '备菜计划'])
+  expect(tools.map((tool) => tool.querySelector('img')?.getAttribute('src'))).toEqual([
+    '/img/icons/puzzle.png',
+    '/img/icons/calendar.png',
+  ])
 })
 
 it('问 AI 那行只有后半句可点：前半句是说明，不该看着像按钮', async () => {
@@ -191,7 +198,7 @@ it('问 AI 那行只有后半句可点：前半句是说明，不该看着像按
   expect(hint.closest('button')).toBeNull()
 
   // 点它确实打开问答抽屉（不是只有样式像链接）
-  fireEvent.click(screen.getByRole('button', { name: '点这里问 AI →' }))
+  fireEvent.click(screen.getByRole('button', { name: '点这里问 AI' }))
   expect(await screen.findByText(/拿不准的都能问/)).toBeTruthy()
 })
 
@@ -208,10 +215,17 @@ it('两条出路并排一行，AI 收进抽屉（2026-10-13 用户提出重复�
    */
   expect(screen.queryByText('AI 帮你想')).toBeNull()
 
+  // 同上：图案在 <img> 上，文字只剩动作词
   const rows = [...document.querySelectorAll('.today__row')].map((row) =>
-    [...row.querySelectorAll('button')].map((button) => button.textContent?.replace(/\s+/g, '')),
+    [...row.querySelectorAll('button')].map((button) => ({
+      text: button.textContent?.replace(/\s+/g, ''),
+      icon: button.querySelector('img')?.getAttribute('src'),
+    })),
   )
-  expect(rows).toEqual([['🎲摇一桌', '✨帮我决定']])
+  expect(rows).toEqual([[
+    { text: '摇一桌', icon: '/img/icons/dice.png' },
+    { text: '帮我决定', icon: '/img/icons/sparkle.png' },
+  ]])
 
   /*
    * 两个按钮必须**等宽平分**那一行（用户 2026-10-13：「为什么有时候会歪」那条的延续）：

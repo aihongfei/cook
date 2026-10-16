@@ -4,6 +4,7 @@ import { apiErrorMessage } from '@/api/client'
 import { useUpdateMealStatus, type MealCard } from '@/api/orders'
 import { useMealPreview } from '@/api/shopping'
 import BottomSheet, { type BottomSheetHandle } from '@/components/ui/BottomSheet'
+import Icon from '@/components/icons/Icon'
 import { toast } from '@/components/ui/toast'
 
 /**
@@ -86,7 +87,7 @@ export default function ConfirmMenuSheet({
 
       {/* 人数没定就摆出来（不是拦路的错误，是提醒）；定了就显示，并保留一个改的入口 */}
       <button type="button" className="confirm-menu__diners" onClick={adjustDiners}>
-        🍚 {card.dinerCount ? `${card.dinerCount} 人吃` : '还没定几个人吃'}
+        {<Icon name="rice" size={14} />} {card.dinerCount ? `${card.dinerCount} 人吃` : '还没定几个人吃'}
         <span className="confirm-menu__diners-go">{card.dinerCount ? '改' : '去定'}</span>
       </button>
 
@@ -184,7 +185,7 @@ function MealShoppingPreview({ mealKey, onLeave }: { mealKey: string; onLeave: (
           navigate('/shopping', { state: { from: '/order' } })
         }}
       >
-        去采购清单看看 →
+        去采购清单看看<Icon name="arrow-right" size={13} className="icon--trail" />
       </button>
     </div>
   )

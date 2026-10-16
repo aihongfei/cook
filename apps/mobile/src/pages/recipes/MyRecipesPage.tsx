@@ -6,6 +6,7 @@ import {
   useRecipes,
   type RecipeSummary,
 } from '@/api/recipes'
+import Icon from '@/components/icons/Icon'
 import { SelectIcon } from '@/components/icons/TabIcons'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
@@ -203,7 +204,7 @@ export default function MyRecipesPage() {
               </div>
             ) : (
               <div className="my-recipes__top">
-                <Link className="my-recipes__new" to="/recipes/new">＋ 新建菜谱</Link>
+                <Link className="my-recipes__new" to="/recipes/new"><Icon name="plus" size={13} white className="icon--lead" /> 新建菜谱</Link>
                 {/*
                   多选的**显式入口**：长按是手势，第一次用的人找不到（与点菜单那颗图标同一条，
                   见 OrderPage）。只在**真有菜**的时候画——空列表上摆一颗点了没事发生的按钮，
@@ -362,7 +363,7 @@ function OwnRecipesList({
       {recipes.isSuccess && items.length === 0 && (
         <div className="my-recipes__empty">
           <EmptyState
-            emoji="📝"
+            icon="pencil"
             title="还没有自己上传的菜谱"
             desc="把家里的拿手菜写下来，下次谁问起就直接翻给他看。"
           />

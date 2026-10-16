@@ -167,7 +167,7 @@ it('新建：提交的 payload 与后端契约逐字段对上（标签去重、�
   type('第 1 条配料用量', '500g')
   type('掌勺小贴士（一行一条，最多 5 条）', '糖色别炒糊\n小火慢炖')
   type('热量（千卡，可不填）', '480')
-  fireEvent.click(screen.getByRole('button', { name: '＋ 加一步' }))
+  fireEvent.click(screen.getByRole('button', { name: '加一步' }))
   type('第 2 步做法', '小火炖 40 分钟')
 
   fireEvent.click(screen.getByRole('button', { name: '写好收着' }))

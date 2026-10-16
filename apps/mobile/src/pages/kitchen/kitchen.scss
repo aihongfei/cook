@@ -305,19 +305,19 @@
   place-items: center;
   width: 22px;
   height: 22px;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-  color: transparent;
   background: var(--color-paper);
   border: 1.5px solid var(--color-line);
   border-radius: 7px;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
   pointer-events: none;
 }
 
+/*
+ * 勾（2026-10-16 换成手绘水彩图）：原来是一个文字 `✓`，font-size 13px / font-weight 700 /
+ * line-height 1 / `color: transparent` 四条度量全是为了让那个字形落在方框正中间——
+ * 图是几何居中的（`place-items: center`），那四条连同 `transition` 里的 `color` 一起删了。
+ */
 .dish-card__pick.is-on {
-  color: var(--color-paper);
   background: var(--color-brand);
   border-color: var(--color-brand);
 }
@@ -332,6 +332,12 @@
    它是 .dish-card__link 的**兄弟**（放进链接里点它会冒泡进详情页），
    所以定位基准是 .dish-card（.dish-card__pic 在链接内部，够不着）——
    因此 .dish-card 那条规则里补了 position: relative。 */
+/*
+ * 收藏那颗心（2026-10-16 换成手绘水彩图）：原来是文字 `❤`/`♡`，
+ * 靠 `font-size: 14px` + `color` 决定大小与红/灰。现在 **实心红心与空心褐心是两张图**
+ * （`heart.png` / `heart-outline.png`），所以 `font-size` 与 `color` 都删了
+ * ——唯一还靠 CSS 的是选中时的轻微放大（下面 `.is-on` 那条）。
+ */
 .dish-card__fav {
   position: absolute;
   top: 8px;
@@ -344,9 +350,6 @@
   height: 26px;
   padding: 0;
   font-family: inherit;
-  font-size: 14px;
-  line-height: 1;
-  color: #b08a63;
   cursor: pointer;
   background: rgb(255 252 244 / 90%);
   border: 0;
@@ -356,7 +359,8 @@
 
 /* 收藏了就是实心红心（♡ → ❤），一眼能看出状态 */
 .dish-card__fav.is-on {
-  color: #d9534f;
+  /* 选中不再靠颜色（红心就那么红），靠这张图的**存在**与一点点放大 */
+  transform: scale(1.06);
 }
 
 .dish-card__fav:active {

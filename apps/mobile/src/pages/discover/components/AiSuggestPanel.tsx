@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { DotLoading } from 'antd-mobile'
 import { apiErrorMessage } from '@/api/client'
 import { toast } from '@/components/ui/toast'
@@ -194,7 +195,7 @@ export default function AiSuggestPanel({ onNavigate, closing = false }: AiSugges
                 disabled={suggest.isPending}
                 onClick={() => setQuickHints(pickHints(aiBatch))}
               >
-                换一批 ↻
+                换一批 <Icon name="refresh" size={13} className="icon--trail" />
               </button>
             </div>
           </div>

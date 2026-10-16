@@ -106,8 +106,10 @@ a.row:active {
   color: var(--color-ink-3);
 }
 
+/* 2026-10-16：文字符号换成手绘水彩图（见 `components/icons/Icon.tsx`），给字形用的度量作废 */
 .row__arrow {
-  color: #c7a97e;
+  display: flex;
+  align-items: center;
 }
 
 /*

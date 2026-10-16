@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Icon from '@/components/icons/Icon'
 import { DotLoading } from 'antd-mobile'
 import { useQueryClient } from '@tanstack/react-query'
 import BottomSheet from '@/components/ui/BottomSheet'
@@ -322,7 +323,7 @@ export default function AiAssistantSheet() {
                     aria-label={`删掉「${item.title}」`}
                     onClick={() => removeConversation(item.id)}
                   >
-                    ×
+                    <Icon name="close" size={13} />
                   </button>
                 </li>
               ))}

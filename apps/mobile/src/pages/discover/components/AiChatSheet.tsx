@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Icon from '@/components/icons/Icon'
 import { DotLoading } from 'antd-mobile'
 import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
@@ -166,7 +167,7 @@ export default function AiChatSheet({ visible, onClose }: AiChatSheetProps) {
                   {/* 「换一批」而不铺满整池：铺满会把输入框挤到屏幕外，而这个入口本来就要打字。
                       它**不重新调模型**——就在已经拿到的那批里抽 */}
                   <button type="button" className="ai__hint ai__hint--more" onClick={() => setExamples(pickExamples(aiBatch))}>
-                    换一批 ↻
+                    换一批 <Icon name="refresh" size={13} className="icon--trail" />
                   </button>
                 </div>
               </div>

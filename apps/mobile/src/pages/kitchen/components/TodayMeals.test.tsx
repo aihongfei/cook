@@ -83,7 +83,17 @@ it('两餐都显示：有菜的那餐给菜名与状态，没点菜的那餐明�
   expect(await screen.findByText('番茄炒蛋 · 米饭')).toBeTruthy()
   // 没点菜的那行要在，且不编内容
   expect(screen.getByText('晚餐')).toBeTruthy()
-  expect(screen.getByText('还没人点')).toBeTruthy()
+  /*
+   * 「还没人点」这句话在这两处都要出现：菜品那一格（说清没内容）与状态那一行
+   * （说清为什么）——所以是 `getAllBy` 而不是 `getBy`。
+   * 从前这里能写 `getByText` 只是因为状态行前面有个文字 `●` 把它撑成了"● 还没人点"，
+   * 那个点现在是图（2026-10-16），那层偶然的区分也就没了。
+   */
+  const said = screen.getAllByText('还没人点')
+  expect(said.length).toBe(2)
+  // 状态行那颗点图要真的在（它承担的可读性信息是"这一餐还没开始"）
+  const status = document.querySelector('.today-meals__status.is-none')
+  expect(status?.querySelector('img')?.getAttribute('src')).toBe('/img/icons/dot-none.png')
 })
 
 it('菜不编造：没有菜的那餐不会出现任何菜名（假数据时代这里是"小米南瓜粥"）', async () => {

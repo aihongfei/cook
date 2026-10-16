@@ -22,6 +22,7 @@ import {
 import Chips from '@/components/ui/Chips'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import EmptyState from '@/components/ui/EmptyState'
+import Icon from '@/components/icons/Icon'
 import PageHeader from '@/components/ui/PageHeader'
 import Page from '@/components/ui/Page'
 import { STATUS_TONE } from '@/components/ui/status-tone'
@@ -338,7 +339,7 @@ export default function OrderPage() {
             state={{ from: location.pathname }}
           >
             <span className="order-history__icon" aria-hidden="true">
-              📖
+              <Icon name="book" size={15} />
             </span>
             历史
           </Link>
@@ -388,12 +389,12 @@ export default function OrderPage() {
       */}
       {prepNotice && (
         <Link className="order-notice" to={prepNotice.to} state={{ from: location.pathname }}>
-          <span className="order-notice__icon">🥬</span>
+          <span className="order-notice__icon"><Icon name="greens" size={18} /></span>
           <span className="order-notice__text">
             {prepNotice.title}
             {prepNotice.body && <small>{prepNotice.body}</small>}
           </span>
-          <span className="order-notice__arrow">›</span>
+          <span className="order-notice__arrow"><Icon name="chevron-right" size={14} /></span>
         </Link>
       )}
 
@@ -493,7 +494,7 @@ export default function OrderPage() {
                       {card.statusLabel}
                     </span>
                     <span className="order-card__arrow" aria-hidden="true">
-                      ›
+                      <Icon name="chevron-right" size={15} />
                     </span>
                   </div>
 
@@ -541,7 +542,7 @@ export default function OrderPage() {
                         disabled={!canManageDiners}
                         onClick={() => setDinersFor(card)}
                       >
-                        🍚 {card.dinerCount ? `${card.dinerCount} 人吃` : '还没定几个人吃'}
+                        {<Icon name="rice" size={14} />} {card.dinerCount ? `${card.dinerCount} 人吃` : '还没定几个人吃'}
                         {canManageDiners && ' · 改'}
                       </button>
                     </span>
@@ -550,7 +551,7 @@ export default function OrderPage() {
                   {/* 确认留痕（M4 / F4-05）：谁把这一版菜单定下来的。**纯信息，不是可点元素** */}
                   {card.confirmedBy && card.confirmedAt && (
                     <p className="order-card__confirmed">
-                      🔒 {card.confirmedBy.nickname} {formatConfirmedAt(card.confirmedAt)} 定下这餐
+                      {<Icon name="lock" size={13} />} {card.confirmedBy.nickname} {formatConfirmedAt(card.confirmedAt)} 定下这餐
                     </p>
                   )}
 
@@ -561,7 +562,7 @@ export default function OrderPage() {
                   {card.status === 'DONE' && card.photoCount > 0 && (
                     <p className="order-card__photo-line">
                       <Link className="order-card__photo-link" to="/checkins" state={{ from: '/order' }}>
-                        已传 {card.photoCount} 张成品照，去看看 →
+                        已传 {card.photoCount} 张成品照，去看看<Icon name="arrow-right" size={13} className="icon--trail" />
                       </Link>
                     </p>
                   )}
@@ -580,7 +581,7 @@ export default function OrderPage() {
                           className="order-card__quick-btn order-card__quick-btn--brand"
                           onClick={() => setComboFor(card)}
                         >
-                          ⭐ 存组合
+                          {<Icon name="star" size={14} />} 存组合
                         </button>
                       )}
 
@@ -591,7 +592,7 @@ export default function OrderPage() {
                           className="order-card__quick-btn order-card__quick-btn--brand"
                           onClick={() => setRepeatFor(card)}
                         >
-                          🔁 再点一次
+                          {<Icon name="refresh" size={14} />} 再点一次
                         </button>
                       )}
 
@@ -602,7 +603,7 @@ export default function OrderPage() {
                           className="order-card__quick-btn"
                           onClick={() => setUploadMealKey(card.mealKey)}
                         >
-                          📷 {card.photoCount > 0 ? '再传一张' : '传成品照'}
+                          {<Icon name="camera" size={14} />} {card.photoCount > 0 ? '再传一张' : '传成品照'}
                         </button>
                       )}
                     </div>
@@ -640,7 +641,7 @@ export default function OrderPage() {
         <p className="order-window-hint">
           还有 {orders.data.beyondCount} 餐在三天之外 ·{' '}
           <Link to="/prep" state={{ from: location.pathname }}>
-            去备菜计划 →
+            去备菜计划<Icon name="arrow-right" size={13} className="icon--trail" />
           </Link>
         </p>
       )}
@@ -711,7 +712,7 @@ export default function OrderPage() {
       {family.data && (
         <button type="button" className="order-write" onClick={openFreeDish}>
           <span className="order-write__icon" aria-hidden="true">
-            ✍️
+            <Icon name="pencil" size={15} />
           </span>
           自己写一道
         </button>

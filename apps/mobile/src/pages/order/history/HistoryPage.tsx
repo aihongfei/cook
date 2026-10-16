@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { apiErrorMessage } from '@/api/client'
 import { useFamily } from '@/api/family'
 import { useDeleteMealRecord, useOrderHistory, type HistoryDay, type MealProgressRow } from '@/api/orders'
@@ -127,7 +128,7 @@ export default function HistoryPage() {
               历史是按家里一起记的。先创建家庭或用邀请码加入，再回来翻这一段。
             </p>
             <Link className="history__link" to="/family" state={{ from: location.pathname }}>
-              去创建或加入家庭 →
+              去创建或加入家庭<Icon name="arrow-right" size={13} className="icon--trail" />
             </Link>
           </section>
         ) : (

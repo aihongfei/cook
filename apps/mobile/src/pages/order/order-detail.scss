@@ -185,10 +185,11 @@
   overflow-wrap: anywhere;
 }
 
-.od-line__name-arrow {
+/* 2026-10-16：文字符号换成手绘水彩图（见 `components/icons/Icon.tsx`），给字形用的度量作废 */
+  .od-line__name-arrow {
+  display: flex;
   flex: 0 0 auto;
-  font-size: 14px;
-  color: #c7a97e;
+  align-items: center;
 }
 
 /* 「自己写的」那道菜（F3-10）在后端没有 recipeId，点不进菜谱详情——标出来，

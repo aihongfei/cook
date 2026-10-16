@@ -8,6 +8,7 @@ import type { FridgeScanDraft } from '@/api/ai'
 import * as checkins from '@/api/checkins'
 import { useAuth } from '@/stores/auth'
 import { Toaster } from '@/components/ui/toast'
+import Icon from '@/components/icons/Icon'
 import FridgeScanSheet from './FridgeScanSheet'
 
 /**
@@ -323,7 +324,7 @@ function renderHost() {
     return (
       <>
         <button type="button" onClick={() => setOpen(true)}>
-          📷 拍照
+          <Icon name="camera" size={14} /> 拍照
         </button>
         {/* 与 FridgeStock 一字不差的用法：条件挂载 + visible 恒真 */}
         {open && <FridgeScanSheet visible onClose={() => setOpen(false)} />}
@@ -342,7 +343,7 @@ it('关掉之后**再点还能开**（第二次点「📷 拍照」要真的又�
   renderHost()
 
   // 第一次：点开
-  fireEvent.click(screen.getByText('📷 拍照'))
+  fireEvent.click(screen.getByText('拍照'))
   expect(await screen.findByText('拍一张')).toBeTruthy()
 
   // 关掉（点遮罩，与用户的操作一样）。遮罩是 Popup 在入场动画跑起来之后才挂上的，
@@ -356,6 +357,6 @@ it('关掉之后**再点还能开**（第二次点「📷 拍照」要真的又�
   await waitFor(() => expect(screen.queryByText('拍一张')).toBeNull(), { timeout: 3000 })
 
   // 第二次：必须还能开——关不干净时这里会一路等到超时
-  fireEvent.click(screen.getByText('📷 拍照'))
+  fireEvent.click(screen.getByText('拍照'))
   expect(await screen.findByText('拍一张', undefined, { timeout: 3000 })).toBeTruthy()
 })

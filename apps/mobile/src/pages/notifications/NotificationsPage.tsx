@@ -6,6 +6,7 @@ import {
 } from '@/api/notifications'
 import { apiErrorMessage } from '@/api/client'
 import EmptyState from '@/components/ui/EmptyState'
+import Icon, { type IconName } from '@/components/icons/Icon'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import { toast } from '@/components/ui/toast'
@@ -45,17 +46,17 @@ import './notifications.scss'
  * 开关**按账号**（用户 2026-10-15 选定）：提醒是"打扰我"这件事，别人不能替我决定
  * （与口味档案 F8-01 同一条）。所以这一页任何人都能改自己的，不需要家庭角色。
  */
-const KIND_STYLE: Record<NotificationKind, { icon: string; tone: string }> = {
-  plan: { icon: '📋', tone: 'is-plan' },
-  done: { icon: '🍲', tone: 'is-done' },
-  expiry: { icon: '⏳', tone: 'is-expiry' },
-  prep: { icon: '🧺', tone: 'is-prep' },
-  order: { icon: '🥢', tone: 'is-order' },
-  fridge: { icon: '🧊', tone: 'is-fridge' },
-  checkin: { icon: '📷', tone: 'is-checkin' },
-  comment: { icon: '💬', tone: 'is-comment' },
-  family: { icon: '🏠', tone: 'is-family' },
-  recipe: { icon: '📖', tone: 'is-recipe' },
+const KIND_STYLE: Record<NotificationKind, { icon: IconName; tone: string }> = {
+  plan: { icon: 'clipboard', tone: 'is-plan' },
+  done: { icon: 'pot', tone: 'is-done' },
+  expiry: { icon: 'hourglass', tone: 'is-expiry' },
+  prep: { icon: 'basket', tone: 'is-prep' },
+  order: { icon: 'chopsticks', tone: 'is-order' },
+  fridge: { icon: 'ice', tone: 'is-fridge' },
+  checkin: { icon: 'camera', tone: 'is-checkin' },
+  comment: { icon: 'bubble', tone: 'is-comment' },
+  family: { icon: 'house', tone: 'is-family' },
+  recipe: { icon: 'book', tone: 'is-recipe' },
 }
 
 export default function NotificationsPage() {
@@ -124,7 +125,7 @@ export default function NotificationsPage() {
         {board.data && items.length === 0 && (
           <div className="notifications__empty">
             <EmptyState
-              emoji="✅"
+              icon="check"
               title="眼下没什么要处理的"
               desc="菜单定了、饭做好了、有人点了菜、动了冰箱、传了打卡照、家里或菜谱有变动，都会在这儿告诉你。"
             />
@@ -226,7 +227,9 @@ function NotificationRow({ item, onGo }: { item: AppNotification; onGo: () => vo
   const style = KIND_STYLE[item.kind]
   return (
     <button type="button" className={`row notifications__row${item.unread ? ' is-unread' : ''}`} onClick={onGo}>
-      <div className={`row__icon ${style.tone}`.trim()}>{style.icon}</div>
+      <div className={`row__icon ${style.tone}`.trim()}>
+        <Icon name={style.icon} size={20} />
+      </div>
       <div className="row__main">
         {item.title}
         {item.body && <div className="row__sub">{item.body}</div>}

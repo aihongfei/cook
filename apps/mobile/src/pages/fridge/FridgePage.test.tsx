@@ -196,7 +196,7 @@ it('主体是冰箱：空的时候说"还是空的"并指路，骨架话（"还�
   expect(await screen.findByText('冰箱里有什么')).toBeTruthy()
   expect(await screen.findByText(/冰箱还是空的/)).toBeTruthy()
   // 入口就在这块的标题行上（文案里说"点右上角"，所以它得真的在标题那一行里）
-  const add = screen.getByRole('button', { name: '＋ 记一样' })
+  const add = screen.getByRole('button', { name: '记一样' })
   expect(add.closest('.stock__head')).toBeTruthy()
   // M6 之前那段的写法必须彻底不在：数据是真的了，不能一边有真数据一边留着骨架话
   expect(screen.queryByText('还没做')).toBeNull()
@@ -349,9 +349,17 @@ it('内置食材有图，自己打的字给中性占位（不假装知道那是�
 
   const known = (await screen.findByText('鸡蛋')).closest('.fitem') as HTMLElement
   expect(known.querySelector('img')?.getAttribute('src')).toBe('/img/ingredients/egg.png')
+  /*
+   * 自己打的字**仍然没有对应食材图**（那件事没变），但占位现在是一张通用盘子图
+   * （2026-10-16 由 🍽 换成图片）——所以这里换一个判据：占位那一格里的图
+   * 必须正是 `plate.png`，而不是某张食材图（否则就是"假装知道那是什么"）。
+   */
   const homemade = screen.getByText('外婆的酱').closest('.fitem') as HTMLElement
-  expect(homemade.querySelector('img')).toBeNull()
-  expect(homemade.querySelector('.fitem__pic-none')).toBeTruthy()
+  const placeholder = homemade.querySelector('.fitem__pic-none') as HTMLElement
+  expect(placeholder).toBeTruthy()
+  expect(placeholder.querySelector('img')?.getAttribute('src')).toBe('/img/icons/plate.png')
+  // 直接子元素那一层才是"真食材图"的位置；占位那张 nested 在 span 里，不该出现在那儿
+  expect(homemade.querySelector('.fitem__pic > img')).toBeNull()
 })
 
 it('冰箱这块也照顾共享关掉的情况：说清这里只显示自己放的', async () => {

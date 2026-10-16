@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useFamily } from '@/api/family'
 import { useShoppingList } from '@/api/shopping'
+import Icon from '@/components/icons/Icon'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
 import FridgeStock from './components/FridgeStock'
@@ -42,7 +43,7 @@ export default function FridgePage() {
               采购清单是按家里一起定的菜单算的。先创建家庭或用邀请码加入，再回来买菜。
             </p>
             <Link className="fridge-tip__link" to="/family" state={{ from: location.pathname }}>
-              去创建或加入家庭 →
+              去创建或加入家庭<Icon name="arrow-right" size={13} className="icon--trail" />
             </Link>
           </section>
         ) : (
@@ -52,7 +53,7 @@ export default function FridgePage() {
            * 三种状态都只占一行，这样无论取不取得到数据，冰箱那块的位置都不会被挤走。
            */
           <Link className="card shopline" to="/shopping" state={{ from: location.pathname }}>
-            <span className="shopline__icon" aria-hidden>🛒</span>
+            <span className="shopline__icon" aria-hidden><Icon name="cart" size={19} /></span>
             <span className="shopline__main">
               <span className="shopline__title">要去买什么</span>
               <span className="shopline__meta">
@@ -66,7 +67,7 @@ export default function FridgePage() {
             {data && data.missing.length > 0 && (
               <span className="shopline__warn" title={`有 ${data.missing.length} 道菜没有配料表`}>!</span>
             )}
-            <span className="shopline__arrow" aria-hidden>›</span>
+            <span className="shopline__arrow" aria-hidden><Icon name="chevron-right" size={16} /></span>
           </Link>
         )}
 

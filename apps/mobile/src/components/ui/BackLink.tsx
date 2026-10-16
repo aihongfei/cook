@@ -1,5 +1,6 @@
 import type { MouseEvent, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { goBack } from '@/lib/back-go'
 
 /**
@@ -47,7 +48,11 @@ export default function BackLink({
 
   return (
     <Link className={className} to={to} state={state} onClick={onClick}>
-      {children ?? `← ${label ?? '返回'}`}
+      {children ?? (
+        <>
+          <Icon name="arrow-left" size={13} /> {label ?? '返回'}
+        </>
+      )}
     </Link>
   )
 }

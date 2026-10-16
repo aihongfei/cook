@@ -118,7 +118,7 @@ it('顶部「＋ 新建菜谱」与空态里的入口都去 `/recipes/new`', asy
   expect(await screen.findByText('还没有自己上传的菜谱')).toBeTruthy()
   expect(screen.getByText('共 0 道')).toBeTruthy()
   // 顶部那个入口在列表为空时也得在（不能因为空了就找不到入口）
-  expect(screen.getByRole('link', { name: '＋ 新建菜谱' }).getAttribute('href')).toBe('/recipes/new')
+  expect(screen.getByRole('link', { name: '新建菜谱' }).getAttribute('href')).toBe('/recipes/new')
   // 空态自己那条同时给出"下一步"
   fireEvent.click(screen.getByRole('link', { name: '写下第一道菜' }))
   expect(screen.getByTestId('form-page')).toBeTruthy()
@@ -147,14 +147,14 @@ it('「＋ 新建菜谱」只在「原创的」上有（做过的 / 收藏的底
 
   // 默认落在「做过的」：这一支不该有新建入口
   expect(await screen.findByText('我做的排骨')).toBeTruthy()
-  expect(screen.queryByRole('link', { name: '＋ 新建菜谱' })).toBeNull()
+  expect(screen.queryByRole('link', { name: '新建菜谱' })).toBeNull()
 
   fireEvent.click(screen.getByText('收藏的'))
   expect(await screen.findByText('我收的菜')).toBeTruthy()
-  expect(screen.queryByRole('link', { name: '＋ 新建菜谱' })).toBeNull()
+  expect(screen.queryByRole('link', { name: '新建菜谱' })).toBeNull()
 
   fireEvent.click(screen.getByText('原创的'))
-  expect((await screen.findByRole('link', { name: '＋ 新建菜谱' })).getAttribute('href')).toBe('/recipes/new')
+  expect((await screen.findByRole('link', { name: '新建菜谱' })).getAttribute('href')).toBe('/recipes/new')
 })
 
 it('「多选」只在真有菜的时候画（空列表上摆一颗点了没事发生的按钮最糟）', async () => {
@@ -190,7 +190,7 @@ it('换走 tab 就退出多选（否则会留着一条"已选 N 道 / 删除"对
 
   // 切回来是干净的：没有复选框、没有操作条
   fireEvent.click(screen.getByText('原创的'))
-  expect(await screen.findByRole('link', { name: '＋ 新建菜谱' })).toBeTruthy()
+  expect(await screen.findByRole('link', { name: '新建菜谱' })).toBeTruthy()
   expect(document.querySelector('.dish-card__pick')).toBeNull()
 })
 
@@ -235,7 +235,7 @@ it('顶部「＋ 新建菜谱」始终在（不能因为列表空了/加载中�
   mockGet([])
   mount()
 
-  const link = screen.getByRole('link', { name: '＋ 新建菜谱' })
+  const link = screen.getByRole('link', { name: '新建菜谱' })
   expect(link.getAttribute('href')).toBe('/recipes/new')
   fireEvent.click(link)
   await waitFor(() => expect(screen.getByTestId('form-page')).toBeTruthy())

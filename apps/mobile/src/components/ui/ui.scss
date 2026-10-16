@@ -81,11 +81,15 @@
   color: #6e3a1c;
 }
 
-.section-title__orn {
-  color: #e29a5a;
-  font-size: 11px;
-  letter-spacing: -1px;
-}
+/* 2026-10-16：这一处原来是文字符号，现在是手绘水彩图（见 `components/icons/Icon.tsx`）。
+   下面那些给字形用的度量（font-size / color / letter-spacing）都随之删掉——
+   图有自己的像素尺寸与颜色，留着只会让人以为改它有用。 */
+/*
+ * 「❯❯」装饰换成了图片之后这里一度留给 `.section-title__orn` 的样式全部作废：
+ * 图是 `<Icon>` 直接放的，11px 的字形度量（负字距是为了把两个 ❯ 挤紧）都不再有意义——
+ * 那一点现在烧在图里。所以整条规则删掉，而不是留一条没人读的 `color`。
+ * 行距由 `.section-title__text` 的 `gap: 9px` 管着，与原来那个 `<span>` 是同一个位置。
+ */
 
 .section-title__more {
   display: flex;
@@ -249,8 +253,16 @@
   text-align: center;
 }
 
-.empty__emoji {
-  font-size: 44px;
+/*
+ * 空态插画（2026-10-16 由文字 emoji 换成手绘水彩图，见 `components/icons/Icon.tsx` 的文件头）。
+ * 原来是 `.empty__emoji { font-size: 44px }`——文字的 44px 与图片的 44px 不是一回事
+ * （字形框里还带着上下边距），所以尺寸现在交给 `<Icon size={44}>` 的 width/height，
+ * 这一层只管居中。
+ */
+.empty__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .empty__title {
@@ -563,6 +575,19 @@
   animation: toast-in 0.2s ease-out;
 }
 
+/*
+ * 提示层的对勾 / 叹号：**那张手绘的勾**（`tick.png`），不是 `✓` 字符
+ * （2026-10-16 用户：「不要用符号图标了」）。
+ *
+ * 这颗圆底的颜色是**语气**（成功=品牌橙、失败=砖红），所以留着——图只负责里面的记号。
+ * 记号刷成奶白：深褐的勾压在橙底上只有 2.1:1，等于看不见
+ * （见 `components/icons/icon.scss` 的 `.icon--white`）。
+ *
+ * ⚠️ **记号只给 9px，不给满**：圆只有 18px，而这张勾的墨迹是**斜着铺满整格**的
+ * （贴边裁的，见 `.icon--trail`），顶到 11px 就开始出圈了——放大 4 倍量过：
+ * 10px 时右上那一撇已经贴着边，9px 才是"四边都留得住"的尺寸。
+ * 这也是符号年代不存在的问题：`✓` 的字号与墨迹大小是两件事，图是同一件。
+ */
 .toast__mark {
   display: flex;
   flex: 0 0 auto;
@@ -570,8 +595,6 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  font-size: 11px;
-  color: var(--color-paper);
   background: var(--color-brand);
   border-radius: 50%;
 }

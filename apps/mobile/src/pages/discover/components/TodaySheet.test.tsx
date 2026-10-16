@@ -220,7 +220,7 @@ it('拿不出菜时说清那一种情况的去路（冰箱空 → 给去记冰�
   renderSheet()
 
   expect(await screen.findByText('冰箱里还没记东西')).toBeTruthy()
-  expect(screen.getByText('去记两样冰箱里的东西 →')).toBeTruthy()
+  expect(screen.getByText('去记两样冰箱里的东西')).toBeTruthy()
 })
 
 it('冰箱空但挑得出菜：明说"这次没照着冰箱挑"（不说的话用户会以为它看过冰箱了）', async () => {
@@ -228,7 +228,7 @@ it('冰箱空但挑得出菜：明说"这次没照着冰箱挑"（不说的话�
   renderSheet()
 
   expect(await screen.findByText(/冰箱里还没记东西，这次只按家里的口味/)).toBeTruthy()
-  expect(screen.getByText('去记两样 →')).toBeTruthy()
+  expect(screen.getByText('去记两样')).toBeTruthy()
 })
 
 it('请求失败时说人话并给「再试一次」；重试仍带着已经看过的排除项', async () => {

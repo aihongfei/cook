@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { apiErrorMessage } from '@/api/client'
 import { useFamily } from '@/api/family'
 import {
@@ -82,7 +83,7 @@ function Row({
           aria-label={`把「${item.name}」从清单上删掉`}
           onClick={onRemove}
         >
-          ✕
+          <Icon name="close" size={13} />
         </button>
       )}
     </li>
@@ -200,7 +201,7 @@ export default function ShoppingPage() {
               采购清单是按家里一起定的菜单算的。先创建家庭或用邀请码加入，再回来列清单。
             </p>
             <Link className="shop__link" to="/family" state={{ from: location.pathname }}>
-              去创建或加入家庭 →
+              去创建或加入家庭<Icon name="arrow-right" size={13} className="icon--trail" />
             </Link>
           </section>
         ) : (
@@ -234,7 +235,7 @@ export default function ShoppingPage() {
                   菜一「选好了」就会出现在这里。
                 </p>
                 <Link className="shop__link" to="/prep" state={{ from: location.pathname }}>
-                  去备菜计划 →
+                  去备菜计划<Icon name="arrow-right" size={13} className="icon--trail" />
                 </Link>
               </section>
             )}
@@ -320,7 +321,7 @@ export default function ShoppingPage() {
                     </form>
                   ) : (
                     <button type="button" className="shop__add-open" onClick={() => setAddOpen(true)}>
-                      ＋ 加一样清单上没有的
+                      <Icon name="plus" size={14} className="icon--lead" /> 加一样清单上没有的
                     </button>
                   )}
                 </div>
@@ -346,7 +347,9 @@ export default function ShoppingPage() {
                     家里有 {covered.length} 样，不用买
                     {data && data.unsureCount > 0 && `（${data.unsureCount} 样的量要自己看一眼）`}
                   </span>
-                  <span className="shop__covered-arrow" aria-hidden>{coveredOpen ? '⌃' : '⌄'}</span>
+                  <span className="shop__covered-arrow" aria-hidden>
+                    <Icon name={coveredOpen ? 'chevron-up' : 'chevron-down'} size={15} />
+                  </span>
                 </button>
                 {coveredOpen && (
                   <section className="card shop__covered-list-card">
@@ -363,7 +366,7 @@ export default function ShoppingPage() {
               <p className="shop__stock-empty">
                 冰箱里还没记东西，所以这份清单没替你扣掉什么。
                 <Link className="shop__stock-link" to="/fridge" state={{ from: location.pathname }}>
-                  记一下冰箱里有什么 →
+                  记一下冰箱里有什么<Icon name="arrow-right" size={13} className="icon--trail" />
                 </Link>
               </p>
             )}

@@ -1,4 +1,5 @@
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { useCookablePages, type CookableDish } from '@/api/fridge'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
@@ -153,7 +154,7 @@ export default function CookablePage() {
                 ? '挑好的这几样配不出菜，回冰箱页重新挑几样。'
                 : '冰箱里还没有能拿来做菜的东西（调料不算）。先去记几样，这里就会告诉你它们能做什么。'}
             </p>
-            <Link className="cooklist__link-out" to="/fridge">去记冰箱里的东西 →</Link>
+            <Link className="cooklist__link-out" to="/fridge">去记冰箱里的东西<Icon name="arrow-right" size={13} className="icon--trail" /></Link>
           </section>
         )}
 

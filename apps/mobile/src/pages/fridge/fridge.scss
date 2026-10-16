@@ -74,10 +74,11 @@
   border-radius: 50%;
 }
 
+/* 2026-10-16：文字符号换成手绘水彩图（见 `components/icons/Icon.tsx`），给字形用的度量作废 */
 .shopline__arrow {
+  display: flex;
   flex: 0 0 auto;
-  font-size: 17px;
-  color: var(--color-ink-3);
+  align-items: center;
 }
 
 .fridge-scope {
@@ -301,8 +302,10 @@
 }
 
 /* 没有对应图的食材（用户自己打的字）：中性占位，不假装知道那是什么 */
+/* 没有对应图时的占位盘（2026-10-16 换成手绘水彩图）：16px 的字形度量删掉，
+   尺寸交给 `<Icon size={20}>` 的 width/height；`opacity` 留着——
+   它是"这个地方没有真图"的信号（占位不该和真图一样显眼） */
 .fitem__pic-none {
-  font-size: 16px;
   opacity: 0.45;
 }
 
@@ -501,11 +504,11 @@
   object-fit: contain;
 }
 
+/* 同上：尺寸交给 `<Icon size={24}>`，这一层只管居中与压淡 */
 .fridge-sheet__name-pic--none {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
   opacity: 0.45;
 }
 
@@ -860,9 +863,23 @@
   border-color: var(--color-brand);
 }
 
+/*
+ * 选中标签行首那个对勾：也是一张**图**（2026-10-16 用户：「不要用符号图标了」）。
+ *
+ * 原来是 `content: '✓ '`——字形的度量由字体说了算，10px 上还会被手写体拽歪
+ * （与 `＋`/`×` 那两次同一条，见 TabIcons.tsx 里那两个 ⚠️）。
+ * `::before` 里放不下 `<img>`，所以走背景图：**同一张 tick.png**，只用滤镜刷成白的
+ * （选中时是品牌色实底，深褐的对勾压上去看不清）。
+ */
 .cook__chip.is-on::before {
-  content: '✓ ';
-  font-size: 10px;
+  content: '';
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 3px;
+  vertical-align: -1px;
+  background: url('/img/icons/tick.png') center / contain no-repeat;
+  filter: brightness(0) invert(1);
 }
 
 .cook__chip:active {

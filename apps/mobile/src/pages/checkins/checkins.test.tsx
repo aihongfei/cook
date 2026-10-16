@@ -284,10 +284,10 @@ it('返回入口跟着来源走：从「我的」进来就回我的，不写死�
   mockGet({ family: familyFixture() })
   renderWall('/mine')
 
-  const back = await screen.findByRole('link', { name: '← 返回我的' })
+  const back = await screen.findByRole('link', { name: '返回我的' })
   expect(back.getAttribute('href')).toBe('/mine')
   // 写死"返回厨房"时，从我的进来的人点返回会落到厨房——这条就是防它回来
-  expect(screen.queryByRole('link', { name: '← 返回厨房' })).toBeNull()
+  expect(screen.queryByRole('link', { name: '返回厨房' })).toBeNull()
 })
 
 it('从点单卡的成品照进来就回订单页', async () => {
@@ -296,7 +296,7 @@ it('从点单卡的成品照进来就回订单页', async () => {
 
   // 文案统一取底部 Tab 的名字（共享的 back-link 模块按 tab.label 生成）：
   // 用户看着底栏那个「订单」点返回，按钮上就不该写另一种叫法
-  const back = await screen.findByRole('link', { name: '← 返回订单' })
+  const back = await screen.findByRole('link', { name: '返回订单' })
   expect(back.getAttribute('href')).toBe('/order')
 })
 
@@ -304,7 +304,7 @@ it('没带来源（直接输地址）时兜底回「我的」，不是厨房', a
   mockGet({ family: familyFixture() })
   renderWall()
 
-  const back = await screen.findByRole('link', { name: '← 返回我的' })
+  const back = await screen.findByRole('link', { name: '返回我的' })
   expect(back.getAttribute('href')).toBe('/mine')
 })
 

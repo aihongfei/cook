@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { useFamily } from '@/api/family'
 import { usePlanBoard, type MealProgressRow, type PlanDay } from '@/api/orders'
 import BackLink from '@/components/ui/BackLink'
@@ -99,7 +100,7 @@ export default function PrepPage() {
               备菜是按家里一起排的。先创建家庭或用邀请码加入，再回来安排这一周。
             </p>
             <Link className="prep__link" to="/family" state={{ from: location.pathname }}>
-              去创建或加入家庭 →
+              去创建或加入家庭<Icon name="arrow-right" size={13} className="icon--trail" />
             </Link>
           </section>
         ) : (
@@ -125,7 +126,7 @@ export default function PrepPage() {
                 {/* 采购清单（M7 / F7-01）：排完菜顺路去买菜是同一件事的两半，
                     所以入口就放在排菜的页上（而不是只挂在发现页） */}
                 <Link className="prep__shop" to="/shopping" state={{ from: location.pathname }}>
-                  看要买什么 →
+                  看要买什么<Icon name="arrow-right" size={13} className="icon--trail" />
                 </Link>
               </p>
             )}

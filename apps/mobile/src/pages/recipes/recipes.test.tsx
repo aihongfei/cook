@@ -218,7 +218,7 @@ describe('recipe browsing states', () => {
      */
     expect(screen.getAllByText('HowToCook')).toHaveLength(2)
     expect(document.querySelector('.recipe-detail__origin .origin-badge')!.textContent).toBe('HowToCook')
-    expect(screen.getByRole('link', { name: '查看原始菜谱 ↗' }).getAttribute('href')).toBe('https://example.com/recipe')
+    expect(screen.getByRole('link', { name: '查看原始菜谱' }).getAttribute('href')).toBe('https://example.com/recipe')
     expect(document.querySelector('video')).toBeNull()
   })
 })

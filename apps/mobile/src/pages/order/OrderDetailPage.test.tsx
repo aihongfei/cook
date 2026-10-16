@@ -335,7 +335,7 @@ it('「＋ 再加一道」跳到菜谱小书，并把这一餐（日期/餐次/�
   mockGet()
   renderAdd()
 
-  const add = await screen.findByRole('link', { name: '＋ 再加一道' })
+  const add = await screen.findByRole('link', { name: '再加一道' })
   expect(add.getAttribute('href')).toBe('/recipes')
 
   fireEvent.click(add)
@@ -354,5 +354,5 @@ it('已做好的那一餐不给「再加一道」（成品封口，要改就是�
   renderDetail()
 
   await screen.findAllByRole('link', { name: /番茄炒蛋/ })
-  expect(screen.queryByRole('link', { name: '＋ 再加一道' })).toBeNull()
+  expect(screen.queryByRole('link', { name: '再加一道' })).toBeNull()
 })

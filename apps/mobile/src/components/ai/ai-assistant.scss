@@ -74,8 +74,12 @@
   color: var(--color-ink-3);
 }
 
-.ai__receipt-mark {
-  font-size: 11px;
+/* 回执行首那个「已办妥」的记号（2026-10-16 换成手绘水彩图）：
+   11px 的字形度量删掉，尺寸交给 `<Icon name="check" size={15}>` */
+  .ai__receipt-mark {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
 }
 
 .ai__receipt-list {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import Icon from '@/components/icons/Icon'
 import { DotLoading } from 'antd-mobile'
 import BottomSheet from '@/components/ui/BottomSheet'
 import { apiErrorMessage } from '@/api/client'
@@ -261,7 +262,7 @@ export default function TodaySheet({ visible, onClose }: { visible: boolean; onC
           <p className="decide__none-text">{result.reason ?? '这会儿挑不出来'}</p>
           {result.fridgeEmpty && (
             <Link className="decide__link" to="/fridge" state={{ from: '/discover' }} onClick={onClose}>
-              去记两样冰箱里的东西 →
+              去记两样冰箱里的东西 <Icon name="arrow-right" size={13} className="icon--trail" />
             </Link>
           )}
         </div>
@@ -302,7 +303,7 @@ export default function TodaySheet({ visible, onClose }: { visible: boolean; onC
             <p className="decide__hint">
               冰箱里还没记东西，这次只按家里的口味和平时爱吃的挑。
               <Link className="decide__link" to="/fridge" state={{ from: '/discover' }} onClick={onClose}>
-                去记两样 →
+                去记两样 <Icon name="arrow-right" size={13} className="icon--trail" />
               </Link>
             </p>
           )}
@@ -356,7 +357,7 @@ export default function TodaySheet({ visible, onClose }: { visible: boolean; onC
               disabled={decide.isPending || result?.canSwap === false}
               onClick={swap}
             >
-              换一道 ↻
+              换一道 <Icon name="refresh" size={13} className="icon--trail" />
             </button>
           </div>
         </div>

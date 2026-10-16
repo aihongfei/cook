@@ -513,7 +513,7 @@ it('「做好了」的一餐：卡片上给的是成品照，而不是能改的�
   expect(await screen.findByText(headingOf('2026-10-13'))).toBeTruthy()
   // 流转按钮一个都不给（后端 nextActions 为空），能点的只剩"看照片/传照片"那一档
   expect(screen.queryByRole('button', { name: '选好了' })).toBeNull()
-  expect(screen.getByRole('button', { name: '📷 再传一张' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '再传一张' })).toBeTruthy()
 })
 
 it('切换「只看我的」按 scope 重新取数（两个视角各自一片缓存）', async () => {
@@ -679,9 +679,9 @@ it('「已做好」的卡片显示成品照张数，并给去打卡墙看看的�
   })
   renderOrder()
 
-  expect(await screen.findByText('已传 3 张成品照，去看看 →')).toBeTruthy()
+  expect(await screen.findByText('已传 3 张成品照，去看看')).toBeTruthy()
   // 已经有照片了，按钮话术变成"再传一张"（不然像在催人重复上传）
-  expect(screen.getByRole('button', { name: '📷 再传一张' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '再传一张' })).toBeTruthy()
 })
 
 it('一张成品照都没有时只说上传，不提"去看看"（没东西可看）', async () => {
@@ -694,7 +694,7 @@ it('一张成品照都没有时只说上传，不提"去看看"（没东西可�
   })
   renderOrder()
 
-  expect(await screen.findByRole('button', { name: '📷 传成品照' })).toBeTruthy()
+  expect(await screen.findByRole('button', { name: '传成品照' })).toBeTruthy()
   expect(screen.queryByText(/张成品照，去看看/)).toBeNull()
 })
 
@@ -758,7 +758,7 @@ it('定局的那一餐才有「再点一次」入口（能不能照它点由后�
   })
   renderOrder()
 
-  expect(await screen.findByRole('button', { name: '🔁 再点一次' })).toBeTruthy()
+  expect(await screen.findByRole('button', { name: '再点一次' })).toBeTruthy()
 })
 
 it('还在收集中的那一餐不给这个入口（要加菜直接点那道菜，不必绕道"复制"）', async () => {
@@ -768,7 +768,7 @@ it('还在收集中的那一餐不给这个入口（要加菜直接点那道菜�
   renderOrder()
 
   expect(await screen.findByText(headingOf('2026-10-13'))).toBeTruthy()
-  expect(screen.queryByRole('button', { name: '🔁 再点一次' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '再点一次' })).toBeNull()
 })
 
 it('「再点一次」先把要照的那桌菜念出来，再让选照到哪一餐', async () => {
@@ -792,9 +792,14 @@ it('「再点一次」先把要照的那桌菜念出来，再让选照到哪一�
   })
   renderOrder()
 
-  fireEvent.click(await screen.findByRole('button', { name: '🔁 再点一次' }))
+  fireEvent.click(await screen.findByRole('button', { name: '再点一次' }))
 
-  expect(await screen.findByText('再点一次')).toBeTruthy()
+  /*
+   * 抽屉打开后「再点一次」这句话**有两处**：卡片上那颗按钮（还在页面上）与抽屉标题。
+   * 从前那颗按钮前面有个文字 🔁 把两者分开，现在图标是图（2026-10-16），
+   * 按钮的可读名字就只剩「再点一次」了——所以要按抽屉那一层去找标题。
+   */
+  expect(await screen.findByText('再点一次', { selector: '.sheet__title' })).toBeTruthy()
   // 要照的是哪一桌：菜名连同份数（×2 是"两个人各点了一份"，照抄时只收一份）
   expect(screen.getByText('番茄炒蛋、红烧排骨 ×2')).toBeTruthy()
   // 备注不跟着走这件事要说清楚，否则用户会以为"少放盐"也被带过去了
@@ -820,7 +825,7 @@ it('确认后按选中的那一餐发请求，并把"加了哪些、哪些本来
     } as never)
   renderOrder()
 
-  fireEvent.click(await screen.findByRole('button', { name: '🔁 再点一次' }))
+  fireEvent.click(await screen.findByRole('button', { name: '再点一次' }))
   /*
    * **显式选日子与餐次**，不依赖"默认下一餐"：`nextMealDefaults` 按当前钟点算
    * （15 点前默认今晚、之后默认明天午饭），断言钉死其中一个值会在下午变红。
@@ -859,7 +864,7 @@ it('整桌都已经有了：只说"都有了"，不编一个"加了 0 道"', asy
   } as never)
   renderOrder()
 
-  fireEvent.click(await screen.findByRole('button', { name: '🔁 再点一次' }))
+  fireEvent.click(await screen.findByRole('button', { name: '再点一次' }))
   fireEvent.click(await screen.findByRole('button', { name: '明天' }))
   fireEvent.click(await screen.findByRole('button', { name: /照这桌点进/ }))
 

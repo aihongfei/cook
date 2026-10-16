@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import Icon from '@/components/icons/Icon'
 import { apiErrorMessage } from '@/api/client'
 import { useSetDinerCount, type MealCard } from '@/api/orders'
 import BottomSheet, { type BottomSheetHandle } from '@/components/ui/BottomSheet'
@@ -64,7 +65,7 @@ export default function DinerCountSheet({
           onClick={() => setValue((prev) => String(Math.max(1, Number(prev) - 1)))}
           aria-label="少一个人"
         >
-          −
+          <Icon name="minus" size={18} />
         </button>
         <input
           className="diners-stepper__input"
@@ -80,7 +81,7 @@ export default function DinerCountSheet({
           onClick={() => setValue((prev) => String(Math.min(50, Number(prev) + 1)))}
           aria-label="多一个人"
         >
-          ＋
+          <Icon name="plus" size={18} />
         </button>
         <span className="diners-stepper__unit">人</span>
       </div>

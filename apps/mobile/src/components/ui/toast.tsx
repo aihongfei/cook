@@ -1,3 +1,4 @@
+import Icon from '@/components/icons/Icon'
 import { create } from 'zustand'
 import './ui.scss'
 
@@ -65,7 +66,9 @@ export function Toaster() {
           onClick={() => dismiss(item.id)}
         >
           <span className="toast__mark" aria-hidden="true">
-            {item.tone === 'error' ? '!' : '✓'}
+            {item.tone === 'error'
+              ? <Icon name="close" size={10} white />
+              : <Icon name="tick" size={10} white />}
           </span>
           <span className="toast__text">{item.text}</span>
         </div>
