@@ -6,6 +6,7 @@ import {
   ensureBucket, extensionForContentType, mediaKey, mediaS3Config, publicImageUrl, putImage, s3Client,
 } from '../media/media.storage'
 import { decodeImage } from '../media/image.rules'
+import { NotificationsService } from '../notifications/notifications.service'
 import {
   RECIPE_ORIGIN_USER,
   buildSearchText,
@@ -34,10 +35,19 @@ function imageProvided(raw: unknown): boolean {
  *
  * **AI 也走这里**（见 ai.service 的菜谱工具）：一条写入逻辑只此一份，
  * 校验、家庭隔离、搜索文本拼法都只有一处实现。D-052 给冰箱定的规矩沿用到这里。
+ *
+ * 三处写操作**顺带告诉家里人**（用户 2026-10-16：「菜谱之类的」也要通知）：
+ * 自建菜谱是**一家人共用的**（`familyId` 那一列，与冰箱同一层可见性），
+ * 谁上传/改动/删掉都该让家人知道。AI 走的是同一套方法，所以 AI 干的那些也会通知——
+ * 这是对的：家里人看到的仍然是"菜谱变了"，而且AI 的动作本来就该留痕（见 `AiAction`）。
  */
 @Injectable()
 export class RecipeWriteService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    /** 「菜谱…有变化」要告诉家里人（用户 2026-10-16） */
+    private readonly notifications: NotificationsService,
+  ) {}
 
   /**
    * 取当前用户的家庭归属。**没有家庭也能建菜谱**——一家之主还没建家庭时
@@ -86,6 +96,24 @@ export class RecipeWriteService {
         } as unknown as Prisma.InputJsonValue,
       },
     })
+
+    /*
+     * 「菜谱…有变化」：谁上传了一道（用户 2026-10-16）。
+     * 没加入家庭时 `who.familyId` 是 null——那时没有"家里人"可通知，直接不发
+     * （`recordChange` 的收件人是按家庭算的，没有家庭就是空集）。
+     */
+    if (who.familyId) {
+      await this.notifications.recordChange(who.familyId, {
+        kind: 'recipe',
+        action: `上传了新菜谱「${row.name}」`,
+        body: [row.category, row.cuisine].filter(Boolean).join(' · ') || null,
+        to: `/recipes/${row.id}`,
+        mealKey: null,
+        tag: '新菜谱',
+        scope: `new:${row.id}`,
+      }, userId)
+    }
+
     return this.view(row)
   }
 
@@ -130,6 +158,32 @@ export class RecipeWriteService {
       where: { id },
       data: { ...this.columns(merged), ...(await this.storeImage(raw)) },
     })
+
+    /*
+     * 「菜谱…有变化」：谁改了哪一道（用户 2026-10-16）。
+     * 改名了就把新旧名字都说出来（"改成了 X"），没改名就说"改了"——
+     * 那句话对家里人是有用的：一道菜的做法变了，做过的人下次照着做就不一样了。
+     *
+     * 幂等键里带 **`updatedAt` 的时刻**（Prisma 在这次 update 里写下的那个值，
+     * 一次修改一个时刻）：这一条与冰箱那条的取舍**故意不同**——冰箱改的是"它现在是 X"
+     * （同一个值说一次就够），而这里是"**有人动了某道菜谱**"，那是动作，
+     * 动十次就该看到十次。代价是"请求成功了但响应丢了、客户端重试"会多出一条
+     * ——比"第二次改菜谱家里人完全不知道"轻得多。
+     */
+    if (row.familyId) {
+      await this.notifications.recordChange(row.familyId, {
+        kind: 'recipe',
+        action: patch.name && patch.name !== row.name
+          ? `把菜谱「${row.name}」改名成「${patch.name}」`
+          : `改了菜谱「${row.name}」`,
+        body: null,
+        to: `/recipes/${id}`,
+        mealKey: null,
+        tag: '改了',
+        scope: `edit:${id}:${updated.updatedAt.getTime()}`,
+      }, userId)
+    }
+
     return this.view(updated)
   }
 
@@ -140,6 +194,26 @@ export class RecipeWriteService {
     const who = await this.actor(userId)
     if (!canWriteRecipe(row, who)) throw new ForbiddenException(writeRefusal(row))
     await this.prisma.recipe.delete({ where: { id } })
+
+    /*
+     * 「菜谱…有变化」：谁删了哪一道（用户 2026-10-16）。
+     *
+     * 注意：**撤销 AI 删除（`restore`）不发提醒**——那条路是"把误删的还回来"，
+     * 发一条"还回来了"家里人也没做什么新事；而真正重要的是"它曾经被删掉过"，
+     * 那一条已经在删除时发出去了（历史不抹）。
+     */
+    if (row.familyId) {
+      await this.notifications.recordChange(row.familyId, {
+        kind: 'recipe',
+        action: `删掉了菜谱「${row.name}」`,
+        body: null,
+        to: '/recipes',
+        mealKey: null,
+        tag: '删了',
+        scope: `del:${id}`,
+      }, userId)
+    }
+
     return { id: row.id, name: row.name }
   }
 

@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
+import type { NotificationBoard } from '@/api/notifications'
+import { boardFixture, notificationFixture } from '@/api/notifications.testkit'
 import { Toaster, useToasts } from '@/components/ui/toast'
 import { useAuth } from '@/stores/auth'
 import MinePage from './MinePage'
@@ -46,7 +48,15 @@ const ME = {
  * **不做第二次 spyOn 去覆盖某一条**：spyOn 叠在已 spy 的方法上时，
  * 里层那份先匹配上，外层的实现根本轮不到（第一次写这条用例就是这么红的）。
  */
-function mockGet(family: unknown = null, unread = 0) {
+/**
+ * 装后端。
+ *
+ * 第二个参数是**一整份通知看板**（不只是一个未读数）：2026-10-16 之后
+ * 「我的」页要用它画三行的小红点（打卡/家庭/菜谱），那几行看的是
+ * `unreadByKind` 里各自的类——只给一个总数是不够的。
+ * 传数字则当"整页未读总数"（老用例这么用的，保持兼容）。
+ */
+function mockGet(family: unknown = null, notifications: number | NotificationBoard = 0) {
   vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
     if (url === '/auth/options') {
       return Promise.resolve({
@@ -65,7 +75,10 @@ function mockGet(family: unknown = null, unread = 0) {
      * 不是被测行为；要验"有未读时显示几条"就单独给一份（见下面那条）。
      */
     if (url === '/notifications') {
-      return Promise.resolve({ data: { items: [], unread, unreadByKind: {}, prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true } } } as never)
+      const board = typeof notifications === 'number'
+        ? boardFixture({ unread: notifications })
+        : notifications
+      return Promise.resolve({ data: board } as never)
     }
     if (url === '/checkins/stats') {
       return Promise.resolve({
@@ -252,8 +265,17 @@ it('消息提醒那一行是真入口（M10 落地后不再是「还没做」的
   expect(link).toBeTruthy()
   expect(link.getAttribute('href')).toBe('/notifications')
   expect(link.querySelector('.row__arrow')).toBeTruthy()
-  // 没有未读时说清这一页管什么（不写"0 条"）
-  expect(link.querySelector('.row__sub')?.textContent).toContain('菜单安排')
+  /*
+   * 没有未读时说清这一页管什么（不写"0 条"）。
+   *
+   * 这段文案 2026-10-16 跟着提醒范围一起扩了（用户：「家庭相关修改的都需要通知」）——
+   * 所以断的是**它把那几块列出来了**，不是某个具体措辞：措辞还会变，
+   * 而"用户在这一行就能知道这里管哪些事"才是要保住的那条。
+   */
+  const sub = link.querySelector('.row__sub')?.textContent ?? ''
+  for (const topic of ['菜单', '订单', '冰箱', '打卡', '家人', '菜谱']) {
+    expect(sub).toContain(topic)
+  }
 
   // AI 是部署时配的（.env / D-009），界面上没有可改的东西 —— 那两行连同整节都下线了
   expect(screen.queryByText('AI 模型配置')).toBeNull()
@@ -276,4 +298,56 @@ it('有未读时那一行的副标题报数（那是用户点它的理由）', a
     const link = screen.getByText('家庭消息提醒').closest('a') as HTMLAnchorElement
     expect(link.querySelector('.row__sub')?.textContent).toBe('3 条新消息')
   })
+})
+
+it('打卡/家庭/菜谱三行各有自己的小红点（用户 2026-10-16：家里的事也要在这页看得出来）', async () => {
+  /*
+   * 这三块**不亮底栏**（底栏五个 Tab 里没有打卡墙/家庭页/我的菜谱的入口），
+   * 所以红点只能落在这一页对应的那几行上——不给标记的话，家里人传了打卡照、
+   * 换了邀请码、改了你家菜谱，用户在这一页完全看不出来。
+   *
+   * 数从 `unreadByKind` 来（后端按 kind 数好的），三行的分组在这一页做：
+   * 打卡 + 评论同属"打卡墙"那一行（它们也是同一个开关）。
+   */
+  vi.restoreAllMocks()
+  mockGet({
+    id: 'f1', name: '小满一家', shared: true, inviteCode: 'H65WAJ',
+    createdAt: new Date().toISOString(), memberCount: 2, memberLimit: 10,
+    myRole: 'OWNER', myCapabilities: [], members: [],
+  }, boardFixture({
+    items: [
+      notificationFixture({ id: 'checkin:1', kind: 'checkin', unread: true }),
+      notificationFixture({ id: 'comment:1', kind: 'comment', unread: true }),
+      notificationFixture({ id: 'family:1', kind: 'family', unread: true }),
+      notificationFixture({ id: 'recipe:1', kind: 'recipe', unread: true }),
+      notificationFixture({ id: 'recipe:2', kind: 'recipe', unread: true }),
+    ],
+  }))
+  renderMine()
+
+  /*
+   * 打卡那一行：**两个数合成一个**（上传 1 + 评论 1 = 2），写在
+   * "去打卡墙看看"那句话里（那颗小圆标在这一行会跟"连续打卡"抢注意力）。
+   */
+  await waitFor(() => {
+    expect(document.querySelector('.me-checkin__count')?.textContent).toBe('2')
+  })
+
+  // 家庭那一行与菜谱那一行各挂一颗（菜谱是 2）
+  const badges = [...document.querySelectorAll('.me-badge')].map((node) => node.textContent)
+  expect(badges.sort()).toEqual(['1', '2'])
+})
+
+it('没有未读时这三行**不挂空标记**（0 不画，免得看着像"有 0 件事"）', async () => {
+  vi.restoreAllMocks()
+  mockGet({
+    id: 'f1', name: '小满一家', shared: true, inviteCode: 'H65WAJ',
+    createdAt: new Date().toISOString(), memberCount: 2, memberLimit: 10,
+    myRole: 'OWNER', myCapabilities: [], members: [],
+  }, boardFixture())
+  renderMine()
+
+  await screen.findByText('家庭消息提醒')
+  expect(document.querySelector('.me-badge')).toBeNull()
+  expect(document.querySelector('.me-checkin__count')).toBeNull()
 })

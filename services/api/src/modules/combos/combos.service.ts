@@ -197,17 +197,20 @@ export class CombosService {
     // 先确保整组都能加（这一餐的状态）：一次判定，避免加到一半才发现"已做好了"
     await this.orders.assertMealAcceptsItems(userId, mealDate, meal)
 
-    for (const recipeId of toAdd) {
-      await this.orders.addItem(userId, { recipeId, mealDate: dateKey(mealDate), meal })
-    }
+    /*
+     * 整组交给 `orders.addItems`（而不是在这里循环调 `addItem`）：那一支已经处理好了
+     * "逐道写入 + 合成一条通知"这件事（用户 2026-10-16 要的「订单有变化」——
+     * 一键加六道菜刷六条通知是打扰）。这里**不再自己循环**：两处各写一遍循环，
+     * 通知的合成就得跟着写两遍，而合成规则（取哪一条当幂等键）只有一份才对。
+     *
+     * 卡直接用它返回的那张（它就是"写完之后的这一餐"），不再多查一次。
+     */
+    const { card } = await this.orders.addItems(userId, { recipeIds: toAdd, mealDate: dateKey(mealDate), meal })
 
-    const finalRow = await this.prisma.mealOrder.findUnique({
-      where: { familyId_mealDate_meal: { familyId, mealDate, meal } },
-    })
     return {
       added: toAdd.map(id => this.nameOf(combo.items, id)),
       skipped: skipped.map(id => this.nameOf(combo.items, id)),
-      card: finalRow ? await this.orders.card(finalRow.id, userId) : null,
+      card,
       role: role as FamilyRole,
     }
   }

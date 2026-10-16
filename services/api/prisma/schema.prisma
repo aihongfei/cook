@@ -619,42 +619,56 @@ model ShoppingExtra {
   @@index([familyId, createdAt])
 }
 
-/// 消息提醒的**四个开关**（M10 / F10-04，2026-10-15）。
+/// 消息提醒的**开关**（M10 / F10-04，2026-10-15；2026-10-16 从四个扩到九个）。
 ///
 /// 为什么是一张自己的表，而不是往 `TasteProfile` 上加几个字段：那两件事没有关系。
 /// 口味是"家里吃什么"，这里是"什么该打扰我"——合表会让两边都得读一份自己不需要的数据，
 /// 而且以后任一边加字段都要动同一行。
 ///
-/// **四个开关各自独立**（`F10-01` 菜单安排 / `F10-02` 饭已做好 / `F10-03` 快过期 / 备菜）：
+/// **每个开关各自独立**（`F10-01` 菜单安排 / `F10-02` 饭已做好 / `F10-03` 快过期 / 备菜，
+/// 加上 2026-10-16 用户要的那四块变动：点菜、冰箱、打卡与评论、家庭、菜谱）：
 /// 一个总开关看着简洁，但用户真正想关的往往是**其中一个**——"饭好了要告诉我、
-/// 别天天催我备菜"是很常见的组合。关掉一个不影响其余三个。
+/// 别天天催我备菜"是很常见的组合。关掉一个不影响其余。
+///
+/// **开关 9 个、提醒类别 10 个**：打卡与评论合成一个开关（都在打卡墙上、点进去是同一处），
+/// 其余一一对应。哪个类别归哪个开关只写在 `notifications.rules.ts` 的 `prefOfKind` 里。
 ///
 /// **已读状态不在这张表上**——它逐条记在 `NotificationEvent.readAt` 里
 /// （用户 2026-10-15：「需要真的已读时才清」；按"推进水位线"设计过一版，被这句话否掉了）。
 /// 这里**只存"什么该打扰我"**。
 ///
 /// 一行不给（用户从没打开过通知中心 / 从没改过开关）时按**默认全开**处理，
-/// 这是"没反对"而不是"同意过"——所以界面上那四个开关必须如实展示当前生效值。
+/// 这是"没反对"而不是"同意过"——所以界面上那些开关必须如实展示当前生效值。
 model NotificationPref {
   id     String @id @default(cuid())
   userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   /**
-   * 这里**只有四个开关**——"已读"不在这张表上，而是**逐条**记在 `NotificationEvent.readAt` 上。
+   * 这里只有开关——"已读"不在这张表上，而是**逐条**记在 `NotificationEvent.readAt` 上。
    * 用户 2026-10-15 把这件事说得很准：「需要**真的已读**时才清」「通知那边点进去才清除」。
    * 所以判据不是"他进过哪个区域"（那样只要点一下底栏，他没看过的那些也跟着灭了——
    * 红点最坏的失败方式就是说谎），而是"这一条他有没有点开过"。
    */
 
   /// F10-01 菜单安排：某一天某一餐的菜单定下来了
-  mealPlan Boolean @default(true)
+  mealPlan     Boolean @default(true)
   /// F10-02 饭已做好：我点过菜的那一餐做好了
-  mealDone Boolean @default(true)
+  mealDone     Boolean @default(true)
   /// F10-03 之一：冰箱里有东西快过期 / 已经过期
-  expiry   Boolean @default(true)
+  expiry       Boolean @default(true)
   /// F10-03 之二：接下来几天有餐次还空着（备菜提醒）
-  prep     Boolean @default(true)
+  prep         Boolean @default(true)
+  /// 2026-10-16 用户：「订单有变化」——有人加菜、撤菜、改人数、取消这一餐
+  orderChange  Boolean @default(true)
+  /// 2026-10-16 用户：「冰箱有变化」——有人放进来、改了、拿走
+  fridgeChange Boolean @default(true)
+  /// 2026-10-16 用户：「打卡墙有上传、评论」（两类合成一个开关：去处是同一处）
+  checkin      Boolean @default(true)
+  /// 2026-10-16 用户：「家庭有变化」——有人加入/退出/被移出，或家庭设置与角色改了
+  family       Boolean @default(true)
+  /// 2026-10-16 用户：「菜谱之类的」——自家自建的菜谱被上传、修改、删掉
+  recipe       Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -674,14 +688,18 @@ model NotificationPref {
 /// - 日志说的是"**某时刻发生过一件事，并且通知了谁**"——这是一件**它自己的**事实，
 ///   不会因为那一餐后来被取消就不再成立（它就是发生过）。
 ///
-/// ## 谁写、什么时候写
+/// ## 谁写、什么时候写（**两条路**，2026-10-16 起）
 ///
-/// - **有明确时刻的事件**（菜单定下来、饭做好了）：在**状态变更的那一刻**写，
-///   与那次变更同一个请求里（见 `NotificationsService.recordMealEvent`）；
-/// - **状态型的提醒**（快过期、该备菜）没有"发生的那一刻"——它们是"现在这个状态"。
-///   所以按天**懒补一条**（`expiry:<userId>:<日期>` 这种确定性 id + upsert，重复读不会写重）。
-///   语义是诚实的："那天你第一次看到时，确实有东西快过期"——
-///   哪怕你后来把那盒奶喝了，这句话在当时也是真的。
+/// - **状态型**（`plan` / `done` / `expiry` / `prep`）：事实还在库里，所以**取列表时现算**，
+///   顺手把新出现的那几条懒补进日志（`NotificationsService.recordDerived`，`skipDuplicates` 幂等）。
+///   语义是"**现在**家里有这件事"——那一餐被取消了，"菜单定下来了"那条就跟着消失；
+/// - **事件型**（`order` / `fridge` / `checkin` / `comment` / `family` / `recipe`）：
+///   说的是一件**已经发生、且发生过就不在库里了**的事（撤了一道菜、从冰箱拿走一盒奶、
+///   谁改了家庭名）。事实本身没有留下痕迹可反推，所以由**做事的那一侧当场写下来**
+///   （`NotificationsService.recordChange`），一次动作一行、每人一行。
+///   语义是"某时刻谁做了什么"——**发生过就不会因为后来变了而消失**。
+///
+/// 两条路只在"谁写"上不同，读回来是同一张表、同一套已读、同一套红点。
 ///
 /// ## 为什么按账号存、不是按家庭存 + 已读表
 ///
@@ -695,7 +713,10 @@ model NotificationEvent {
   /// 家庭（清库/排查时按家看；用户退出家庭后这些行仍留着——那是他自己的历史）
   familyId String
 
-  /// 四类之一（`plan` / `done` / `expiry` / `prep`），与看板同一套 kind（前端共用一份图标表）
+  /// 十类之一。**状态型**：`plan` 菜单安排 / `done` 饭已做好 / `expiry` 快过期 / `prep` 该备菜；
+  /// **事件型**：`order` 点菜变动 / `fridge` 冰箱变动 / `checkin` 打卡上传 / `comment` 打卡评论 /
+  /// `family` 家庭变动 / `recipe` 菜谱变动。
+  /// 与看板同一套 kind（前端共用一份图标表），哪一类归哪个开关见 `notifications.rules` 的 `prefOfKind`。
   kind   String  @db.VarChar(12)
   /// 标题与副标题：**当时**拼好存下来的那句
   ///
@@ -706,6 +727,14 @@ model NotificationEvent {
   body   String? @db.VarChar(200)
   /// 点进去看哪儿（当时定的去处）
   toPath String  @db.VarChar(64)
+  /// 这一条属于哪一餐（`2026-10-18-DINNER`），不属于任何一餐时为 null。
+  ///
+  /// 只有**事件型**那几类用得上它：状态型的 `mealKey` 由现算那条给出（`mergeStored`
+  /// 既回放库里那句、又保留现算那边的归属）。事件型没有"现算的那条"，所以归属要存下来——
+  /// 点单列表靠它把"这张卡有事没看过"标出来（用户 2026-10-14 要求）。
+  mealKey String? @db.VarChar(32)
+  /// 标题旁边那个小标（"加菜""入库""新菜谱"…）。同一理由：事件型没有现算的那条可依。
+  tag     String? @db.VarChar(16)
 
   /// 事件时刻（排序与保留策略都用它）
   at DateTime

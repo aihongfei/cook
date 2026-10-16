@@ -1,13 +1,14 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../recipes/prisma.service'
-import { MEAL_LABEL, dateKey, dayWindow, visibleToMember } from '../orders/orders.rules'
+import { MEAL_LABEL, dateKey, dayWindow, mealWhenLabel, visibleToMember } from '../orders/orders.rules'
 import type { FamilyRole } from '../family/family.roles'
 import { expiryState } from '../fridge/fridge.rules'
 import { digest, randomToken } from '../auth/token'
 import {
-  buildNotifications, dateKey as calendarKey, dedupeKeyOf, mergeStored, PREP_WINDOW_DAYS, unreadByArea, unreadCount,
-  type DoneFact, type FridgeFact, type NotificationInput, type NotificationItem, type NotificationKind,
-  type NotificationPrefs, type PlanFact, type PrepFact, type NotificationRow,
+  buildChange, buildNotifications, dateKey as calendarKey, dedupeKeyOf, mergeStored, NOTIFICATION_PREF_KEYS, prefOfKind,
+  PREP_WINDOW_DAYS, unreadByArea, unreadCount,
+  type ChangeFact, type DoneFact, type FridgeFact, type NotificationInput, type NotificationItem, type NotificationKind,
+  type NotificationPrefKey, type NotificationPrefs, type PlanFact, type PrepFact, type NotificationRow,
 } from './notifications.rules'
 import { PATROL_MAX_ITEMS, nextSince, notifyIdOf, pickPatrolItems, type PatrolItem } from './patrol.rules'
 
@@ -24,13 +25,16 @@ const LOOKBACK_DAYS = 30
 const RELATIVE_DAY_SPAN = 3
 
 /**
- * 消息提醒（M10）。口径见 D-078。
+ * 消息提醒（M10）。口径见 D-078 与 `notifications.rules` 文件头。
  *
- * ## 这个模块**不存通知**，只存用户的偏好
+ * ## 这个模块不存"通知正文"的副本，存的是"发生过这件事"
  *
- * 四条提醒全部由已有数据现算（详见 `notifications.rules` 文件头）。这里负责把事实查出来、
- * 套上可见性口径、交给纯规则去组装——**"什么算一条提醒"这件事只写在纯规则里**，
- * 所以它能被测到，也不会与别处的口径漂移。
+ * **状态型**那四类由已有数据现算（菜单定了 / 做好了 / 快过期 / 该备菜），
+ * 所以那一半永远等于事实；**事件型**那六类（点菜、冰箱、打卡、评论、家庭、菜谱）
+ * 说的是一件发生过就不在库里的事（撤了一道菜、从冰箱拿走一盒奶），
+ * 只能由**做事的那一侧当场写下来**——入口就是本服务的 `recordChange`。
+ *
+ * 两条路的写法与理由见 `notifications.rules` 文件头那张表。
  *
  * ## 可见性跟点单同一条（不另立一套）
  *
@@ -40,16 +44,29 @@ const RELATIVE_DAY_SPAN = 3
  */
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name)
+
   constructor(private readonly prisma: PrismaService) {}
 
   /** 我的偏好；没有行就按默认全开（**不是**"没同意过"——见 schema 里那段说明） */
   async prefs(userId: string): Promise<NotificationPrefs> {
     const row = await this.prisma.notificationPref.findUnique({ where: { userId } })
+    /*
+     * 逐列写默认值，而**不是**"没行就返回一张常量表"：
+     * 以后加开关时，这里漏一列会立刻表现为"那个开关永远是默认值"（改不动），
+     * 而漏在常量表里则表现为"整个账号所有开关都回到默认"——后者更难查。
+     * 两处都写不出来才是真的好，所以这里有单测钉住"九个键一个不少"。
+     */
     return {
       mealPlan: row?.mealPlan ?? true,
       mealDone: row?.mealDone ?? true,
       expiry: row?.expiry ?? true,
       prep: row?.prep ?? true,
+      orderChange: row?.orderChange ?? true,
+      fridgeChange: row?.fridgeChange ?? true,
+      checkin: row?.checkin ?? true,
+      family: row?.family ?? true,
+      recipe: row?.recipe ?? true,
     }
   }
 
@@ -88,15 +105,13 @@ export class NotificationsService {
     )
 
     const window = dayWindow(PREP_WINDOW_DAYS, now)
-    const named = dayWindow(RELATIVE_DAY_SPAN, now)
-    /** 「今天晚餐」；超出 3 天窗口的写「10月9日晚餐」（不编一个"周五"——那是最近邻的叫法） */
-    const labelOf = (mealDate: Date, meal: 'LUNCH' | 'DINNER'): string => {
-      const key = dateKey(mealDate)
-      const hit = named.find((day) => day.value === key)
-      if (hit) return `${hit.label}${MEAL_LABEL[meal]}`
-      const [, month, day] = key.split('-')
-      return `${Number(month)}月${Number(day)}日${MEAL_LABEL[meal]}`
-    }
+    /*
+     * 「今天晚餐」这个说法**只有一份**：`mealWhenLabel` 在 `orders.rules` 里，
+     * 订单变动提醒（`orders.service`）也用同一个。两处各写一遍的话，
+     * 同一天同一餐会在两条提醒里出现两种叫法（"后天晚餐" vs "10月18日晚餐"）。
+     */
+    const labelOf = (mealDate: Date, meal: 'LUNCH' | 'DINNER'): string =>
+      mealWhenLabel(mealDate, meal, now, RELATIVE_DAY_SPAN)
 
     const plan: PlanFact[] = visible
       .filter((meal) => meal.confirmedAt !== null && meal.status !== 'CANCELED')
@@ -179,24 +194,108 @@ export class NotificationsService {
     })
     const byKey = new Map(stored.map((row) => [row.dedupeKey, {
       dedupeKey: row.dedupeKey,
+      kind: row.kind,
       title: row.title,
       body: row.body,
       toPath: row.toPath,
       at: row.at,
       readAt: row.readAt,
+      mealKey: row.mealKey,
+      tag: row.tag,
     }]))
 
-    // 库里那句优先（如实回放"当时那句话"），已读只认库里的 `readAt`
-    const rows = mergeStored(items, byKey, userId)
+    /*
+     * 库里那句优先（如实回放"当时那句话"），已读只认库里的 `readAt`。
+     * **事件型那六类也从这一份里出来**（它们没有现算的对应条目），开关在这里再过一遍。
+     */
+    const rows = mergeStored(items, byKey, userId, prefs)
 
     return {
       items: rows,
       /** 红点用这个数（**不是** `items.length`：已读的还要能翻回去看） */
       unread: unreadCount(rows),
       unreadByArea: unreadByArea(rows),
-      /** 四条提醒各自的未读数（通知中心里按类看） */
+      /** 各类提醒各自的未读数（通知中心里按类看） */
       unreadByKind: countByKind(rows),
-      prefs: { mealPlan: prefs.mealPlan, mealDone: prefs.mealDone, expiry: prefs.expiry, prep: prefs.prep },
+      prefs,
+    }
+  }
+
+  /**
+   * 记下**刚刚发生的一件事**（事件型那六类的唯一入口，2026-10-16 加）。
+   *
+   * 谁来调：**做事的那一侧**（订单、冰箱、打卡、家庭、菜谱的写接口），
+   * 在写完库、拿到返回之后顺手调一次。它拿不到"事实"就永远补不出来了
+   * （撤掉的那道菜已经不在库里），所以这件事必须在**动作发生的那个请求里**做。
+   *
+   * 调用方只报"发生了什么"（`fact` + `actorId`）：**谁做的**由这里查出来补上、
+   * **提醒谁**由这里扇出——这两件事在五个调用点完全一样，各写一遍就是五份会分叉的副本。
+   *
+   * ## 三件事由这一侧统一负责
+   *
+   * ① **扇出给全家人**（一人一行）：日志按账号存（已读也按账号），所以写入时扇出；
+   * ② **不给做事的人自己写**（`actorId` 排除掉）——"自己做的事不必被告知"
+   *    与 `plan`/`done` 的 `byMe` 是同一条规矩。同时**跳过关掉了这一类开关的人**：
+   *    关掉期间不写，于是重新打开时不会涌出一批"我关掉那阵子发生的事"；
+   * ③ **幂等**：靠 `dedupeKey` 的唯一约束 + `skipDuplicates`，重复调用不会写重
+   *    （与 `recordEvents` 同一条：不靠"先查后写"，并发下那会写两条）。
+   *
+   * ## 调用方应当 `await` 它，但**不为它失败**
+   *
+   * 这一侧吞掉异常（通知是**副作用**：加菜已经成功了，不该因为"提醒写不进去"让用户
+   * 看到一个报错、以为加菜失败而再点一次），所以调用方不必 try/catch；
+   * 但**要 await**——先写完再回响应，客户端拿到"成功"时提醒已经在库里了。
+   * 第一版让调用方 `void` 掉它（不等），后果是前端做完动作立刻重取通知时
+   * 那几毫秒里还没有这一条：表现就是"我刚点的菜，通知里看不见"，
+   * 要等下一次刷新才出现（`staleTime` 是 60 秒）。这正是本项目反复记过的
+   * "页面上看不见刚发生的事"那一族（R-78）。
+   * 代价是写接口多两三次小查询；比"用户以为功能没生效"便宜得多。
+   */
+  async recordChange(familyId: string, fact: ChangeFact, actorId: string): Promise<void> {
+    try {
+      // ① 家里除我之外的人 + ② 我叫什么（两个查询互不依赖，一起发）
+      const [actor, members] = await Promise.all([
+        this.prisma.user.findUnique({ where: { id: actorId }, select: { nickname: true } }),
+        this.prisma.familyMember.findMany({
+          where: { familyId, userId: { not: actorId } },
+          select: { userId: true },
+        }),
+      ])
+      if (members.length === 0) return
+
+      const item = buildChange(actor?.nickname ?? '家里人', fact)
+
+      /*
+       * 关掉这一类开关的人不写。
+       * 一次把这些人的偏好查回来（九列布尔、几十字节），**不按 kind 动态挑列**：
+       * 动态 select 在 Prisma 里要拼一个类型不定的对象，为此多一层间接不值得。
+       */
+      const prefKey = prefOfKind(item.kind)
+      const off = await this.prisma.notificationPref.findMany({
+        where: { userId: { in: members.map((member) => member.userId) }, [prefKey]: false },
+        select: { userId: true },
+      })
+      const muted = new Set(off.map((row) => row.userId))
+      const receivers = members.map((member) => member.userId).filter((id) => !muted.has(id))
+      if (receivers.length === 0) return
+
+      await this.prisma.notificationEvent.createMany({
+        data: receivers.map((userId) => ({
+          userId,
+          familyId,
+          kind: item.kind,
+          title: item.title,
+          body: item.body,
+          toPath: item.to,
+          mealKey: item.mealKey,
+          tag: item.tag,
+          at: new Date(item.at),
+          dedupeKey: dedupeKeyOf(item.id, userId),
+        })),
+        skipDuplicates: true,
+      })
+    } catch (error) {
+      this.logger.warn(`记录变动提醒失败（不影响主流程）：${String(error)}`)
     }
   }
 
@@ -275,14 +374,28 @@ export class NotificationsService {
     return { read: updated.count }
   }
 
-  /** 改四个开关（只改传了的那些；没传的保持原值） */
-  async updatePrefs(userId: string, patch: Partial<Pick<NotificationPrefs, 'mealPlan' | 'mealDone' | 'expiry' | 'prep'>>) {
+  /** 改开关（只改传了的那些；没传的保持原值） */
+  async updatePrefs(userId: string, patch: Partial<NotificationPrefs>): Promise<NotificationPrefs> {
     const row = await this.prisma.notificationPref.upsert({
       where: { userId },
       create: { userId, ...patch },
       update: patch,
     })
-    return { mealPlan: row.mealPlan, mealDone: row.mealDone, expiry: row.expiry, prep: row.prep }
+    /*
+     * 回写**九列的值**，返回形状与 `prefs()`/`GET /notifications` 同一份
+     * （前端三处用同一份 `NotificationPrefs`，少一列就是"改完这个开关没反应"）。
+     */
+    return {
+      mealPlan: row.mealPlan,
+      mealDone: row.mealDone,
+      expiry: row.expiry,
+      prep: row.prep,
+      orderChange: row.orderChange,
+      fridgeChange: row.fridgeChange,
+      checkin: row.checkin,
+      family: row.family,
+      recipe: row.recipe,
+    }
   }
 
   /**

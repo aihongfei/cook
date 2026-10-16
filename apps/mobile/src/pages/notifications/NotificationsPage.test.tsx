@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
+import type { AppNotification, NotificationBoard } from '@/api/notifications'
+import { ALL_PREFS_ON, boardFixture, notificationFixture } from '@/api/notifications.testkit'
 import { useAuth } from '@/stores/auth'
 import NotificationsPage from './NotificationsPage'
 
@@ -42,6 +44,10 @@ function renderPage() {
           <Route path="/order" element={<div data-testid="order-page" />} />
           {/* 提醒的去处是**那一餐的详情**（不是列表页） */}
           <Route path="/order/:mealKey" element={<div data-testid="order-detail-page" />} />
+          {/* 事件型那几类的去处（2026-10-16）：打卡墙、家庭页、菜谱详情 */}
+          <Route path="/checkins" element={<div data-testid="checkins-page" />} />
+          <Route path="/family" element={<div data-testid="family-page" />} />
+          <Route path="/recipes/:id" element={<div data-testid="recipe-detail-page" />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -49,7 +55,7 @@ function renderPage() {
 }
 
 const ITEMS = [
-  {
+  notificationFixture({
     id: 'done:2026-10-15-DINNER',
     kind: 'done',
     title: '今天晚餐做好了',
@@ -61,8 +67,8 @@ const ITEMS = [
     mealKey: '2026-10-15-DINNER',
     tag: '做好了',
     unread: true,
-  },
-  {
+  }),
+  notificationFixture({
     id: 'prep:2026-10-15',
     kind: 'prep',
     title: '明天午餐还没安排',
@@ -73,14 +79,18 @@ const ITEMS = [
     mealKey: null,
     tag: '备菜',
     unread: false,
-  },
+  }),
 ]
 
-const PREFS = { mealPlan: true, mealDone: true, expiry: true, prep: true }
-
-function mockBoard(board: unknown, onPost?: (url: string, body: unknown) => void) {
+/**
+ * 装一份看板。**传 `{ items }` 就够**：`unread`/`unreadByKind`/`prefs` 由
+ * `boardFixture` 按 items 算出来（与后端同一口径），用例不必自己写那三个数
+ * ——手写的那几份在"加一类提醒"时会漏字段（2026-10-16 就是这么炸的编译）。
+ */
+function mockBoard(board: Partial<NotificationBoard> & { items?: AppNotification[] }, onPost?: (url: string, body: unknown) => void) {
+  const full = boardFixture(board)
   vi.spyOn(apiClient, 'get').mockImplementation(((url: string) => {
-    if (url === '/notifications') return Promise.resolve({ data: board } as never)
+    if (url === '/notifications') return Promise.resolve({ data: full } as never)
     throw new Error(`未预期的请求：${url}`)
   }) as never)
   vi.spyOn(apiClient, 'post').mockImplementation(((url: string, body: unknown) => {
@@ -103,7 +113,7 @@ afterEach(() => {
 })
 
 it('列出提醒：标题、副标题、小标都来自后端（前端不拼第二份）', async () => {
-  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS })
+  mockBoard({ items: ITEMS })
   renderPage()
 
   expect(await screen.findByText('今天晚餐做好了')).toBeTruthy()
@@ -117,7 +127,7 @@ it('列出提醒：标题、副标题、小标都来自后端（前端不拼第�
 })
 
 it('点一条提醒按后端给的去处跳（路由表不写在前端）', async () => {
-  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS })
+  mockBoard({ items: ITEMS })
   renderPage()
 
   fireEvent.click(await screen.findByText('今天晚餐做好了'))
@@ -128,7 +138,7 @@ it('点一条提醒按后端给的去处跳（路由表不写在前端）', asyn
 
 it('**打开页面本身不清红点**（用户要的是"真的已读"才清）', async () => {
   const calls: string[] = []
-  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS }, (url) => calls.push(url))
+  mockBoard({ items: ITEMS }, (url) => calls.push(url))
   renderPage()
 
   await screen.findByText('今天晚餐做好了')
@@ -139,7 +149,7 @@ it('**打开页面本身不清红点**（用户要的是"真的已读"才清）'
 
 it('点开那一条才标它已读（先标记再跳走，顺序不能反）', async () => {
   const posts: { url: string; body: unknown }[] = []
-  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS }, (url, body) => posts.push({ url, body }))
+  mockBoard({ items: ITEMS }, (url, body) => posts.push({ url, body }))
   renderPage()
 
   fireEvent.click(await screen.findByText('今天晚餐做好了'))
@@ -152,7 +162,7 @@ it('点开那一条才标它已读（先标记再跳走，顺序不能反）', a
 it('点已读的那条不再重复提交（省一次没必要的写）', async () => {
   const posts: { url: string; body: unknown }[] = []
   // 第二条（备菜）本来就是已读的
-  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS }, (url, body) => posts.push({ url, body }))
+  mockBoard({ items: ITEMS }, (url, body) => posts.push({ url, body }))
   renderPage()
 
   /*
@@ -166,7 +176,7 @@ it('点已读的那条不再重复提交（省一次没必要的写）', async (
 
 it('一键已读：只提交当前列表里那些**未读**的 id', async () => {
   const posts: { url: string; body: unknown }[] = []
-  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS }, (url, body) => posts.push({ url, body }))
+  mockBoard({ items: ITEMS }, (url, body) => posts.push({ url, body }))
   renderPage()
 
   fireEvent.click(await screen.findByRole('button', { name: '全部已读' }))
@@ -180,7 +190,7 @@ it('一键已读：只提交当前列表里那些**未读**的 id', async () => 
 })
 
 it('没有未读时不摆「全部已读」（不画点了没反应的按钮）', async () => {
-  mockBoard({ items: ITEMS.map((item) => ({ ...item, unread: false })), unread: 0, unreadByKind: {}, prefs: PREFS })
+  mockBoard({ items: ITEMS.map((item) => ({ ...item, unread: false })) })
   renderPage()
 
   await screen.findByText('今天晚餐做好了')
@@ -188,31 +198,93 @@ it('没有未读时不摆「全部已读」（不画点了没反应的按钮）'
 })
 
 it('空态给出下一步（不是一句"没有消息"了事）', async () => {
-  mockBoard({ items: [], unread: 0, unreadByKind: {}, prefs: PREFS })
+  mockBoard({ items: [] })
   renderPage()
 
   expect(await screen.findByText('眼下没什么要处理的')).toBeTruthy()
   expect(screen.getByText('去看看今天的菜单')).toBeTruthy()
 })
 
-it('四个开关反映后端的当前值，改一个只提交那一个', async () => {
+it('九个开关各自照后端的当前值画，改一个只提交那一个', async () => {
   const posts: { url: string; body: unknown }[] = []
   mockBoard(
-    { items: [], unread: 0, unreadByKind: {}, prefs: { ...PREFS, prep: false } },
+    // 关掉一个**靠后**的（菜谱）与一个靠前的（备菜）：顺序若写错，这条就会红
+    { items: [], prefs: { ...ALL_PREFS_ON, prep: false, recipe: false } },
     (url, body) => posts.push({ url, body }),
   )
   renderPage()
 
   const switches = await screen.findAllByRole('switch')
-  // 顺序与 NOTIFICATION_KINDS 一致；「该备菜了」被关掉了
-  expect(switches.map((node) => (node as HTMLInputElement).checked)).toEqual([true, true, true, false])
+  /*
+   * 顺序与 `NOTIFICATION_KINDS` 一致（前四个状态型、后五个事件型），
+   * 且**九个都在**——2026-10-16 从四个扩到九个，只画前四个的话，
+   * 用户会在通知中心看到"订单/冰箱/打卡/家庭/菜谱"的提醒却找不到关掉它的开关。
+   */
+  expect(switches.length).toBe(9)
+  expect(switches.map((node) => (node as HTMLInputElement).checked)).toEqual([
+    true, true, true, false, true, true, true, true, false,
+  ])
 
   fireEvent.click(switches[0])
   await waitFor(() => expect(posts).toContainEqual({ url: '/notifications/prefs', body: { mealPlan: false } }))
 })
 
+it('新加的五类各有自己的开关，且改它只提交它（用户 2026-10-16 要的那四块）', async () => {
+  const posts: { url: string; body: unknown }[] = []
+  mockBoard({ items: [] }, (url, body) => posts.push({ url, body }))
+  renderPage()
+
+  // 五个新开关的文案都在（用户要在界面上看得见"什么会打扰我"）
+  for (const title of ['订单有变化', '冰箱有变化', '打卡墙', '家庭有变化', '菜谱有变化']) {
+    expect(await screen.findByText(title)).toBeTruthy()
+  }
+
+  // 改「家庭有变化」只提交这一个键
+  const family = await screen.findByRole('switch', { name: '家庭有变化' })
+  fireEvent.click(family)
+  await waitFor(() => expect(posts).toContainEqual({ url: '/notifications/prefs', body: { family: false } }))
+})
+
+it('事件型的提醒（打卡/家庭/菜谱）也画得出来：图标与小标都从后端那条拿', async () => {
+  mockBoard({
+    items: [
+      notificationFixture({
+        id: 'checkin:photo-1', kind: 'checkin', title: '妈妈往打卡墙传了一张照片',
+        body: '去看看做得怎么样', to: '/checkins', mealKey: null, tag: '打卡',
+      }),
+      notificationFixture({
+        id: 'family:f1:2', kind: 'family', title: '爸爸加入了家庭',
+        body: '现在家里有 3 口人', to: '/family', mealKey: null, tag: '新成员',
+      }),
+      notificationFixture({
+        id: 'recipe:new-1', kind: 'recipe', title: '妈妈上传了新菜谱「番茄炒蛋」',
+        body: '家常 · 川菜', to: '/recipes/own-1', mealKey: null, tag: '新菜谱',
+      }),
+    ],
+  })
+  renderPage()
+
+  expect(await screen.findByText('妈妈往打卡墙传了一张照片')).toBeTruthy()
+  expect(screen.getByText('爸爸加入了家庭')).toBeTruthy()
+  expect(screen.getByText('妈妈上传了新菜谱「番茄炒蛋」')).toBeTruthy()
+  /*
+   * 小标（tag）与去处都由后端给：前端只渲染。这里钉住"三类各画各的"，
+   * 而不是"十类里只有四类能画出来"——旧的 `KIND_STYLE` 只有四个键时，
+   * 事件型那几条会因为 `KIND_STYLE[item.kind]` 是 undefined 而直接崩掉。
+   */
+  expect(screen.getByText('打卡')).toBeTruthy()
+  expect(screen.getByText('新成员')).toBeTruthy()
+
+  /*
+   * 去处照后端给的那条走（**不是**所有提醒都去订单详情——这一点最容易在
+   * "加了几类提醒但没加路由"时漏掉）：打卡那条落到打卡墙。
+   */
+  fireEvent.click(screen.getByText('妈妈往打卡墙传了一张照片'))
+  expect(await screen.findByTestId('checkins-page')).toBeTruthy()
+})
+
 it('那条边界说明留着：说清"什么会弹、什么不会"', async () => {
-  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS })
+  mockBoard({ items: ITEMS })
   renderPage()
 
   await screen.findByText('今天晚餐做好了')
@@ -226,12 +298,19 @@ it('那条边界说明留着：说清"什么会弹、什么不会"', async () =>
    * （用户 2026-10-14：「这个是默认的，不用设置」「删掉这块配置」），
    * 所以这里只剩一句说明——它必须留着，否则用户不知道什么会弹。
    */
-  expect(screen.getByText(/别人点了菜这类「家里刚发生的事」仍然只在应用内看得到/)).toBeTruthy()
+  /*
+   * 两半都要在（2026-10-16 改口径之后）：
+   * ① 本机能算的那两类**关掉应用也会响**（交付二，走去系统闹钟）；
+   * ② "家里刚发生的事"靠后台巡查，**最多晚约一刻钟**——上一版这里写的是
+   *    「只在应用内看得到」，那是交付三之前的实话，现在不准了：
+   *    说成"应用内才能看到"会让用户以为必须开着 App，而它其实在后台也会响。
+   */
   expect(screen.getByText(/关掉这个应用也会响/)).toBeTruthy()
+  expect(screen.getByText(/最多晚约一刻钟知道/)).toBeTruthy()
 })
 
 it('手机弹窗提醒**默认开着**：界面上没有它的开关（用户要求删掉这块配置）', async () => {
-  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS })
+  mockBoard({ items: ITEMS })
   renderPage()
 
   await screen.findByText('今天晚餐做好了')
@@ -241,7 +320,7 @@ it('手机弹窗提醒**默认开着**：界面上没有它的开关（用户要
 })
 
 it('到期提醒说的是"到期那天早上"（提前排给系统闹钟，不是只在当天算）', async () => {
-  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS })
+  mockBoard({ items: ITEMS })
   renderPage()
 
   // 口径必须写对：写"当天到期时会弹一下"会让人以为只在当天算，
@@ -250,7 +329,7 @@ it('到期提醒说的是"到期那天早上"（提前排给系统闹钟，不�
 })
 
 it('**不给假按钮**：系统权限被拒时只留一句"去设置里打开"（点了没反应的按钮不许有）', async () => {
-  mockBoard({ items: ITEMS, unread: 1, unreadByKind: { done: 1 }, prefs: PREFS })
+  mockBoard({ items: ITEMS })
   renderPage()
 
   await screen.findByText('今天晚餐做好了')

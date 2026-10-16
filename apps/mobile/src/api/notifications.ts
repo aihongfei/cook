@@ -22,7 +22,19 @@ import { apiClient } from './client'
  * 且已读是逐条记在账号上的（用户 2026-10-15：「同一个账号换设备了也需要都留存」）。
  */
 
-export type NotificationKind = 'plan' | 'done' | 'expiry' | 'prep'
+export type NotificationKind =
+  | 'plan' | 'done' | 'expiry' | 'prep'
+  | 'order' | 'fridge' | 'checkin' | 'comment' | 'family' | 'recipe'
+
+/**
+ * 一条提醒**属于哪个区域**——与后端 `areaOfKind` 同一套分法。
+ *
+ * **这是前端唯一知道 kind 语义的地方**，而且只有这一处：底栏两个红点与「我的」页
+ * 里那几行的小红点都从 `unreadByArea` 里取数（后端算好的），这里只决定"哪一行看哪个区域"。
+ * 之所以需要它：`unreadByArea` 是个字典，而每个界面元素要回答"我看哪一格"——
+ * 那一格的名字在这里，不在各页面里散着写（散着写就会出现"家庭那行去看 fridge 的红点"）。
+ */
+export type NotificationArea = 'order' | 'fridge' | 'family'
 
 export interface AppNotification {
   id: string
@@ -35,14 +47,26 @@ export interface AppNotification {
   to: string
   /**
    * 这条提醒**属于哪一餐**（`2026-10-18-DINNER`）；不属于某一餐时为 `null`
-   * （快过期、该备菜）。点单列表拿它把"这张卡有事没看过"标出来（用户 2026-10-14 要求）。
+   * （快过期、该备菜、打卡、家庭、菜谱）。点单列表拿它把"这张卡有事没看过"标出来
+   * （用户 2026-10-14 要求）。
    *
    * **不在前端从 `id` 或 `to` 里切字符串**：那种切法迟早切错（`prep` 里没有 mealKey、
    * `expiry` 指向冰箱），而"这一条对应哪一餐"是个事实，该由知道它的一侧给出。
    */
   mealKey: string | null
-  /** 标题旁边那个小标（"菜单""做好了""快过期""备菜"） */
+  /** 标题旁边那个小标（"选好了""加菜""入库"…） */
   tag: string
+  /**
+   * 这一条是**现算的**还是**当时写下的**（后端 `origin`）：
+   * - `derived`（状态型：菜单定了/做好了/快过期/该备菜）说的是"现在家里有这件事"——
+   *   那一餐被取消它就消失；
+   * - `event`（事件型：点菜/冰箱/打卡/评论/家庭/菜谱）说的是"发生过这件事"——
+   *   发生了就一直在，撤掉的那道菜不会因为没有那道菜了就没发生过。
+   *
+   * 界面**不必按它分支**（文案与去处都由后端给全），它如实反映列表会长什么样；
+   * 目前只有一个地方用它，而且是在测试里（断言"事件型那几条不会自己消失"）。
+   */
+  origin: 'derived' | 'event'
   unread: boolean
 }
 
@@ -51,6 +75,11 @@ export interface NotificationPrefs {
   mealDone: boolean
   expiry: boolean
   prep: boolean
+  orderChange: boolean
+  fridgeChange: boolean
+  checkin: boolean
+  family: boolean
+  recipe: boolean
 }
 
 export interface NotificationBoard {
@@ -58,12 +87,15 @@ export interface NotificationBoard {
   /** 未读总数 */
   unread: number
   /**
-   * 底栏两个 Tab 各自的未读数——**红点直接用它**（用户 2026-10-15：「底部菜单，
-   * 订单之类的也需要小红点」）。不在前端把四类"三加一"再加一遍：那种算术写两处
-   * 迟早有一处漏改（表现是"订单的红点少了一个"）。
+   * 各区域的未读数——**红点直接用它**（用户 2026-10-15：「底部菜单，订单之类的
+   * 也需要小红点」；2026-10-16 加了家事那一块）。不在前端把十类"三加一"再加一遍：
+   * 那种算术写两处迟早有一处漏改（表现是"订单的红点少了一个"）。
+   *
+   * `family` 这一格**不亮底栏**（底栏五个 Tab 里没有打卡/家庭/菜谱的入口），
+   * 它落在「我的」页对应的那几行上。
    */
-  unreadByArea: Partial<Record<'order' | 'fridge', number>>
-  /** 四条提醒各自的未读数（通知中心里按类看） */
+  unreadByArea: Partial<Record<NotificationArea, number>>
+  /** 各类提醒各自的未读数（通知中心里按类看） */
   unreadByKind: Partial<Record<NotificationKind, number>>
   prefs: NotificationPrefs
 }
@@ -182,10 +214,24 @@ export function useUpdateNotificationPrefs() {
   })
 }
 
-/** 四条提醒的说明文案（开关那一页要用；**只有一份**，不散在界面里） */
+/**
+ * 九个开关的说明文案（通知中心那一列要用；**只有一份**，不散在界面里）。
+ *
+ * 顺序就是界面上从上到下的顺序，**两类分开放**（先"家里的事"，后"我做的事"）：
+ * 前四个是状态型（家里到了某个状态），后五个是事件型（谁做了什么）。
+ * 用户 2026-10-16 说要的那四块（订单/冰箱/打卡/家庭/菜谱）就是下面这五个。
+ *
+ * `key` 直接是 `NotificationPrefs` 的键，所以与后端 `NOTIFICATION_PREF_KEYS` 一一对应；
+ * 后端加一个开关时，这里的类型会报错（`Record` 少一项），不会静默漏掉。
+ */
 export const NOTIFICATION_KINDS: { key: keyof NotificationPrefs; title: string; desc: string }[] = [
   { key: 'mealPlan', title: '菜单安排', desc: '家里人把某一天的菜单定下来了' },
   { key: 'mealDone', title: '饭已做好', desc: '我点过菜的哪一餐做好了' },
   { key: 'expiry', title: '快过期', desc: '冰箱里有东西快到期，或者已经过期了' },
   { key: 'prep', title: '该备菜了', desc: '接下来几天还有餐次没安排' },
+  { key: 'orderChange', title: '订单有变化', desc: '有人点了菜、退了菜、改人数、取消这一餐' },
+  { key: 'fridgeChange', title: '冰箱有变化', desc: '有人往冰箱放了东西、改了或拿走了' },
+  { key: 'checkin', title: '打卡墙', desc: '有人传了照片，或者在你的照片下说了话' },
+  { key: 'family', title: '家庭有变化', desc: '有人加入或退出、角色变了、改了家庭设置' },
+  { key: 'recipe', title: '菜谱有变化', desc: '家里自建的菜谱有人上传、改过或删掉了' },
 ]

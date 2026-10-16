@@ -336,6 +336,29 @@
 }
 
 /*
+ * 那句话里的未读数（2026-10-16：家里人传了照片、说了话，这一页要看得出来）。
+ *
+ * **不做成圆标**，只跟在话后面当个小数字：这一行已经说了"去哪儿"，
+ * 再摆一颗圆标会让这行出现两处"要去的地方"的暗示；而这个数只回答
+ * "打卡墙上有几个新的"，贴着那句话最不喧宾夺主。
+ */
+.me-checkin__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  margin: 0 3px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  color: #fff;
+  background: var(--color-brand);
+  border-radius: 999px;
+}
+
+/*
  * 打卡详情（用户 2026-10-14：「打卡墙卡片不能点击查看详情」）。
  *
  * 照片是主角（占满抽屉宽度、按原比例），文字在下面依次排开——

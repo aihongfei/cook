@@ -21,7 +21,14 @@ import { doneStampFor } from '../src/modules/orders/orders.rules'
  *    "关掉备菜之后通知中心里还有备菜"。
  */
 
-const P = { mealPlan: true, mealDone: true, expiry: true, prep: true }
+/**
+ * 九个开关全开。**必须与 `NotificationPrefs` 一一对应**（少一个键就编译不过，
+ * 那正是 2026-10-16 扩开关时想要的：漏一处立刻在类型上现形）。
+ */
+const P = {
+  mealPlan: true, mealDone: true, expiry: true, prep: true,
+  orderChange: true, fridgeChange: true, checkin: true, family: true, recipe: true,
+}
 /** 用哪个账号读（日志的键带上它；这里固定一个，省得每个用例都写） */
 const USER = 'u1'
 const TODAY = '2026-10-15'
@@ -199,12 +206,16 @@ function storedFor(items: ReturnType<typeof buildNotifications>, readKeys: strin
       // 键必须与写入侧同源（`dedupeKeyOf`）——第一版两边各拼一遍，列表因此永远是空的
       dedupeKeyOf(item.id, USER),
       {
-        dedupeKey: item.id,
+        // `dedupeKey` 是**库里那一列的原值**（含 userId）——`itemIdOf` 要从它把 id 还原出来
+        dedupeKey: dedupeKeyOf(item.id, USER),
+        kind: item.kind as string,
         title: item.title,
         body: item.body,
         toPath: item.to,
         at: new Date(item.at),
         readAt: readKeys.includes(item.id) ? new Date('2026-10-15T20:00:00') : null,
+        mealKey: item.mealKey,
+        tag: item.tag,
       },
     ]),
   )
@@ -212,7 +223,7 @@ function storedFor(items: ReturnType<typeof buildNotifications>, readKeys: strin
 
 test('未读：库里 readAt 为空就是未读，标过就是已读（逐条）', () => {
   const items = buildNotifications(input({ plan: [planFact()], done: [doneFact()] }), NOW)
-  const rows = mergeStored(items, storedFor(items, ['done:2026-10-15-DINNER']), USER)
+  const rows = mergeStored(items, storedFor(items, ['done:2026-10-15-DINNER']), USER, P)
   assert.equal(unreadCount(rows), 1)
   assert.equal(rows.find((row) => row.unread)?.kind, 'plan')
 })
@@ -224,7 +235,7 @@ test('已读是持久的：标过的那条**不会再变回未读**（哪怕它�
    * 明天这条又亮——而它其实是同一件事。
    */
   const items = buildNotifications(input({ prep: [prepFact()] }), NOW)
-  const rows = mergeStored(items, storedFor(items, ['prep:2026-10-15']), USER)
+  const rows = mergeStored(items, storedFor(items, ['prep:2026-10-15']), USER, P)
   assert.equal(unreadCount(rows), 0)
 })
 
@@ -240,7 +251,7 @@ test('文案与去处取**库里那句**（历史要如实回放当时那句话�
     body: '当时的副标题',
     toPath: '/order?from=history',
   })
-  const rows = mergeStored(items, stored, USER)
+  const rows = mergeStored(items, stored, USER, P)
   assert.equal(rows[0].title, '当时那句话')
   assert.equal(rows[0].body, '当时的副标题')
   assert.equal(rows[0].to, '/order?from=history')
@@ -248,7 +259,7 @@ test('文案与去处取**库里那句**（历史要如实回放当时那句话�
 
 test('库里没有的那条不进列表（先入库再读，见 service）', () => {
   const items = buildNotifications(input({ plan: [planFact()] }), NOW)
-  assert.equal(mergeStored(items, new Map(), USER).length, 0)
+  assert.equal(mergeStored(items, new Map(), USER, P).length, 0)
 })
 
 test('标记已读**不改排序**（刚看的那条还在原地，不会跳走）', () => {
@@ -256,8 +267,8 @@ test('标记已读**不改排序**（刚看的那条还在原地，不会跳走�
     input({ plan: [planFact({ at: new Date('2026-10-15T09:00:00') })], done: [doneFact({ at: new Date('2026-10-15T18:30:00') })] }),
     NOW,
   )
-  const before = mergeStored(items, storedFor(items), 'u1').map((row) => row.id)
-  const after = mergeStored(items, storedFor(items, ['done:2026-10-15-DINNER']), USER).map((row) => row.id)
+  const before = mergeStored(items, storedFor(items), 'u1', P).map((row) => row.id)
+  const after = mergeStored(items, storedFor(items, ['done:2026-10-15-DINNER']), USER, P).map((row) => row.id)
   assert.deepEqual(after, before)
 })
 
@@ -291,7 +302,7 @@ test('按区域数未读：只数未读的，且各归各的区', () => {
     NOW,
   )
   // 只把「饭已做好」标掉
-  const rows = mergeStored(items, storedFor(items, ['done:2026-10-15-DINNER']), USER)
+  const rows = mergeStored(items, storedFor(items, ['done:2026-10-15-DINNER']), USER, P)
   const byArea = unreadByArea(rows)
   assert.equal(byArea.order, 2) // plan + prep
   assert.equal(byArea.fridge, 1)
@@ -330,8 +341,8 @@ test('锚点：状态型提醒的锚点跨天会变（明天零点），但**已
    * 这正是这次把已读从"时间戳比较"改成"逐条记录"的原因
    * （用户 2026-10-15：「需要**真的已读**时才清」）。
    */
-  assert.equal(unreadCount(mergeStored(today, storedFor(today, [today[0].id]), USER)), 0)
-  const laterRows = mergeStored(tomorrow, storedFor(today, [today[0].id]), USER)
+  assert.equal(unreadCount(mergeStored(today, storedFor(today, [today[0].id]), USER, P)), 0)
+  const laterRows = mergeStored(tomorrow, storedFor(today, [today[0].id]), USER, P)
   assert.equal(unreadCount(laterRows), 0, '同一条读过之后，锚点变了也不该重新变未读')
 })
 
@@ -437,5 +448,134 @@ test('做好了要留痕（通知靠它才知道"这一餐刚做好"）；取消
   assert.equal(doneStampFor('CANCELED'), 'clear')
   for (const status of ['PLANNED', 'COOKING', 'PENDING'] as const) {
     assert.equal(doneStampFor(status), 'keep', `${status} 不该动这条留痕`)
+  }
+})
+
+/*
+ * ------------------------------------------------------------------
+ * 事件型那六类（2026-10-16 加，用户：「订单有变化、打卡墙有上传/评论、
+ * 家庭有变化、冰箱有变化，就是家庭相关修改的都需要通知」）
+ *
+ * 这一段是**本次改动的核心**：状态型那四类从事实现算，事件型这六类由做事的那一侧
+ * 当场写下（撤掉的那道菜已经不在库里了，事后算不出来）。所以要钉住的是
+ * 「怎么拼那句话 + 怎么归属 + 库里的历史不会因为事实没了而消失」。
+ * ------------------------------------------------------------------
+ */
+import {
+  areaOfKind as areaOfEventKind, buildChange, dedupeKeyOf as keyOf, isEventKind, itemIdOf,
+  prefOfKind, type ChangeFact,
+} from '../src/modules/notifications/notifications.rules'
+
+function changeFact(patch: Partial<ChangeFact> = {}): ChangeFact {
+  return {
+    kind: 'order',
+    action: '点了「番茄炒蛋」',
+    body: '加进今天晚餐了',
+    to: '/order/2026-10-18-DINNER',
+    mealKey: '2026-10-18-DINNER',
+    tag: '加菜',
+    scope: 'add:i1',
+    ...patch,
+  }
+}
+
+test('事件型：id 与文案的形状（`kind:scope` + "谁 + 做了什么"）', () => {
+  const item = buildChange('妈妈', changeFact())
+  assert.equal(item.id, 'order:add:i1')
+  assert.equal(item.kind, 'order')
+  assert.equal(item.title, '妈妈点了「番茄炒蛋」')
+  assert.equal(item.body, '加进今天晚餐了')
+  assert.equal(item.mealKey, '2026-10-18-DINNER')
+  assert.equal(item.tag, '加菜')
+  assert.equal(item.origin, 'event', '事件型要能被认出来（状态型会自己消失，事件型不会）')
+})
+
+test('事件型：六类都归 family/order/fridge 里的某一区，且各有开关', () => {
+  // 打卡/评论/家庭/菜谱归 family（不亮底栏，红点在「我的」页那几行上）
+  for (const kind of ['checkin', 'comment', 'family', 'recipe'] as const) {
+    assert.equal(areaOfEventKind(kind), 'family', `${kind} 该归 family`)
+  }
+  assert.equal(areaOfEventKind('order'), 'order')
+  assert.equal(areaOfEventKind('fridge'), 'fridge')
+
+  // 十类一个不少地映射到九个开关（打卡与评论共用一个）
+  assert.equal(prefOfKind('checkin'), 'checkin')
+  assert.equal(prefOfKind('comment'), 'checkin')
+  assert.equal(prefOfKind('family'), 'family')
+  assert.equal(prefOfKind('recipe'), 'recipe')
+  assert.equal(prefOfKind('order'), 'orderChange')
+  assert.equal(prefOfKind('fridge'), 'fridgeChange')
+})
+
+test('事件型：撤菜/家庭变动这类"事实已经不在库里"的也照旧显示（与状态型分道）', () => {
+  /*
+   * 这一条是两条路的分水岭：
+   * - 状态型（`plan`/`done`/…）**只显示"现在还算得出来的"**——那一餐被取消了，
+   *   "菜单定下来了"就不该在列表上；
+   * - 事件型（`order`/`fridge`/…）**以库为准全显示**——撤掉的那道菜是真的撤过。
+   *
+   * 所以这里造一份"库里有、但现算一条都没有"的数据（items 为空），
+   * 事件型那条**必须还在**。写反了的话，用户会看到"我说过的那句话消失了"。
+   */
+  const stored = new Map([[
+    keyOf('order:remove:i9', USER),
+    {
+      dedupeKey: keyOf('order:remove:i9', USER),
+      kind: 'order',
+      title: '爸爸退掉了「红烧排骨」',
+      body: '今天晚餐少了一道',
+      toPath: '/order/2026-10-18-DINNER',
+      at: new Date('2026-10-18T12:00:00'),
+      readAt: null,
+      mealKey: '2026-10-18-DINNER',
+      tag: '撤菜',
+    },
+  ]])
+  const rows = mergeStored([], stored, USER, P)
+  assert.equal(rows.length, 1, '库里的事件型提醒不该因为"现在算不出来"而消失')
+  assert.equal(rows[0].id, 'order:remove:i9', 'id 要从 dedupeKey 精确还原（前端拿它标已读）')
+  assert.equal(rows[0].title, '爸爸退掉了「红烧排骨」')
+  assert.equal(rows[0].unread, true)
+  assert.equal(rows[0].mealKey, '2026-10-18-DINNER', '归属要跟着库里那行走（点单卡靠它标角标）')
+  assert.equal(rows[0].tag, '撤菜')
+  assert.equal(rows[0].origin, 'event')
+})
+
+test('事件型：关掉那一类开关之后不再显示（库里有也不给看）', () => {
+  const stored = new Map([[
+    keyOf('checkin:photo-1', USER),
+    {
+      dedupeKey: keyOf('checkin:photo-1', USER),
+      kind: 'checkin',
+      title: '妈妈往打卡墙传了一张照片',
+      body: null,
+      toPath: '/checkins',
+      at: new Date('2026-10-18T12:00:00'),
+      readAt: null,
+      mealKey: null,
+      tag: '打卡',
+    },
+  ]])
+  assert.equal(mergeStored([], stored, USER, { ...P, checkin: false }).length, 0)
+  assert.equal(mergeStored([], stored, USER, P).length, 1)
+})
+
+test('事件型：id 能还原（键是 `<id>:<userId>`，粘错了就标不上已读）', () => {
+  // 正常：剥掉后缀就是那条的 id
+  assert.equal(itemIdOf('order:add:i1:u1', 'u1'), 'order:add:i1')
+  // 别人的行按定义不该出现在我这份里（真出现也不能给一个"标不上已读的 id"）
+  assert.equal(itemIdOf('order:add:i1:u2', 'u1'), null)
+  // 尾巴剥完是空串 → 也当取不到（宁可少显示一条，也不要一个坏 id）
+  assert.equal(itemIdOf('u1', 'u1'), null)
+  // 拆错方向：`id` 里自带冒号不影响（这正是不能用 split(':') 的原因）
+  assert.equal(itemIdOf('status:abc:COOKING:u1', 'u1'), 'status:abc:COOKING')
+})
+
+test('事件型：isEventKind 只认那六类（状态型不会被当成"永不消失"的历史）', () => {
+  for (const kind of ['order', 'fridge', 'checkin', 'comment', 'family', 'recipe']) {
+    assert.equal(isEventKind(kind), true, `${kind} 是事件型`)
+  }
+  for (const kind of ['plan', 'done', 'expiry', 'prep']) {
+    assert.equal(isEventKind(kind), false, `${kind} 是状态型（会随事实消失）`)
   }
 })

@@ -10,6 +10,7 @@ import { apiClient } from '@/api/client'
 import { emitTabRetap } from '@/lib/tab-retap'
 import type { Family } from '@/api/family'
 import type { NotificationBoard } from '@/api/notifications'
+import { ALL_PREFS_ON, boardFixture as boardNotification, notificationFixture } from '@/api/notifications.testkit'
 import type { MealCard, OrderBoard } from '@/api/orders'
 import { Toaster, useToasts } from '@/components/ui/toast'
 import { useAuth } from '@/stores/auth'
@@ -175,13 +176,8 @@ function boardFixture(
 function mockGet({
   family = familyFixture() as Family | null,
   boards,
-  notifications = {
-    items: [],
-    unread: 0,
-    unreadByArea: {},
-    unreadByKind: {},
-    prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
-  } as NotificationBoard,
+  // 默认那份"没有提醒"的看板走夹具（也顺带钉住"三条数由 items 推出来"）
+  notifications = boardNotification(),
 }: {
   family?: Family | null
   boards: Record<string, OrderBoard>
@@ -899,22 +895,22 @@ it('未读标记只落在**那几餐**的卡上：别的卡一点变化都没有
     },
     notifications: {
       items: [
-        {
-          id: 'done:2026-10-14-LUNCH',
-          kind: 'done',
-          title: '明天午餐做好了',
-          body: '你点的 红烧排骨 可以吃了',
-          at: '2026-10-14T12:30:00.000Z',
-          to: '/order/2026-10-14-LUNCH',
-          mealKey: '2026-10-14-LUNCH',
-          tag: '做好了',
-          unread: true,
-        },
+        notificationFixture({
+            id: 'done:2026-10-14-LUNCH',
+            kind: 'done',
+            title: '明天午餐做好了',
+            body: '你点的 红烧排骨 可以吃了',
+            at: '2026-10-14T12:30:00.000Z',
+            to: '/order/2026-10-14-LUNCH',
+            mealKey: '2026-10-14-LUNCH',
+            tag: '做好了',
+            unread: true,
+        }),
       ],
       unread: 1,
       unreadByArea: { order: 1 },
       unreadByKind: { done: 1 },
-      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+      prefs: ALL_PREFS_ON,
     },
   })
   renderOrder()
@@ -936,33 +932,33 @@ it('一餐两条未读时都念得出来，且「做好了」在前（哪个更�
     boards: { family: boardFixture() },
     notifications: {
       items: [
-        {
-          id: 'done:2026-10-13-DINNER',
-          kind: 'done',
-          title: '今天晚餐做好了',
-          body: '你点的 红烧排骨 可以吃了',
-          at: '2026-10-13T18:30:00.000Z',
-          to: '/order/2026-10-13-DINNER',
-          mealKey: '2026-10-13-DINNER',
-          tag: '做好了',
-          unread: true,
-        },
-        {
-          id: 'plan:2026-10-13-DINNER',
-          kind: 'plan',
-          title: '今天晚餐的菜单定下来了',
-          body: '妈妈定了 2 道菜',
-          at: '2026-10-13T10:00:00.000Z',
-          to: '/order/2026-10-13-DINNER',
-          mealKey: '2026-10-13-DINNER',
-          tag: '选好了',
-          unread: true,
-        },
+        notificationFixture({
+            id: 'done:2026-10-13-DINNER',
+            kind: 'done',
+            title: '今天晚餐做好了',
+            body: '你点的 红烧排骨 可以吃了',
+            at: '2026-10-13T18:30:00.000Z',
+            to: '/order/2026-10-13-DINNER',
+            mealKey: '2026-10-13-DINNER',
+            tag: '做好了',
+            unread: true,
+        }),
+        notificationFixture({
+            id: 'plan:2026-10-13-DINNER',
+            kind: 'plan',
+            title: '今天晚餐的菜单定下来了',
+            body: '妈妈定了 2 道菜',
+            at: '2026-10-13T10:00:00.000Z',
+            to: '/order/2026-10-13-DINNER',
+            mealKey: '2026-10-13-DINNER',
+            tag: '选好了',
+            unread: true,
+        }),
       ],
       unread: 2,
       unreadByArea: { order: 2 },
       unreadByKind: { plan: 1, done: 1 },
-      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+      prefs: ALL_PREFS_ON,
     },
   })
   renderOrder()
@@ -980,22 +976,22 @@ it('已读的那条不留标记（标过了还挂着，用户会以为没生效�
     boards: { family: boardFixture() },
     notifications: {
       items: [
-        {
-          id: 'done:2026-10-13-DINNER',
-          kind: 'done',
-          title: '今天晚餐做好了',
-          body: null,
-          at: '2026-10-13T18:30:00.000Z',
-          to: '/order/2026-10-13-DINNER',
-          mealKey: '2026-10-13-DINNER',
-          tag: '做好了',
-          unread: false,
-        },
+        notificationFixture({
+            id: 'done:2026-10-13-DINNER',
+            kind: 'done',
+            title: '今天晚餐做好了',
+            body: null,
+            at: '2026-10-13T18:30:00.000Z',
+            to: '/order/2026-10-13-DINNER',
+            mealKey: '2026-10-13-DINNER',
+            tag: '做好了',
+            unread: false,
+        }),
       ],
       unread: 0,
       unreadByArea: {},
       unreadByKind: {},
-      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+      prefs: ALL_PREFS_ON,
     },
   })
   renderOrder()
@@ -1024,22 +1020,22 @@ it('再点一次订单 Tab：滚到那条未读提醒所在的卡', async () => 
     },
     notifications: {
       items: [
-        {
-          id: 'plan:2026-10-12-LUNCH',
-          kind: 'plan',
-          title: '昨天午餐的菜单定下来了',
-          body: null,
-          at: '2026-10-12T10:00:00.000Z',
-          to: '/order/2026-10-12-LUNCH',
-          mealKey: '2026-10-12-LUNCH',
-          tag: '选好了',
-          unread: true,
-        },
+        notificationFixture({
+            id: 'plan:2026-10-12-LUNCH',
+            kind: 'plan',
+            title: '昨天午餐的菜单定下来了',
+            body: null,
+            at: '2026-10-12T10:00:00.000Z',
+            to: '/order/2026-10-12-LUNCH',
+            mealKey: '2026-10-12-LUNCH',
+            tag: '选好了',
+            unread: true,
+        }),
       ],
       unread: 1,
       unreadByArea: { order: 1 },
       unreadByKind: { plan: 1 },
-      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+      prefs: ALL_PREFS_ON,
     },
   })
   renderOrder()
@@ -1068,22 +1064,22 @@ it('那条提醒的卡被筛选挡住时：放开筛选再滚（用户要的是"
     },
     notifications: {
       items: [
-        {
-          id: 'plan:2026-10-12-LUNCH',
-          kind: 'plan',
-          title: '昨天午餐的菜单定下来了',
-          body: null,
-          at: '2026-10-12T10:00:00.000Z',
-          to: '/order/2026-10-12-LUNCH',
-          mealKey: '2026-10-12-LUNCH',
-          tag: '选好了',
-          unread: true,
-        },
+        notificationFixture({
+            id: 'plan:2026-10-12-LUNCH',
+            kind: 'plan',
+            title: '昨天午餐的菜单定下来了',
+            body: null,
+            at: '2026-10-12T10:00:00.000Z',
+            to: '/order/2026-10-12-LUNCH',
+            mealKey: '2026-10-12-LUNCH',
+            tag: '选好了',
+            unread: true,
+        }),
       ],
       unread: 1,
       unreadByArea: { order: 1 },
       unreadByKind: { plan: 1 },
-      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+      prefs: ALL_PREFS_ON,
     },
   })
   renderOrder()
@@ -1107,22 +1103,22 @@ it('只有「该备菜」未读时：列表顶上说一句，去处是备菜页�
     boards: { family: boardFixture() },
     notifications: {
       items: [
-        {
-          id: 'prep:2026-10-13',
-          kind: 'prep',
-          title: '接下来 3 餐还没安排',
-          body: '最近的是今天晚餐',
-          at: '2026-10-13T00:00:00.000Z',
-          to: '/prep',
-          mealKey: null,
-          tag: '备菜',
-          unread: true,
-        },
+        notificationFixture({
+            id: 'prep:2026-10-13',
+            kind: 'prep',
+            title: '接下来 3 餐还没安排',
+            body: '最近的是今天晚餐',
+            at: '2026-10-13T00:00:00.000Z',
+            to: '/prep',
+            mealKey: null,
+            tag: '备菜',
+            unread: true,
+        }),
       ],
       unread: 1,
       unreadByArea: { order: 1 },
       unreadByKind: { prep: 1 },
-      prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true },
+      prefs: ALL_PREFS_ON,
     },
   })
   renderOrder()

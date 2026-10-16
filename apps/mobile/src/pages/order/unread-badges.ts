@@ -38,13 +38,20 @@ export function unreadByMeal(items: MealBadgeSource[]): Map<string, string> {
 }
 
 /**
- * 这一张卡上要标哪些（**顺序固定**：做好了在前，菜单在后）。
+ * 这一张卡上要标哪些（**顺序固定**：做好了 → 有变动 → 选好了）。
  *
  * 顺序写死而不是跟着列表的顺序走：列表按时刻排，而"最要紧的那个"不总是最新的
- * ——饭做好了比"菜单定下来了"更该先看到。
+ * ——饭做好了最该先看到，其次是"这一餐刚被人动过"，最后才是"菜单定下来了"。
+ *
+ * `order` 这一类是 2026-10-16 加的（用户：「订单有变化」）：有人加菜/撤菜/改人数/
+ * 取消这一餐时，卡上标一个"加菜""撤菜"……——否则红点亮着，进来却看不出是哪张卡，
+ * 正是用户 2026-10-14 报过的那个感觉（「订单有红点，但是里面的卡片看不出来哪个是提醒的」）。
+ *
+ * 「删掉了某餐的记录」那一条也带 `mealKey`，但那一餐的卡已经不存在了——
+ * 它标不上任何卡（查表查不到），不影响这里。
  */
 export function badgesOfMeal(map: Map<string, string>, mealKey: string): string[] {
-  return (['done', 'plan'] as const)
+  return (['done', 'order', 'plan'] as const)
     .map((kind) => map.get(`${mealKey}:${kind}`))
     .filter((tag): tag is string => Boolean(tag))
 }

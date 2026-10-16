@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
 import type { NotificationBoard } from '@/api/notifications'
 import { useMarkArrived } from '@/api/notifications'
+import { boardFixture, notificationFixture } from '@/api/notifications.testkit'
 import { useAuth } from '@/stores/auth'
 
 /*
@@ -26,11 +27,8 @@ function Board() {
 
 function mockBoard(items: NotificationBoard['items']) {
   const posts: { url: string; body: unknown }[] = []
-  vi.spyOn(apiClient, 'get').mockImplementation(() =>
-    Promise.resolve({
-      data: { items, unread: items.filter((item) => item.unread).length, unreadByArea: {}, unreadByKind: {}, prefs: { mealPlan: true, mealDone: true, expiry: true, prep: true } },
-    } as never),
-  )
+  // 那三个未读数由夹具按 items 算（与后端同一份投影），用例不必手写
+  vi.spyOn(apiClient, 'get').mockImplementation(() => Promise.resolve({ data: boardFixture({ items }) } as never))
   vi.spyOn(apiClient, 'post').mockImplementation((url: string, body: unknown, _config?: AxiosRequestConfig) => {
     posts.push({ url, body })
     return Promise.resolve({ data: { read: 1 } } as never)
@@ -39,9 +37,9 @@ function mockBoard(items: NotificationBoard['items']) {
 }
 
 function item(patch: Partial<NotificationBoard['items'][number]>) {
-  return {
+  return notificationFixture({
     id: 'plan:2026-10-14-LUNCH',
-    kind: 'plan' as const,
+    kind: 'plan',
     title: '今天午餐的菜单定下来了',
     body: null,
     at: '2026-10-14T10:00:00.000Z',
@@ -50,7 +48,7 @@ function item(patch: Partial<NotificationBoard['items'][number]>) {
     tag: '选好了',
     unread: true,
     ...patch,
-  }
+  })
 }
 
 function renderAt(pathname: string) {

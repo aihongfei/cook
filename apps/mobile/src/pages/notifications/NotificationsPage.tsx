@@ -18,10 +18,14 @@ import './notifications.scss'
 /**
  * 通知中心（M10 / F10-01~04）。口径见 D-078。
  *
- * ## 这里显示的**不是"消息"，是"家里现在有什么值得知道的事"**
+ * ## 这里显示的**不是"消息"，是"家里现在和最近有什么值得知道的事"**
  *
- * 四条提醒全部由后端从已有事实现算（菜单定下来了 / 饭做好了 / 快过期 / 该备菜了），
- * 所以这个列表会**自己变**：把那一餐取消掉，"饭已做好"那条就没了。
+ * 十类提醒由后端两条路给出（用户 2026-10-16 把范围扩大到了"家庭相关修改都要通知"）：
+ * - **状态型四类**（菜单定了 / 饭做好了 / 快过期 / 该备菜）从已有事实现算，
+ *   所以它们会**自己变**：把那一餐取消掉，"饭已做好"那条就没了；
+ * - **事件型六类**（点菜/冰箱/打卡/评论/家庭/菜谱）是**发生过的事**，
+ *   由做事的那一侧当场记下：撤掉的那道菜不会因为没有那道菜了就没发生过。
+ *
  * 这与"收到过一条消息就永远躺在收件箱里"是两回事，也是刻意选的——
  * 存一份通知表就是给同一个事实存第二份副本，必然会与事实漂移（见 D-078）。
  *
@@ -45,6 +49,12 @@ const KIND_STYLE: Record<NotificationKind, { icon: string; tone: string }> = {
   done: { icon: '🍲', tone: 'is-done' },
   expiry: { icon: '⏳', tone: 'is-expiry' },
   prep: { icon: '🧺', tone: 'is-prep' },
+  order: { icon: '🥢', tone: 'is-order' },
+  fridge: { icon: '🧊', tone: 'is-fridge' },
+  checkin: { icon: '📷', tone: 'is-checkin' },
+  comment: { icon: '💬', tone: 'is-comment' },
+  family: { icon: '🏠', tone: 'is-family' },
+  recipe: { icon: '📖', tone: 'is-recipe' },
 }
 
 export default function NotificationsPage() {
@@ -101,7 +111,7 @@ export default function NotificationsPage() {
     <Page>
       <div className="pscreen notifications">
         <Link className="page-back" to={back.to}>← {back.label}</Link>
-        <PageHeader title="家里的消息" subtitle="菜单、饭好了、快过期、该备菜" art="recipes" />
+        <PageHeader title="家里的消息" subtitle="菜单、饭好了、订单、冰箱、打卡、家人、菜谱" art="recipes" />
 
         {board.isPending && <RecipeStatus title="正在看看家里有什么事…" loading />}
         {board.isError && (
@@ -115,7 +125,7 @@ export default function NotificationsPage() {
             <EmptyState
               emoji="✅"
               title="眼下没什么要处理的"
-              desc="菜单定了、饭做好了、有东西快过期、或者哪一餐还空着，都会在这儿告诉你。"
+              desc="菜单定了、饭做好了、有人点了菜、动了冰箱、传了打卡照、家里或菜谱有变动，都会在这儿告诉你。"
             />
             <Link className="recipe-button notifications__go" to="/order" state={{ from: '/notifications' }}>
               去看看今天的菜单
@@ -148,8 +158,11 @@ export default function NotificationsPage() {
         )}
 
         {/*
-          四个开关（F10-04）。放在列表**下面**：用户是来看有什么事的，
-          不是来配置的；配置完还能顺手往上看一眼。
+          九个开关（F10-04；2026-10-16 从四个扩到九个）。放在列表**下面**：用户是来看
+          有什么事的，不是来配置的；配置完还能顺手往上看一眼。
+
+          `NOTIFICATION_KINDS` 里已经分了两段（家里的事 / 谁做了什么），这里**照它渲染**
+          ——不在这一页再分一次组，那会成为第二份"哪些开关属于哪一类"的说法。
         */}
         {myPrefs && (
           <>
@@ -184,19 +197,20 @@ export default function NotificationsPage() {
               「这个是默认的，不用设置」「删掉这块配置」），所以这里不再放任何可配的东西——
               但必须留一句话说清**哪些会弹、哪些只在应用里看得到**：
               本机能算的那两类（到点做饭、有东西到期）关掉 App 也会弹；
-              "别人点了菜"这类远端事件没有推送通道就送不到（RISKS R-63），不说用户会以为坏了。
+              "别人做了什么"那一大类靠后台巡查（最多晚约一刻钟，RISKS R-63 那张表），
+              真·实时仍然没有通道——不说用户会以为坏了。
               被系统拒了的情形换成"去设置里打开"那条路——**不给按钮**（系统不会再弹框，
               点了没反应就是假入口，D-066）。
             */}
             {notifyState === 'denied' ? (
               <p className="notifications__hint">
                 这台手机把系统通知关掉了，提醒弹不出来。到手机的「设置 → 应用 → 御膳 → 通知」里打开就会响。
-                别人点了菜这类「家里刚发生的事」仍然只在应用内看得到，打开就看到。
+                在那之前，家里的事打开应用就看得到。
               </p>
             ) : (
               <p className="notifications__note">
                 手机上也会提醒：定了菜单的那一餐到饭点前一小时、冰箱里有东西到期那天早上，会弹一下——关掉这个应用也会响。
-                别人点了菜这类「家里刚发生的事」仍然只在应用内看得到，打开就看到。
+                家里刚发生的事（有人点了菜、传了打卡照、动了冰箱）这台手机在后台也会去问，最多晚约一刻钟知道。
               </p>
             )}
           </>

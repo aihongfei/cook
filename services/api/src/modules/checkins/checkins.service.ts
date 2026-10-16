@@ -6,6 +6,7 @@ import {
   ensurePrivateBucket, getPrivateImage, mediaS3Config, privateBucketName, privateMediaKey,
   putPrivateImage, s3Client,
 } from '../media/media.storage'
+import { NotificationsService } from '../notifications/notifications.service'
 import { PrismaService } from '../recipes/prisma.service'
 import {
   assertSize, buildHeatmap, canDeleteCheckIn, canDeleteComment, canEditCheckIn, canEditComment,
@@ -96,7 +97,11 @@ const CHECKIN_INCLUDE = {
 
 @Injectable()
 export class CheckInsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    /** 「打卡墙有上传、评论」要告诉家里人（用户 2026-10-16） */
+    private readonly notifications: NotificationsService,
+  ) {}
 
   /**
    * 上传一张打卡照片（F9-07）。
@@ -156,6 +161,27 @@ export class CheckInsService {
       // mealOrder 也要 include：否则成品照虽然挂上了餐，返回的卡片里 mealKey 却是 null
       include: CHECKIN_INCLUDE,
     })
+
+    /*
+     * 「打卡墙有上传」告诉家里人（用户 2026-10-16）。
+     *
+     * 去处是**打卡墙本身**（不是那一张的详情）：墙是"最新在前"，新传的那张就在最前面，
+     * 点进去一眼就看到——而详情抽屉需要 id、也得前端再拼一次路径。
+     * 键用这张打卡的 id：同一个人同一天传两张是两件事，各提醒一次。
+     *
+     * ⚠️ **不报"挂了哪一餐"**：`mealKey` 给 null。这一条说的是"有人传了照片"，
+     * 而它的去处是打卡墙；挂到点单卡上的话，会在订单页也标出一个"有新照片"的角标，
+     * 而用户从那儿点进去看到的还是打卡墙——两处标记指向同一件事，多一处就是噪音。
+     */
+    await this.notifications.recordChange(familyId, {
+      kind: 'checkin',
+      action: note ? `打卡了：${note}` : '往打卡墙传了一张照片',
+      body: note ? null : '去看看做得怎么样',
+      to: '/checkins',
+      mealKey: null,
+      tag: '打卡',
+      scope: `photo:${row.id}`,
+    }, userId)
 
     return this.view(row, userId)
   }
@@ -265,6 +291,29 @@ export class CheckInsService {
       data: { checkInId, userId, body },
       include: { user: true },
     })
+
+    /*
+     * 「打卡墙有评论」告诉家里人（用户 2026-10-16）。
+     *
+     * 去处是**打卡墙**而不是那一张的详情：评论要连着照片看才有意义，而详情抽屉是
+     * 前端按 id 打开的——`/checkins` 是那一页的路由，用户在墙上找到那张就能看到这句。
+     * 键用这条评论的 id：改一次评论不会重发（改是 `updateComment`，它不写提醒——
+     * "我把话说得更清楚了"不值得打扰家里人一次）。
+     *
+     * ⚠️ 评论**不区分是谁的照片**：给别人的照片评论是常态，给自己的照片评论也可能发生
+     * （补一句"这个火候刚好"）。后者没必要通知家里人吗？——**要**：那句话是说给家人看的，
+     * 而通知的收件人恰好就是除我之外的人，所以不做额外判断。
+     */
+    await this.notifications.recordChange(familyId, {
+      kind: 'comment',
+      action: `在打卡墙说了一句`,
+      body: body.length > 24 ? `${body.slice(0, 24)}…` : body,
+      to: '/checkins',
+      mealKey: null,
+      tag: '评论',
+      scope: `comment:${created.id}`,
+    }, userId)
+
     return this.commentView(created, userId)
   }
 

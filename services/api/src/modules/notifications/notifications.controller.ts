@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Post, Query, UseGuards } from 
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import { CurrentUserId, JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { PatrolAuthGuard } from './notifications.patrol.guard'
+import { NOTIFICATION_PREF_KEYS, type NotificationPrefs } from './notifications.rules'
 import { NotificationsService } from './notifications.service'
 
 interface PrefsBody {
@@ -9,6 +10,11 @@ interface PrefsBody {
   mealDone?: unknown
   expiry?: unknown
   prep?: unknown
+  orderChange?: unknown
+  fridgeChange?: unknown
+  checkin?: unknown
+  family?: unknown
+  recipe?: unknown
 }
 
 /** 标一条已读：那条的 id（列表里渲染用的那个） */
@@ -19,9 +25,18 @@ interface ReadAllBody { ids?: unknown }
 interface PatrolTokenBody { deviceId?: unknown; device?: unknown }
 
 /**
+ * 改开关：**九个键都可以传**，且**只接受布尔值**（传 `"true"` 这种字符串一律当没传——
+ * 否则前端一处拼错就会把开关静默改掉，而用户看到的界面还是他自己点的那样）。
+ *
+ * 键清单直接用 `NOTIFICATION_PREF_KEYS`（纯规则里那一份，也就是 `NotificationPref` 的九列），
+ * **不在这里再抄一遍**：抄一遍就会在加开关时漏改一处，而漏了的表现是
+ * "新开关改不动"——那正是这一轮最容易犯的错（本项目在"键各拼一遍"上栽过两次，见 D-078 四）。
+ */
+
+/**
  * 消息提醒（M10）。口径见 D-078。
  *
- * 四个接口：**看**（`GET`，红点与通知中心共用）、**标一条已读**（`POST /read`）、
+ * 几个接口：**看**（`GET`，红点与通知中心共用）、**标一条已读**（`POST /read`）、
  * **一键已读**（`POST /read-all`）、**改开关**（`POST /prefs`）。
  * 全部要求登录——提醒是"给我的"，挂在账号上（开关按账号，用户 2026-10-15 选定）。
  */
@@ -32,7 +47,7 @@ export class NotificationsController {
 
   @Get()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: '我的提醒（含未读数与各 Tab 的未读数）（M10 / F10-01~03）' })
+  @ApiOperation({ summary: '我的提醒（含未读数与各区域的未读数）（M10 / F10-01~03）' })
   async list(@CurrentUserId() userId: string) {
     return this.notifications.list(userId)
   }
@@ -65,17 +80,14 @@ export class NotificationsController {
     return this.notifications.markAllRead(userId, body?.ids)
   }
 
-  /**
-   * 四个开关（F10-04）。**只接受布尔值**：传 `"true"` 这种字符串一律当没传——
-   * 否则前端一处拼错就会把开关静默改掉，而用户看到的界面还是他自己点的那样。
-   */
+  /** 改开关（F10-04；2026-10-16 从四个扩到九个）。**只接受布尔值**，见 `PREF_KEYS` 上面那段 */
   @Post('prefs')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: '改提醒开关（只改传了的那些）（M10 / F10-04）' })
   async prefs(@CurrentUserId() userId: string, @Body() body: PrefsBody) {
-    const patch: { mealPlan?: boolean; mealDone?: boolean; expiry?: boolean; prep?: boolean } = {}
-    for (const key of ['mealPlan', 'mealDone', 'expiry', 'prep'] as const) {
+    const patch: Partial<NotificationPrefs> = {}
+    for (const key of NOTIFICATION_PREF_KEYS) {
       if (typeof body?.[key] === 'boolean') patch[key] = body[key]
     }
     return this.notifications.updatePrefs(userId, patch)

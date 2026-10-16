@@ -377,6 +377,25 @@ export interface DayWindowItem {
 }
 
 /**
+ * 一餐的"人话称呼"：`今天晚餐` / `明天午餐` / `10月9日晚餐`。
+ *
+ * **一处实现、两处用**：通知中心里"菜单定下来了"那句（`notifications.service`）
+ * 与订单变动提醒那句（`orders.service`）说的是同一件事的同一个时间说法。
+ * 各写一遍的后果是本项目反复见过的那一类——两边的"后天"迟早指不同的日子
+ * （一个按通知窗口算、一个按订单窗口算），而用户看到的是**同一顿晚餐的两个说法**。
+ *
+ * 超出相对窗口（默认三天）时写具体日期，**不编一个"周五"**：
+ * 一周之外的星期几等于没说，还不如直接给日子。
+ */
+export function mealWhenLabel(mealDate: Date, meal: MealSlot, now: Date = new Date(), span = 3): string {
+  const key = dateKey(mealDate)
+  const hit = dayWindow(span, now).find((day) => day.value === key)
+  if (hit) return `${hit.label}${MEAL_LABEL[meal]}`
+  const [, month, day] = key.split('-')
+  return `${Number(month)}月${Number(day)}日${MEAL_LABEL[meal]}`
+}
+
+/**
  * 从今天起 `span` 天的日历。日期一律按**本地日历**递进（今天/明天/后天……），
  * 是 `dayOptions` 与菜单安排视图共用的那一份口径——两处各算一遍迟早会分叉。
  *

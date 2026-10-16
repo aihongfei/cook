@@ -1212,3 +1212,61 @@ mock 换成**真正被 import 的那个组件**（本次是 `Chips`），并且�
 ### 五、相关
 
 `DECISIONS.md` **D-096 五**、`apps/mobile/src/pages/recipes/recipes.test.tsx`（`Chips` mock 那段注释）。
+
+## R-79 事件型提醒**必须当场写完**：`void` 掉 `recordChange` 会让"刚做的事在通知里看不见"；新加一类 kind 会被 `default` 分支**静默归到订单**（✅ 已定规矩，2026-10-16；配套 D-097）
+
+### 一、风险本身（两个，都是这一版新长出来的）
+
+**① `void` 掉副作用写入 = "看不见刚发生的事"。**
+第一版 19 个写入点全写成 `void this.notifications.recordChange(...)`，理由听着很对
+（"提醒是副作用，不该让用户等一个来回"）。但后果是：用户做完动作，前端**立刻**重取通知列表，
+那几毫秒里那一行还没进库 → **刚做完的事在通知中心里没有**，要等下一次刷新
+（`staleTime` 60 秒）才冒出来。这正是本项目反复记过的那一族
+（"页面上看不见刚发生的事"，见 D-078 四那两次教训）。
+
+**② 新加 kind 时 `default` 分支会静默兜住它。**
+`areaOfKind` 是 `switch` + `default: return 'order'` 的写法——新加一类 kind
+**不报错、不告警**，只是默默归到订单。这一版里 `fridge` 就真的落进去了：
+表现是"冰箱有变化"点亮的是**订单 Tab**，而点进订单页**也找不到那一件事**
+（那件东西已经被拿走了，冰箱页才有它）。**红点在错的地方亮，比不亮更坏**
+——用户会顺着它找一个不存在的东西。
+
+### 二、为什么容易再犯
+
+- **`void` 看起来是"性能优化"**：异步副作用不阻塞主流程，这是很多地方的标准写法；
+  但这里主流程的"完成"包含"客户端重取能看见它"——**副作用与用户可见结果是同一件事的两面**；
+- **`default` 分支看起来是"防御性编程"**：写 `switch` 时顺手加个兜底显得稳妥；
+  但在这张表上**没有合理的默认值**——每一类的去处是一个事实，兜底等于猜；
+- **这类错在单测里不露**：写 `recordChange` 的单测时它是被 `await` 的，
+  "调用方没 await"这件事发生在**另一个文件**里；
+- **它也不在"跑一遍界面"里露**（除非你正好在看那一刻的通知列表）。
+
+### 三、判别要点
+
+- **写完一个"用户可见"的副作用，问一句：客户端下一次请求能不能看见它？**
+  能看见才允许不等；看不见就必须 `await`（并且**为该失败吗**是另一个问题——这里是
+  `recordChange` 内部吞异常，所以"等它"不引入新的失败面）；
+- **反查手段**：`grep -rn "void .*recordChange\|void this\.[a-z]*\.\(create\|record\|write\)"`；
+  更可靠的是**真实请求的验收脚本**——`verify-notifications-change.cjs` 里那条
+  "写完立刻取列表" 的断言就是这个错的探测器（它一跑就红）；
+- **新加 kind 时**：把 `areaOfKind` / `prefOfKind` 里那个 `default` 当成**红灯**——
+  要么显式列出全部类目（现在的写法），要么加 `never` 穷尽检查让编译器报错；
+- **单测要逐类断言**：一条 `it` 里遍历 `NOTIFICATION_KINDS` 断言"每一类都有非 `undefined` 的区域
+  且不是靠 `default` 兜住的"——照类目逐条列出期望值，**新加一类而忘了改这里就会红**。
+
+### 四、怎么修（这一版采用的）
+
+- 19 处 `void this.notifications.recordChange` → **`await this.notifications.recordChange`**，
+  并把注释里那句"用 `void` 不 await"的理由改写成"**await 它、但不为它失败**"；
+- `areaOfKind` 里 `case 'expiry': case 'fridge': return 'fridge'`——把 `fridge` 显式列出来，
+  注释写明"归到 order 的单测会红"；
+- 前端那份 `AREA_OF_KIND` 表（`notifications.testkit.ts`）同步改掉同一处；
+  **两份表同时改**这件事本身也说明"区域的归属"这个事实现在存在于两处
+  （前端只有测试工具用），下次若真要改口径，两边都要动。
+
+### 五、相关
+
+`DECISIONS.md` **D-097 五 / D-097 九**、`services/api/scripts/verify-notifications-change.cjs`（探测器）、
+`services/api/src/modules/notifications/notifications.rules.ts`（`areaOfKind` 那两行注释）、
+`apps/mobile/src/api/notifications.testkit.ts`（前端那份 `AREA_OF_KIND`）、
+`RUNBOOK.md` **R-089**（怎么用真实请求验这一类改动）。

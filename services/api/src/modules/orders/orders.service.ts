@@ -2,12 +2,13 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { MealSlot, OrderStatus, Prisma } from '@prisma/client'
 import { CAPABILITIES, FamilyRole, can } from '../family/family.roles'
 import { publicImageUrl } from '../media/media.storage'
+import { NotificationsService } from '../notifications/notifications.service'
 import { PrismaService } from '../recipes/prisma.service'
 import { TasteService } from '../taste/taste.service'
 import { judgeDish, type TasteJudgement } from '../taste/taste.rules'
 import {
   MEAL_LABEL, MEAL_SLOTS, ORDER_STATUSES, STATUS_LABEL, TRANSITION_CAPABILITY,
-  aggregateItems, canAddItem, canDeleteMeal, canRemoveItem, canRepeatFrom, confirmStampFor, dateKey, doneStampFor, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, nextActionsFor, parseDinerCount,
+  aggregateItems, canAddItem, canDeleteMeal, canRemoveItem, canRepeatFrom, confirmStampFor, dateKey, doneStampFor, dateOnly, dayWindow, isAllowedTransition, mealKeyOf, mealWhenLabel, nextActionsFor, parseDinerCount,
   parseHistoryQuery, historyRange, hasEarlier, weekdayOf,
   parseItemTarget, parseBulkRecipeIds, parseMealDate, parseMealKey, parseNote, parsePlanDays, parseSlot, parseStatus, photoVisibleTo, planRepeat, revivedStatus, splitExisting,
   todayKey, todayMealState, visibleToMember,
@@ -150,15 +151,22 @@ export class OrdersService {
      * 用户已经把这顿饭安排好了，提醒就只剩下添堵。
      */
     private readonly taste: TasteService,
+    /** 「订单有变化」要告诉家里人（用户 2026-10-16）。口径与扇出都在通知服务里，这里只报事实 */
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
    * 点菜（`order.create`，人人可点）：点菜谱里的，或者自己写一道（F3-10）。
    * 同一餐已有就复用；**能不能加只看 `canAddItem`**（到「正在做」为止都能加，只有「做好了」封口）。
+   *
+   * `silent` 只给 `addItems` 用（整组加菜）：它逐道走这里是为了语义一致，
+   * 但**提醒要合成一条**——摇一桌五道菜在通知里刷五行是打扰，不是告知。
+   * 别在业务代码里传它：那是"这一次不要提醒"的内部开关，不是功能选项。
    */
   async addItem(
     userId: string,
     input: { recipeId?: string; dishName?: string; mealDate?: string; meal?: string; note?: string },
+    options: { silent?: boolean } = {},
   ): Promise<AddItemResult> {
     const { familyId } = await this.requireCapability(userId, CAPABILITIES.ORDER_CREATE)
 
@@ -187,10 +195,35 @@ export class OrdersService {
       })
     }
 
-    await this.prisma.orderItem.create({
+    const created = await this.prisma.orderItem.create({
       data: { mealOrderId: mealOrder.id, userId, ...item, note },
     })
     const card = await this.card(mealOrder.id, userId)
+
+    /*
+     * 「订单有变化」告诉家里人（用户 2026-10-16）。
+     * 键用**这一条点单的 id**：同一道菜今天点了、明天又点，是两件事，该有两条提醒
+     * （拿"餐次"当键的话第二次会被当成重复丢掉）。
+     *
+     * **await 它、但不为它失败**（`recordChange` 内部吞异常）：先写完再回响应，
+     * 客户端拿到"加菜成功"时提醒已经在库里了。第一版写成 `void`（不等）——
+     * 那是错的：前端加完菜立刻重取一次通知，那几毫秒里它还没写进去，
+     * 于是"刚做的事在通知里看不见"，要等下一次刷新（`staleTime` 60 秒）才出现。
+     * 这是本项目反复记过的那一类（"页面上看不见刚发生的事"，见 R-78 一族）。
+     * 代价是写接口多几次查询——`recordChange` 里那三条都是小查询，值。
+     */
+    if (!options.silent) {
+      await this.notifications.recordChange(familyId, {
+        kind: 'order',
+        action: `点了「${item.recipeName}」`,
+        body: `加进${mealWhenLabel(mealDate, slot)}了`,
+        to: `/order/${mealKeyOf(mealDate, slot)}`,
+        mealKey: mealKeyOf(mealDate, slot),
+        tag: '加菜',
+        scope: `add:${created.id}`,
+      }, userId)
+    }
+
     return { ...card, ...await this.tasteWarningFor(userId, item.recipeId, item.recipeName) }
   }
 
@@ -244,12 +277,39 @@ export class OrdersService {
     await this.assertMealAcceptsItems(userId, mealDate, slot)
 
     for (const recipeId of toAdd) {
-      await this.addItem(userId, { recipeId, mealDate: dateKey(mealDate), meal: slot })
+      // `silent`：提醒下面**合成一条**（摇一桌五道菜刷五行通知是打扰），见 addItem 的说明
+      await this.addItem(userId, { recipeId, mealDate: dateKey(mealDate), meal: slot }, { silent: true })
     }
 
     const finalRow = await this.prisma.mealOrder.findUnique({
       where: { familyId_mealDate_meal: { familyId, mealDate, meal: slot } },
+      include: { items: { select: { id: true, recipeId: true, recipeName: true } } },
     })
+
+    /*
+     * 合成的那一条（"妈妈一次点了 3 道菜"）。
+     *
+     * 幂等键取**这次新加的那几条里 id 最小的那个**：那些 id 是本次调用刚创建的、
+     * 全局唯一，所以① 同一次调用里它是确定的（不依赖查询返回顺序）；② 两次不同的
+     * 整组加菜必然不同（第二次创建的是新行）；③ 重放同一个请求时 `toAdd` 会是空的
+     * （菜已经有了）而**在上面的早返回里就结束了**，走不到这里——于是不会写出第二条。
+     */
+    const added = (finalRow?.items ?? []).filter((row) => row.recipeId && toAdd.includes(row.recipeId))
+    const names = added.map((row) => row.recipeName)
+    const anchor = [...added].map((row) => row.id).sort()[0]
+    if (anchor) {
+      const mealKey = mealKeyOf(mealDate, slot)
+      await this.notifications.recordChange(familyId, {
+        kind: 'order',
+        action: `一次点了 ${names.length} 道菜`,
+        body: `加进${mealWhenLabel(mealDate, slot)}了：${names.slice(0, 3).join('、')}${names.length > 3 ? ` 等 ${names.length} 道` : ''}`,
+        to: `/order/${mealKey}`,
+        mealKey,
+        tag: '加菜',
+        scope: `bulk:${anchor}`,
+      }, userId)
+    }
+
     return {
       added: toAdd,
       skipped,
@@ -365,6 +425,22 @@ export class OrdersService {
 
     await this.prisma.orderItem.delete({ where: { id: itemId } })
 
+    /*
+     * 「订单有变化」：谁退了哪一道。键用**被退掉那一行的 id**——它已经删了，
+     * 但那个 id 是这一件事的唯一标识（退同一道菜两次是两个 id、两条提醒）。
+     * 放在删除**之后**发：删成功才算这件事发生过。
+     */
+    const mealKey = mealKeyOf(item.mealOrder.mealDate, item.mealOrder.meal)
+    await this.notifications.recordChange(familyId, {
+      kind: 'order',
+      action: `退掉了「${item.recipeName}」`,
+      body: `${mealWhenLabel(item.mealOrder.mealDate, item.mealOrder.meal)}少了一道`,
+      to: `/order/${mealKey}`,
+      mealKey,
+      tag: '撤菜',
+      scope: `remove:${itemId}`,
+    }, userId)
+
     // 退掉最后一份菜后这张卡就空了，顺手删掉——免得列表里留一个"0 道菜"的餐次
     const remaining = await this.prisma.orderItem.count({ where: { mealOrderId: item.mealOrderId } })
     if (remaining > 0) return this.card(item.mealOrderId, userId)
@@ -395,8 +471,26 @@ export class OrdersService {
       throw new ConflictException(`这一餐已经「${STATUS_LABEL[mealOrder.status]}」了，成品不能再改——记录要改请到点单历史里删`)
     }
 
+    const dishCount = await this.prisma.orderItem.count({ where: { mealOrderId: mealOrder.id } })
     await this.prisma.orderItem.deleteMany({ where: { mealOrderId: mealOrder.id } })
     await this.prisma.mealOrder.delete({ where: { id: mealOrder.id } })
+
+    /*
+     * 「订单有变化」：谁把这一桌退了。
+     * 键用**被删掉的那一餐的 id**（`MealOrder.id`，不是 mealKey）：同一餐被退掉、
+     * 又被人点起来、再被退掉，是两件事——mealKey 两次相同，而 `MealOrder.id` 每次新建都不同。
+     */
+    const key = mealKeyOf(mealOrder.mealDate, mealOrder.meal)
+    await this.notifications.recordChange(familyId, {
+      kind: 'order',
+      action: `把${mealWhenLabel(mealOrder.mealDate, mealOrder.meal)}整桌退了`,
+      body: `退了 ${dishCount} 道菜`,
+      to: `/order`,
+      mealKey: key,
+      tag: '撤菜',
+      scope: `clear:${mealOrder.id}`,
+    }, userId)
+
     return emptyCard(mealOrder.mealDate, mealOrder.meal)
   }
 
@@ -438,6 +532,24 @@ export class OrdersService {
     ])
 
     await this.prisma.mealOrder.delete({ where: { id: mealOrder.id } })
+
+    /*
+     * 「订单有变化」：谁删了哪一餐的记录（用户 2026-10-16）。
+     * 这是**唯一一条去处不带 mealKey 的订单提醒**——那一餐已经不存在了，
+     * 点进详情只会 404。所以去 `/order/history`：这条记录刚从那儿消失，
+     * 用户点进来看得见"确实没有了"（比给一个打不开的链接好）。
+     * `mealKey` 字段仍然带上：点单卡上可能还有那一张（列表缓存要几秒才更新），
+     * 而且"这条提醒说的是哪一餐"对用户是有意义的。
+     */
+    await this.notifications.recordChange(familyId, {
+      kind: 'order',
+      action: `删掉了${mealWhenLabel(mealOrder.mealDate, meal)}的记录`,
+      body: dishCount > 0 ? `那 ${dishCount} 道菜一起删了` : null,
+      to: '/order/history',
+      mealKey,
+      tag: '删记录',
+      scope: `delete:${mealOrder.id}`,
+    }, userId)
 
     return {
       mealKey,
@@ -517,17 +629,39 @@ export class OrdersService {
 
     const targetKey = dateKey(targetDate)
     for (const dish of toAdd) {
+      // `silent`：与"摇一桌"同一个理由——照抄一桌菜合成一条提醒（见 addItem 的说明）
       await this.addItem(
         userId,
         dish.recipeId
           ? { recipeId: dish.recipeId, mealDate: targetKey, meal: targetMeal }
           : { dishName: dish.name, mealDate: targetKey, meal: targetMeal },
+        { silent: true },
       )
     }
 
     const finalRow = await this.prisma.mealOrder.findUnique({
       where: { familyId_mealDate_meal: { familyId, mealDate: targetDate, meal: targetMeal } },
+      include: { items: { select: { id: true } } },
     })
+
+    /*
+     * 合成的那一条（"爸爸照上次那桌又点了一次"）。
+     * 键取本次新建条目里最小的 id（与 `addItems` 同一个做法与理由）。
+     */
+    const anchor = (finalRow?.items ?? []).map((row) => row.id).sort()[0]
+    if (anchor) {
+      const key = mealKeyOf(targetDate, targetMeal)
+      await this.notifications.recordChange(familyId, {
+        kind: 'order',
+        action: `照上次那桌又点了 ${toAdd.length} 道菜`,
+        body: `加进${mealWhenLabel(targetDate, targetMeal)}了：${toAdd.slice(0, 3).map(dish => dish.name).join('、')}${toAdd.length > 3 ? ` 等 ${toAdd.length} 道` : ''}`,
+        to: `/order/${key}`,
+        mealKey: key,
+        tag: '加菜',
+        scope: `repeat:${anchor}`,
+      }, userId)
+    }
+
     return {
       added: toAdd.map(dish => dish.name),
       skipped: skipped.map(dish => dish.name),
@@ -601,6 +735,36 @@ export class OrdersService {
           : {}
 
     await this.prisma.mealOrder.update({ where: { id: mealOrder.id }, data: { status: target, ...stamp, ...done } })
+
+    /*
+     * 「订单有变化」——**只报那两档还没有专门提醒的**（2026-10-16）：
+     *
+     * - `PLANNED`（选好了）与 `DONE`（做好了）**不在这里报**：它们各自已经有一条
+     *   **状态型**提醒（`plan` / `done`，从 `confirmedAt` / `doneAt` 现算）——
+     *   在这里再写一条事件型的，用户会为同一件事收到两条通知（"选了好了"+"选好了"）。
+     *   这也是这一版**唯一**需要小心的地方：两条路各报各的，就会在重叠处翻倍；
+     * - `COOKING`（开始做）与 `CANCELED`（取消这一餐）没有专门的提醒，在这里补上。
+     *
+     * 键带目标状态：取消 → 重新点菜 → 再取消，第二次的 mealKey 相同，
+     * 但那时候 `MealOrder.id` 已经变了（取消后加菜是复活同一行、不是新建，所以这里用状态区分）——
+     * 用 `status:<MealOrder.id>:<状态>` 两边都覆盖到：同一餐只取消一次，而"取消又取消"
+     * 本来也不可能（第一次就已经是终态）。
+     */
+    if (target === 'COOKING' || target === 'CANCELED') {
+      const key = mealKeyOf(mealOrder.mealDate, mealOrder.meal)
+      await this.notifications.recordChange(familyId, {
+        kind: 'order',
+        action: target === 'COOKING'
+          ? `开始做${mealWhenLabel(mealOrder.mealDate, mealOrder.meal)}了`
+          : `取消了${mealWhenLabel(mealOrder.mealDate, mealOrder.meal)}`,
+        body: target === 'COOKING' ? '这一餐下锅了' : null,
+        to: `/order/${key}`,
+        mealKey: key,
+        tag: target === 'COOKING' ? '开做了' : '取消了',
+        scope: `status:${mealOrder.id}:${target}`,
+      }, userId)
+    }
+
     return this.card(mealOrder.id, userId)
   }
 
@@ -721,6 +885,25 @@ export class OrdersService {
     if (!mealOrder) throw new NotFoundException('这一餐还没有人点菜')
 
     await this.prisma.mealOrder.update({ where: { id: mealOrder.id }, data: { dinerCount: count } })
+
+    /*
+     * 「订单有变化」：人数改了（用户 2026-10-16）。
+     * 键里带**改成了几**：同一个人把 4 改成 5 再改回 4，第二次不重复提醒——
+     * 那是同一个事实（"这一餐 4 个人吃"），不是两件事（与"加菜/撤菜"不同：
+     * 那些是**动作**，动作做两次就是两次）。
+     */
+    await this.notifications.recordChange(familyId, {
+      kind: 'order',
+      action: count === null
+        ? `清掉了${mealWhenLabel(mealDate, meal)}的人数`
+        : `把${mealWhenLabel(mealDate, meal)}改成 ${count} 人吃`,
+      body: null,
+      to: `/order/${mealKey}`,
+      mealKey,
+      tag: '改人数',
+      scope: `diners:${mealOrder.id}:${count ?? 'none'}`,
+    }, userId)
+
     return this.card(mealOrder.id, userId)
   }
 

@@ -1,7 +1,8 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
 import type { FamilyRole } from '../family/family.roles'
 import { publicImageUrl } from '../media/media.storage'
-import { visibleToMember } from '../orders/orders.rules'
+import { NotificationsService } from '../notifications/notifications.service'
+import { dateKey, visibleToMember } from '../orders/orders.rules'
 import { PrismaService } from '../recipes/prisma.service'
 import { TasteService } from '../taste/taste.service'
 import { judgeDish } from '../taste/taste.rules'
@@ -50,6 +51,8 @@ export class FridgeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly taste: TasteService,
+    /** 「冰箱有变化」要告诉家里人（用户 2026-10-16）。冰箱是家里共用的，谁动了都该能看见 */
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** 库存全量 + 概览（F6-02）。四区各自一组，前端直接画（不在前端再分组一遍） */
@@ -150,9 +153,21 @@ export class FridgeService {
       throw new ConflictException(`「${name}」在${zone}里已经记了一条，直接改它就行`)
     }
 
-    await this.prisma.fridgeItem.create({
+    const created = await this.prisma.fridgeItem.create({
       data: { familyId, addedById: userId, name, amount, zone, expiresOn, note },
     })
+
+    // 「冰箱有变化」：谁放了什么（用户 2026-10-16）。键用新建那一行的 id（同名同区不可能同时出现两条）
+    await this.notifications.recordChange(familyId, {
+      kind: 'fridge',
+      action: `往冰箱放了「${name}」`,
+      body: [amount, zone].filter(Boolean).join(' · ') || null,
+      to: '/fridge',
+      mealKey: null,
+      tag: '入库',
+      scope: `add:${created.id}`,
+    }, userId)
+
     return this.board(userId)
   }
 
@@ -186,6 +201,33 @@ export class FridgeService {
       where: { id: itemId },
       data: { name, zone, amount, expiresOn, note },
     })
+
+    /*
+     * 「冰箱有变化」：谁改了什么（用户 2026-10-16）。
+     *
+     * **只在真的改了东西时提醒**（快照比对）：点开编辑框又原样保存不该打扰家里人一次。
+     *
+     * 键里带**改完之后的那个快照**（名字/区/数量/保质期拼起来），于是：
+     * ① 连点两次保存同一个值不刷两条（键一样，`skipDuplicates` 挡掉）；
+     * ② 改成不同的值各提醒一次。**改回原值不重复提醒**——这一条说的是
+     * "它现在是 X"，而这句话已经告诉过家里人了；把时刻塞进键里能绕开这一点，
+     * 但代价是"网络重试/重复提交会刷出一串同样的提醒"，那更糟。
+     */
+    const snapshotOf = (values: { name: string; zone: string; amount: string | null; expiresOn: Date | null }) =>
+      [values.name, values.zone, values.amount ?? '', values.expiresOn ? dateKey(values.expiresOn) : ''].join('|')
+
+    if (snapshotOf({ name, zone, amount, expiresOn }) !== snapshotOf(item)) {
+      await this.notifications.recordChange(familyId, {
+        kind: 'fridge',
+        action: name === item.name ? `动了冰箱里的「${name}」` : `把「${item.name}」改成了「${name}」`,
+        body: [amount, zone].filter(Boolean).join(' · ') || null,
+        to: '/fridge',
+        mealKey: null,
+        tag: '改了',
+        scope: `edit:${itemId}:${snapshotOf({ name, zone, amount, expiresOn })}`,
+      }, userId)
+    }
+
     return this.board(userId)
   }
 
@@ -198,6 +240,18 @@ export class FridgeService {
       throw new ForbiddenException('这条不是你放的，拿不了')
     }
     await this.prisma.fridgeItem.delete({ where: { id: itemId } })
+
+    // 「冰箱有变化」：谁拿走了什么（用户 2026-10-16）。键用被删掉那一行的 id——它已不在库里，但那次动作有它唯一
+    await this.notifications.recordChange(familyId, {
+      kind: 'fridge',
+      action: `从冰箱拿走了「${item.name}」`,
+      body: item.amount ? `原来的量：${item.amount}` : null,
+      to: '/fridge',
+      mealKey: null,
+      tag: '拿走',
+      scope: `remove:${itemId}`,
+    }, userId)
+
     return this.board(userId)
   }
 

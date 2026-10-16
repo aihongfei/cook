@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { OptionalAuthGuard } from '../auth/optional-auth.guard'
 import { jwtSecret } from '../auth/jwt.config'
+import { NotificationsModule } from '../notifications/notifications.module'
 import { BuiltinRecipeProvider } from './builtin-recipe.provider'
 import { PrismaService } from './prisma.service'
 import { RECIPE_PROVIDER } from './recipe.types'
@@ -17,6 +18,9 @@ import { RecipesController } from './recipes.controller'
  *
  * `RecipeWriteService` 也导出：AI 的菜谱工具要用它，**不允许 AI 另写一份写入逻辑**
  * （与冰箱那条同一个规矩，见 D-052）。
+ *
+ * 引 `NotificationsModule`（2026-10-16）：自建菜谱的上传/修改/删除要告诉家里人
+ * （用户：「菜谱之类的」也属于家庭共享的东西）。**AI 走同一条路**，所以它干的也通知。
  */
 @Module({
   imports: [
@@ -24,6 +28,7 @@ import { RecipesController } from './recipes.controller'
       secret: jwtSecret(),
       signOptions: { expiresIn: Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 7200) },
     }),
+    NotificationsModule,
   ],
   controllers: [RecipesController],
   providers: [

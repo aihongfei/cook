@@ -60,11 +60,23 @@
   border-radius: 999px;
 }
 
-/* 四类提醒各有自己的底色（图标块），扫一眼就知道是哪一类 */
+/*
+ * 十类提醒各有自己的底色（图标块），扫一眼就知道是哪一类。
+ *
+ * 用的是同一套暖调（品牌色系里深浅不同的几种），**不引入新颜色**：
+ * 这些底色是"分类线索"而不是状态标记——用红/绿那套会让"冰箱有人放了东西"
+ * 看上去像一条警告（D-066：颜色只在真的表示某种状态时才用）。
+ */
 .row__icon.is-plan { background: #fdeee0; }
 .row__icon.is-done { background: #f7e6dc; }
 .row__icon.is-expiry { background: #fbf2d8; }
 .row__icon.is-prep { background: #e9f1e2; }
+.row__icon.is-order { background: #fbe6d4; }
+.row__icon.is-fridge { background: #e6eff4; }
+.row__icon.is-checkin { background: #f6e7f0; }
+.row__icon.is-comment { background: #eef0f8; }
+.row__icon.is-family { background: #f3ecdc; }
+.row__icon.is-recipe { background: #eae8dd; }
 
 .notifications__empty {
   display: flex;

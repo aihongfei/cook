@@ -16,6 +16,7 @@ import Page from '@/components/ui/Page'
 import { toast } from '@/components/ui/toast'
 import SectionTitle from '@/components/ui/SectionTitle'
 import { useAuth } from '@/stores/auth'
+import { mineRowUnread } from './unread-rows'
 import '../shared.scss'
 import '../checkins/checkins.scss'
 import './mine.scss'
@@ -51,6 +52,12 @@ export default function MinePage() {
   const cooked = useCooked()
   /* 未读数只用于「家庭消息提醒」那一行的副标题（M10）；与外壳的红点是同一份查询 */
   const notifications = useNotifications()
+  /*
+   * 打卡/家庭/菜谱三行各自的未读数（2026-10-16）。**与外壳的红点用同一份查询**
+   * （`useNotifications`，60 秒的 staleTime）：不另开一份，"同一件事两处各算一遍"
+   * 是本项目反复踩过的那一类（红点说 1、页面上 2）。
+   */
+  const rows = mineRowUnread(notifications.data)
   const taste = useTasteFamily()
   /*
    * 「我的菜谱」那一行的数量（F1-12）：借列表接口的第一页要 `total`，**不另开统计接口**——
@@ -205,6 +212,11 @@ export default function MinePage() {
             我的菜谱
             <small>{myDishesSub}</small>
           </span>
+          {/*
+            自建菜谱是家里人共用的（`Recipe.familyId`）：别人上传/改动/删掉时，
+            这一行亮一个数——这一页是通往"我的菜谱"的唯一入口（用户 2026-10-16 要求）。
+          */}
+          {rows.recipe > 0 && <span className="me-badge" aria-label={`${rows.recipe} 条新变化`}>{rows.recipe > 9 ? '9+' : rows.recipe}</span>}
           <span className="me-entry__arrow">›</span>
         </Link>
 
@@ -227,8 +239,14 @@ export default function MinePage() {
               <span className="me-checkin__streak">
                 连续打卡 <b>{checkins.data.mine.streak}</b> 天
               </span>
+              {/*
+                打卡这一行**不需要额外的红点**（用户 2026-10-16 扩的范围里带上它）：
+                这一页已经把"连续 N 天"摆在最显眼处，而新上传与新评论的去处只有一个
+                ——打卡墙。所以数直接写在这个链接上（"去打卡墙看看 →"），
+                不在这张卡片上再加一颗圆点：同一件事两个标记，用户会以为有两件事。
+              */}
               <Link className="me-checkin__more" to="/checkins" state={{ from: '/mine' }}>
-                去打卡墙看看 →
+                去打卡墙看看{rows.checkin > 0 && <b className="me-checkin__count">{rows.checkin > 9 ? '9+' : rows.checkin}</b>} →
               </Link>
             </div>
             <Heatmap grid={checkins.data.mine} emptyHint="还没有打卡照片：做了一道好菜就拍一张。" />
@@ -261,6 +279,8 @@ export default function MinePage() {
               家庭共享与成员
               <div className="row__sub">{familySub}</div>
             </div>
+            {/* 有人加入/退出、角色变了、改了设置（用户 2026-10-16 要求） */}
+            {rows.family > 0 && <span className="me-badge" aria-label={`${rows.family} 条新变化`}>{rows.family > 9 ? '9+' : rows.family}</span>}
             <span className="row__arrow">›</span>
           </Link>
           <Link className="row" to="/taste" state={{ from: '/mine' }}>
@@ -292,7 +312,7 @@ export default function MinePage() {
               <div className="row__sub">
                 {notifications.data && notifications.data.unread > 0
                   ? `${notifications.data.unread} 条新消息`
-                  : '菜单安排、饭已做好、快过期、该备菜'}
+                  : '菜单、饭好了、订单、冰箱、打卡、家人、菜谱'}
               </div>
             </div>
             <span className="row__arrow">›</span>

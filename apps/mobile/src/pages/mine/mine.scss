@@ -156,6 +156,34 @@
   color: #c7a97e;
 }
 
+/*
+ * 这一页那几行上的未读数（用户 2026-10-16：「家庭相关修改的都需要通知」）。
+ *
+ * 打卡/家庭/菜谱这三块**不亮底栏**（底栏五个 Tab 里没有它们的入口），
+ * 所以它们的红点落在这里——与底栏那颗是同一种东西（同一份 `unreadByKind` 算出来的），
+ * 形状也就跟着底栏那颗：**一颗小圆标、白字、品牌色**。做成两套的样子
+ * （比如这里用文字标签）会让人觉得它们是两回事。
+ *
+ * 尺寸比底栏那颗略小一档（16px vs 18px）：这一页的行高本就比底栏矮，
+ * 同一颗大小会显得这颗"更重"，而它其实只是同一件事在另一个位置上的提示。
+ */
+.me-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  font-style: normal;
+  line-height: 1;
+  color: #fff;
+  background: var(--color-brand);
+  border-radius: 999px;
+}
+
 /* 只读的现状行（如「手机提醒」）：没有箭头，不该看着像能点 */
 .row--status .row__sub--warn {
   color: #b4451f;
