@@ -326,6 +326,20 @@
 }
 
 /*
+ * 「原创的」那个计数（`共 N 道`）：靠右，与另外两个 tab 的 `.cooked__summary` /
+ * `.favorites__summary` **同一个位置与同一套字号**。
+ *
+ * 它原来和「＋ 新建菜谱」挤在同一行；那一行搬进固定区之后，计数留在内容里
+ * （数据在这一支手里），单独占一行——三个 tab 换着看时，总数始终在网格正上方靠右。
+ */
+.my-recipes__summary {
+  margin: 10px var(--spacing-page) 12px;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  text-align: right;
+}
+
+/*
  * 这一页的横向栏距要补在这里：页头、返回键、「新建菜谱」那一行各自带了 `padding/margin`，
  * 而**网格与状态块是页面级的块，自己不带**——不在 `.recipes-page` 里（那页有容器 padding），
  * 本页用的 `.pscreen` 只有上边距。结果就是卡片左右贴着屏幕边缘（用户 2026-10-13：

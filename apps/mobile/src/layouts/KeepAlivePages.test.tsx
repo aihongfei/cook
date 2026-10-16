@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { useState } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -57,6 +57,7 @@ function renderShell(initial: string) {
             <Route path="/c" element={<Page name="c" />} />
             <Route path="/next" element={<Page name="next" />} />
             <Route path="/meal/:mealKey" element={<MealPage />} />
+            <Route path="/tabbed" element={<TabbedPage />} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -73,6 +74,24 @@ function MealPage() {
       <span data-testid="mounted-meal">{count}</span>
       <span data-testid="path-meal">{location.pathname}</span>
       <Link to="/a">去 A</Link>
+    </div>
+  )
+}
+
+/**
+ * 页内 tab（查询串）那一页：用来验"换 tab **不换页面实例**"（2026-10-16 / D-091）。
+ * 它把查询串读出来显示——页面实例没换的话，这里的挂载次数必须一直是 1。
+ */
+function TabbedPage() {
+  const location = useLocation()
+  const count = useMountNumber('tabbed')
+  return (
+    <div>
+      <span data-testid="mounted-tabbed">{count}</span>
+      <span data-testid="search-tabbed">{location.search}</span>
+      {/* 与真实页面里点 tab 同一条路：只改查询串、路径不动 */}
+      <Link to="/tabbed?tab=b">去第二个 tab</Link>
+      <Link to="/tabbed?tab=c">去第三个 tab</Link>
     </div>
   )
 }
@@ -149,6 +168,30 @@ it('一个地址只占一份缓存：来回切多次也不增多、不重挂载'
   expect(screen.getAllByTestId('mounted-a').length).toBe(1)
   expect(screen.getAllByTestId('mounted-next').length).toBe(1)
   expect(screen.getByTestId('mounted-next').textContent).toBe('1')
+})
+
+/*
+ * 换**页内 tab**（只改查询串）**不换页面实例**（2026-10-16 / D-091）。
+ *
+ * 为什么这条必须钉住：页内 tab 整屏滑动时，跟手的手势在「旧那一份」上，
+ * 抬手落位要**接着那一份**播动画。缓存若按整条地址分键，换 tab 就是换一个实例——
+ * 动画被硬切掉（用户看到的是一次闪跳），而且每切一次 tab 就多留一份整页 DOM。
+ * 症状与 `use-page-turn` 里那条同源（判"换页"看 pathname，不看整条地址，D-077）。
+ */
+it('页内 tab（只改查询串）：**页面实例不换、也不多占缓存**，而查询串照常跟着变', async () => {
+  renderShell('/tabbed?tab=a')
+  expect((await screen.findByTestId('mounted-tabbed')).textContent).toBe('1')
+
+  fireEvent.click(screen.getByRole('link', { name: '去第二个 tab' }))
+  await waitFor(() => expect(screen.getByTestId('search-tabbed').textContent).toBe('?tab=b'))
+  // 还是第一份（没重挂载）、缓存里也没多出一份
+  expect(screen.getAllByTestId('mounted-tabbed').length).toBe(1)
+  expect(screen.getByTestId('mounted-tabbed').textContent).toBe('1')
+
+  fireEvent.click(screen.getByRole('link', { name: '去第三个 tab' }))
+  await waitFor(() => expect(screen.getByTestId('search-tabbed').textContent).toBe('?tab=c'))
+  expect(screen.getAllByTestId('mounted-tabbed').length).toBe(1)
+  expect(screen.getByTestId('mounted-tabbed').textContent).toBe('1')
 })
 
 /*

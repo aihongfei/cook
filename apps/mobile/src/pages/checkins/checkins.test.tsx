@@ -76,10 +76,20 @@ function statsFixture(overrides: Partial<CheckInStats> = {}): CheckInStats {
   return { mine: empty, family: empty, mineTotal: 0, familyTotal: 0, attachableMeals: [], ...overrides }
 }
 
-function mockGet({ family, wall, stats, detail }: { family: Family | null; wall?: CheckInWall; stats?: CheckInStats; detail?: CheckIn | null }) {
-  vi.spyOn(apiClient, 'get').mockImplementation((url: string) => {
+function mockGet({ family, wall, mineWall, stats, detail }: { family: Family | null; wall?: CheckInWall; mineWall?: CheckInWall; stats?: CheckInStats; detail?: CheckIn | null }) {
+  // 返回 spy：有几条用例要看"请求带没带那个参数"（两个视角各取各的）
+  return vi.spyOn(apiClient, 'get').mockImplementation(((url: string, config?: { params?: Record<string, unknown> }) => {
     if (url === '/family') return Promise.resolve({ data: family } as never)
-    if (url === '/checkins') return Promise.resolve({ data: wall ?? { items: [], total: 0, hasMore: false, scope: 'family' } } as never)
+    if (url === '/checkins') {
+      /*
+       * 「只看我的」那条要问一句 `family=false`（`useCheckInWall` 按 scope 传参）——
+       * 两个视角现在**各自取数**（跟手拖到一半邻页要画得出来），所以 mock 也必须分得清，
+       * 否则"两个 tab 内容一样"这种真错会被一份共用数据盖过去。
+       */
+      const mine = config?.params?.family === 'false'
+      if (mine && mineWall) return Promise.resolve({ data: mineWall } as never)
+      return Promise.resolve({ data: wall ?? { items: [], total: 0, hasMore: false, scope: 'family' } } as never)
+    }
     if (url === '/checkins/stats') return Promise.resolve({ data: stats ?? statsFixture() } as never)
     /*
      * 单张详情（2026-10-15：抽屉里能看到最新评论、拿到 canEdit/canDelete）。
@@ -93,12 +103,13 @@ function mockGet({ family, wall, stats, detail }: { family: Family | null; wall?
     if (one) {
       if (detail === null) return Promise.reject(new Error('这张照片不存在'))
       const fallback = wall?.items.find(item => item.id === decodeURIComponent(one[1]))
+        ?? mineWall?.items.find(item => item.id === decodeURIComponent(one[1]))
       return Promise.resolve({ data: detail ?? fallback ?? entry({ id: decodeURIComponent(one[1]) }) } as never)
     }
     // 照片：给一个空图片 blob，让 <img> 能进入已加载状态
     if (url.startsWith('/checkins/photos/')) return Promise.resolve({ data: new Blob(['x'], { type: 'image/png' }) } as never)
     throw new Error(`未预期的请求：${url}`)
-  })
+  }) as never)
 }
 
 beforeEach(() => {
@@ -580,4 +591,50 @@ it('删自己的评论：点「删」直接发（可再写、不必弹框确认�
   fireEvent.click(screen.getByRole('button', { name: '删' }))
   await waitFor(() => expect(remove).toHaveBeenCalledWith('/checkins/comments/c2'))
   await waitFor(() => expect(useToasts.getState().items.some(item => item.text === '删掉了')).toBe(true))
+})
+
+/*
+ * 两个视角**各自取数 + 整屏左右滑**（用户 2026-10-16：「还有我的打卡页面，也要 tab 能互相滑动，
+ * 整屏的」「滑动时只滑动主题内容，tab 和操作区域不能动」）。
+ *
+ * 三件事要钉住：返回/标题/段控/拍照按钮**在固定区里**（不在可滑的那一层里）、
+ * 两个视角是**两页**（各自取数、两个请求）、点段控能换过去。
+ */
+it('打卡墙：页头与段控/拍照按钮都在固定区里，可滑的那一层只有照片墙', async () => {
+  mockGet({ family: familyFixture(), wall: { items: [entry()], total: 1, hasMore: false, scope: 'family' } })
+  renderWall()
+  await screen.findByText('家庭打卡墙')
+
+  const fixed = document.querySelector('.page__fixed') as HTMLElement
+  const body = document.querySelector('.page__body') as HTMLElement
+  // 固定的那一块：返回键、标题、段控、拍照入口
+  expect(fixed.querySelector('.page-back')).toBeTruthy()
+  expect(fixed.querySelector('.checkin-add')).toBeTruthy()
+  expect(fixed.textContent).toContain('全家')
+  expect(fixed.textContent).toContain('只看我的')
+  // 可滑的那一层：照片墙在里面，而上面那几样都不在
+  expect(body.querySelector('.checkin-grid')).toBeTruthy()
+  expect(body.querySelector('.checkin-add')).toBeNull()
+  expect(body.querySelector('.segmented')).toBeNull()
+})
+
+it('打卡墙：两个视角是**两页**，各自取一次数（跟手拖到一半邻页要画得出来）', async () => {
+  const get = mockGet({
+    family: familyFixture(),
+    wall: { items: [entry({ id: 'ck-family', note: '全家的' })], total: 1, hasMore: false, scope: 'family' },
+    mineWall: { items: [entry({ id: 'ck-mine', note: '只有我的' })], total: 1, hasMore: false, scope: 'mine' },
+  })
+  renderWall()
+  await screen.findByText('全家的')
+
+  /*
+   * 两个请求都发出去过（`family=true` 与 `family=false`）——这是"每一页各自取数"的证据。
+   * 「只看我的」那一份**在点之前就已经在取**：`SwipePager` 会在拖动时挂邻居，
+   * 而这里断言的是"两个视角是两份数据"，不是"什么时候取"。
+   */
+  fireEvent.click(screen.getByRole('button', { name: '只看我的' }))
+  expect(await screen.findByText('只有我的')).toBeTruthy()
+
+  const calls = get.mock.calls.filter(([url]) => url === '/checkins')
+  expect(calls.some(([, config]) => (config as { params?: { family?: string } })?.params?.family === 'false')).toBe(true)
 })

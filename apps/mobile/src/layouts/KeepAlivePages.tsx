@@ -7,7 +7,7 @@ import {
   type Location,
   type NavigationType,
 } from 'react-router-dom'
-import { pageKeyOf } from '@/lib/scroll-memory'
+import { pageIdentityOf } from '@/lib/scroll-memory'
 import { evictKeys } from './keep-alive.rules'
 
 /**
@@ -32,6 +32,18 @@ import { evictKeys } from './keep-alive.rules'
  * 所以详情页（`/order/:mealKey`、`/recipes/:id`）缓存起来也是对的。
  *
  * **② 缓存不能无限涨**：留最多 `MAX_CACHED_PAGES` 页，超了丢最久没用过的（见 keep-alive.rules）。
+ *
+ * ### 缓存按**路径**分，不按查询串分（2026-10-16 改，D-091）
+ *
+ * 键是 `pageIdentityOf`（只有 pathname）。查询串在本项目里是**页内状态**——
+ * 「我的菜谱」三个 tab、菜谱小书的品类、冰箱「能做点什么」的筛选都写在里面——
+ * 按整条地址分键的话，**换一个 tab 就等于把整页卸载重挂**：跟手滑到一半抬手时，
+ * 正在播落位动画的那一份被新实例替换掉（动画根本播不出来，用户看到的是一次硬切），
+ * 而且每切一次 tab 就在缓存里多留一份整页 DOM。
+ * 这与 `use-page-turn` 里的判断同源（「换页」看 pathname，不看整条地址，D-077）。
+ *
+ * 滚动位置**仍然按整条地址记**（在 `TabLayout` 里，用 `pageKeyOf`）：那是"用户的浏览位置"，
+ * 菜谱小书每个品类各记各的滚到哪儿了，正是 D-083 要的。两个键回答两个问题，别合并。
  *
  * ### 藏起来的那一页仍然是"活"的
  *
@@ -58,7 +70,7 @@ export default function KeepAlivePages({ activeTurnClass }: { activeTurnClass: s
   const outlet = useOutlet()
   const location = useLocation()
   const navigationType = useNavigationType()
-  const key = pageKeyOf(location)
+  const key = pageIdentityOf(location)
 
   /*
    * 缓存写在渲染期而不是 effect 里：`useOutlet()` 拿到的元素**只在当前这次渲染有效**

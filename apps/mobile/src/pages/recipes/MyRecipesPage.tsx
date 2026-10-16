@@ -7,6 +7,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import FilterTabs from '@/components/ui/FilterTabs'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
+import SwipePager from '@/components/ui/SwipePager'
 import { toast } from '@/components/ui/toast'
 import { readBackLink } from '@/pages/back-link'
 import DishCard from '@/pages/kitchen/components/DishCard'
@@ -62,36 +63,58 @@ export default function MyRecipesPage() {
   const raw = params.get('tab')
   const tab: TabKey = isTabKey(raw) ? raw : 'cooked'
 
-  return (
-    <Page>
-      <div className="pscreen my-recipes">
-        <Link className="page-back" to={back.to}>← {back.label}</Link>
-        <PageHeader title="我的菜谱" subtitle="我做过、收藏和写下的菜" art="recipes" />
+  /*
+   * tab 状态进 URL（见文件头）。用 `replace` 而不是 push：在三个 tab 之间来回点
+   * 不该在浏览器历史里堆一串记录（用户按返回时想回的是"上一页"，不是"上一个 tab"）。
+   */
+  const changeTab = (key: string) => setParams(key === 'cooked' ? {} : { tab: key }, { replace: true })
 
-        {/*
-          tab 状态进 URL（见文件头）。用 `replace` 而不是 push：在三个 tab 之间来回点
-          不该在浏览器历史里堆一串记录（用户按返回时想回的是"上一页"，不是"上一个 tab"）。
-        */}
-        {/*
-          三个 tab 的**内容**交给 `FilterTabs` 按页画：它自己就带上了跟手翻页
-          （用户 2026-10-15：「我的菜谱中收藏、我的菜谱这种 tab 页需要能左右滑动切换」，
-          随后又要求「要跟随手指拖动，滑到中间时，两个页是都能看见的」）。
-          所以这里给的是"按 key 画"而不是"只画当前那一个"——跟手拖到一半时邻居那页也要画得出来
-          （它自己的请求就此发出去、由 react-query 缓存住，第二次滑就是现成的）。
-          滑动与点 tab 走同一个 onChange（只改查询串、`replace: true` 不堆历史）。
-        */}
-        <FilterTabs
-          items={TABS.map((item) => ({ key: item.key, title: item.title }))}
-          activeKey={tab}
-          onChange={(key) => setParams(key === 'cooked' ? {} : { tab: key }, { replace: true })}
-          renderPanel={(key) => {
-            const from = `${location.pathname}${location.search}`
-            if (key === 'favorites') return <FavoritesList from={from} />
-            if (key === 'mine') return <OwnRecipesList />
-            return <CookedList from={from} />
-          }}
-        />
-      </div>
+  return (
+    /*
+     * 「页头不动、只滚主体」（D-091，用户 2026-10-16「滑动时只滑动主题内容，tab 和操作区域不能动」）：
+     * 返回键 / 标题 / tab 条 / 「＋ 新建菜谱」那一行都交给 `fixed`，**只有列表滚**。
+     *
+     * 「＋ 新建菜谱」也进来是有意的：它是这一页的**动作**（用户选的口径里"页面级操作行"就包含它），
+     * 翻到「做过的」或「收藏的」时想写一道新菜，不该先滚回顶上再点。
+     */
+    <Page
+      fixed={(
+        <div className="pscreen my-recipes">
+          <Link className="page-back" to={back.to}>← {back.label}</Link>
+          <PageHeader title="我的菜谱" subtitle="我做过、收藏和写下的菜" art="recipes" />
+          {/*
+            这里只要**tab 条**（不给 `renderPanel`）：能滑的那一组内容在下面那个
+            `SwipePager` 里——它要占满剩余高度（`fill`），而 tab 条属于固定区。
+          */}
+          <FilterTabs
+            items={TABS.map((item) => ({ key: item.key, title: item.title }))}
+            activeKey={tab}
+            onChange={changeTab}
+          />
+          <div className="my-recipes__top">
+            <Link className="my-recipes__new" to="/recipes/new">＋ 新建菜谱</Link>
+          </div>
+        </div>
+      )}
+    >
+      {/*
+        三个 tab 的**内容**交给 `SwipePager`：跟手翻页（用户 2026-10-15），
+        整屏（`fill`，用户 2026-10-16）。所以这里给的是"按 key 画"而不是"只画当前那一个"
+        ——跟手拖到一半时邻居那页也要画得出来（它自己的请求就此发出去、由 react-query 缓存住）。
+        滑动与点 tab 走同一个 onChange（只改查询串、`replace: true` 不堆历史）。
+      */}
+      <SwipePager
+        keys={TABS.map((item) => item.key)}
+        activeKey={tab}
+        onChange={changeTab}
+        fill
+        renderPanel={(key) => {
+          const from = `${location.pathname}${location.search}`
+          if (key === 'favorites') return <FavoritesList from={from} />
+          if (key === 'mine') return <OwnRecipesList />
+          return <CookedList from={from} />
+        }}
+      />
     </Page>
   )
 }
@@ -139,10 +162,12 @@ function OwnRecipesList() {
 
   return (
     <>
-      <div className="my-recipes__top">
-        <Link className="my-recipes__new" to="/recipes/new">＋ 新建菜谱</Link>
-        {recipes.data && <span className="my-recipes__count">共 {total} 道</span>}
-      </div>
+      {/*
+        数量这时候走**自己的**一行（不再和「＋ 新建菜谱」同一行）：那一行搬进固定区了，
+        而数量属于这一页的内容（数据在手边，提上去要多一次查询或把状态提上去）。
+        位置对齐另外两个 tab 的计数——都在网格上方、靠右，换 tab 时眼睛不用重新找。
+      */}
+      {recipes.data && <p className="my-recipes__summary">共 {total} 道</p>}
 
       {recipes.isPending && (
         <RecipeStatus title="正在找你自己传的菜…" loading>马上就好</RecipeStatus>

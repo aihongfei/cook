@@ -5,6 +5,62 @@
   min-height: 100%;
 }
 
+/*
+ * 「页头不动、只滚主体」的页面骨架（D-091，用户 2026-10-16「只能滚动主题内容」）。
+ *
+ * 三层的关系：
+ * - `.page--fill`：撑满可视高度，好让主体能算出"还剩下多少高度"；
+ * - `.page__fixed`：`sticky top:0` —— 往下滚时钉在容器顶边不动，内容从它**下面**穿过去。
+ *   它必须不透明（铺外壳同一份纸色 + 颗粒），否则穿过去的内容会透出来；
+ * - `.page__body`：主体。`min-height` 那条算式是"至少占满剩下的高度"——
+ *   于是**内容不足一屏时页脚与空态仍然落在该在的位置**，而内容长时它自然被顶高、正常滚。
+ *
+ * 为什么用 `sticky` 而不是"把外壳拆成两层各自滚"：见 `Page.tsx` 的注释——
+ * 滚动位置记忆 / 页面缓存 / 无限滚动哨兵三件事都挂在**外壳那一个**滚动容器上。
+ *
+ * ⚠️ `z-index: 2`：钉住的那一层要盖住下面滚上来的卡片。
+ * 卡片自己在 `.dish-row` 之类的地方没有更高的 z-index，2 够用且不至于盖住弹层
+ * （弹层是 1000/1010 那一套，见 R-059 定的全站顺序）。
+ */
+.page--fill {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  /* 页脚留白只有主体里那一份，这里不要让出多余的高度 */
+  padding-bottom: 0;
+}
+
+.page__fixed {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+  background: var(--color-cream);
+  background-image: var(--paper-grain);
+  background-size: var(--paper-grain-size);
+}
+
+.page__body {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  /*
+   * 主体自己那一份底部留白。原来在外层 `.page` 上（24px），
+   * 拆成两层之后要跟着内容走，否则短页面下方会多出一条（用户 2026-10-13 报过同类）。
+   */
+  padding-bottom: 24px;
+}
+
+/*
+ * 主体里最后一截如果是**撑高的空态**（`.empty-state` 或 `.recipe-status`），
+ * 让它把剩下的高度吃满：空白留在下面还是居中，用户看的是同一件事——
+ * "这一页没有东西"，而贴顶会让它看着像"下面还有内容没加载出来"。
+ */
+.page__body > .recipe-status:only-child,
+.page__body > .empty-state:only-child {
+  flex: 1 0 auto;
+}
+
 /* 左右 16px 栏距（页面按需包裹，便于 hero 通栏） */
 .pad {
   padding-inline: var(--spacing-page);
@@ -695,6 +751,37 @@
  */
 .swipe-pager__panel:not(.is-active) {
   pointer-events: none;
+}
+
+/*
+ * **整屏**模式（`fill`，用户 2026-10-16：「整屏滑动，并高度要自适应」）。
+ *
+ * 三件事一起成立才是用户要的效果：
+ * ① 翻页区**撑满父元素剩下的高度**（父元素是 `Page` 的 `page__body`，它自己 flex: 1）——
+ *    不撑的话可滑区域只有内容那么高，短内容时是窄窄一条，滑起来不像翻页；
+ * ② **每一页至少占满这块高度**（`min-height`）：于是"整屏滑过去"成立，
+ *    短内容那一页下面是干净的背景，而不是"只有半屏高的一段"；
+ * ③ 内容比屏幕高时**照旧被顶高**（`min-height` 不是 `height`）——页面滚的是整页，
+ *    卡片一个字都不会被裁掉，也不会多出一个内层滚动条（这正是当初否决定高轮播的理由，
+ *    见 `lib/tab-swipe.rules.ts` 文件头）。
+ *
+ * ⚠️ 这里**没有**把纵向溢出剪掉：拖动时邻居可能比当前页高，剪了会把它的内容吃掉
+ * （文件头记着这条）。因为邻居只在拖动与落位那 300 毫秒里存在，静止时的高度只由当前页决定，
+ * 所以"菜谱没超出屏幕时也不会多出可滚的空白"。
+ */
+.swipe-pager--fill {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.swipe-pager--fill .swipe-pager__track {
+  width: 100%;
+  height: 100%;
+}
+
+.swipe-pager--fill .swipe-pager__panel {
+  min-height: 100%;
 }
 
 /*

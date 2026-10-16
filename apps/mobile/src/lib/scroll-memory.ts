@@ -11,6 +11,26 @@ export function pageKeyOf(location: { pathname: string; search?: string }): stri
   return `${location.pathname}${location.search ?? ''}`
 }
 
+/**
+ * 「这一页是**哪个页面**」= 只有路径（查询串不算）。
+ *
+ * 与 `pageKeyOf` 的分工是这一刀（D-091）才明确的，两者回答的是两个不同的问题：
+ *
+ * - `pageKeyOf`（路径 + 查询串）回答「**用户的浏览位置**」：菜谱小书按品类分的那几页
+ *   各自记各自滚到哪儿了（D-083 定的），所以要精确到查询串；
+ * - `pageIdentityOf`（只有路径）回答「**这是同一个页面吗**」：页面缓存按它来分。
+ *
+ * 为什么缓存必须按路径分（用户 2026-10-16 要「整屏滑动」时暴露的）：
+ * 查询串在本项目里是**页内状态**（「我的菜谱」三个 tab、菜谱小书的品类、能做点什么的筛选），
+ * 而页内状态一变就换一个缓存实例的话——**换 tab 等于把整页卸载重挂**。
+ * 表现有两层：跟手滑到一半抬手时，正在播落位动画的那一页被换掉（动画根本播不出来，
+ * 用户看到的是一次硬切）；而且每切一次 tab 就多留一份整页 DOM 在缓存里。
+ * 这与 `use-page-turn` 里那条判断是同一个道理（「换页」看 pathname，不看整条地址，D-077）。
+ */
+export function pageIdentityOf(location: { pathname: string }): string {
+  return location.pathname
+}
+
 export interface ScrollMemory {
   /** 这一页上次停在哪；没记过就是 0（新页面从头看） */
   read(key: string): number

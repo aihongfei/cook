@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { createScrollMemory, pageKeyOf } from './scroll-memory'
+import { createScrollMemory, pageIdentityOf, pageKeyOf } from './scroll-memory'
 
 /*
  * 滚动位置记忆的纯判据（用户 2026-10-14：「我从下方点进去，再返回就滚动到最上面了，
@@ -19,6 +19,27 @@ it('页面键 = 路径 + 查询串：品类/菜系这些存进地址的筛选各
   expect(pageKeyOf({ pathname: '/recipes', search: '?category=汤' })).not.toBe(
     pageKeyOf({ pathname: '/recipes', search: '?category=主食' }),
   )
+})
+
+it('页面身份 = 只有路径：换页内 tab 不换页面实例（否则跟手落位时整页被换掉、动画播不出来）', () => {
+  /*
+   * 用户 2026-10-16 要「整屏滑动」时暴露的：查询串在本项目里是页内状态
+   * （我的菜谱三个 tab、菜谱小书品类、冰箱筛选），页面缓存按整条地址分键的话，
+   * 换一个 tab 就是**换一个缓存实例**——抬手落位那一刻正在播动画的那一份被替掉。
+   */
+  expect(pageIdentityOf({ pathname: '/recipes/mine' })).toBe('/recipes/mine')
+  expect(pageIdentityOf({ pathname: '/recipes/mine' })).toBe(pageIdentityOf({ pathname: '/recipes/mine' }))
+  // 带不带查询串都是**同一个页面**
+  expect(pageIdentityOf({ pathname: '/recipes/mine' })).toBe('/recipes/mine')
+  // 不同的路径仍然是不同的页面（这条不能松：松了缓存会互相覆盖）
+  expect(pageIdentityOf({ pathname: '/recipes' })).not.toBe(pageIdentityOf({ pathname: '/kitchen' }))
+  /*
+   * 与 `pageKeyOf` 的差别就在这里——**两个键都必须存在**：
+   * 一个回答"用户的浏览位置"（要精确到查询串），一个回答"这是同一个页面吗"（只看路径）。
+   * 把两者合并成一个（无论合成哪一个）都会坏掉一半：合并到短键 → 品类各自的位置记不住；
+   * 合并到长键 → 换 tab 卸载重挂、滑动动画播不出来。
+   */
+  expect(pageIdentityOf({ pathname: '/recipes' })).not.toBe(pageKeyOf({ pathname: '/recipes', search: '?category=汤' }))
 })
 
 it('没记过就是 0（新页面从头看），记过就是记过的那个数', () => {

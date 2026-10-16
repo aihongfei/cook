@@ -5118,3 +5118,95 @@ adb shell dumpsys activity activities | grep topResumedActivity
 2. **`aapt2` 在 build-tools 下**、不在 platform-tools 里：`ls ~/Library/Android/sdk/build-tools | tail -1` 取最新一版；
 3. **`adb` 不在默认 PATH 里**（`~/Library/Android/sdk/platform-tools`），每条 shell 都要显式加；
 4. **模拟器的电池/相机初始化比应用慢**：`am start` 之后等 6 秒再取 PID，否则 `pidof` 拿到空串、forward 会绑到一个不存在的端口。
+
+## R-084 「页头固定 + 整屏跟手翻页」怎么验（D-091 / R-72 配套，✅ 已验证，2026-10-16）
+
+### 一、为什么这一条必须有
+
+这一刀改的是**布局与手势**，而两者都有"看着对"的假象：
+
+1. **固定区**：截图里它就在顶上——看不出"滚动时它会不会跟着走"；必须**滚一下再量**它的位置；
+2. **整屏**：翻页区撑满没有，要看 `scrollHeight` 与 `clientHeight` 的关系，
+   而不是"内容看着挺满"；**"菜谱没超出屏幕时不要空白滑动"这一条正是这个比值**；
+3. **跟手**：一次拖动**至少要取三个时刻**——拖到一半（两页同时在屏）、抬手瞬间（过渡打开）、
+   落位之后（只剩新那一页）。只看终态的话，"硬切"与"带动画翻过去"长得一模一样；
+4. **换 tab 不重挂载**：动画能不能播，取决于**动画的宿主还在不在**（R-72）；
+   它只在落位那 300 毫秒里看得出来。
+
+### 二、纯判据（先红后绿那一条）
+
+```bash
+export PATH="$HOME/.nvm/versions/node/v26.7.0/bin:$PATH"
+cd /Users/aihf/Downloads/work/cook/apps/mobile
+npx vitest run src/lib/scroll-memory.test.ts src/layouts/KeepAlivePages.test.tsx src/components/ui/SwipePager.test.tsx
+
+# 把 KeepAlivePages 的键换回 pageKeyOf（按整条地址），"换 tab 不换实例"那条必须红：
+#   sed -i '' 's/pageIdentityOf/pageKeyOf/g' src/layouts/KeepAlivePages.tsx && npx vitest run src/layouts/KeepAlivePages.test.tsx
+#   验完记得改回来（git checkout 那一个文件最省事）
+```
+
+### 三、浏览器里量三个时刻（不需要装机，手势用触摸事件派发）
+
+```js
+// ① 固定区与可滑区各占多少，以及"有没有多出可滚的高度"
+const r = (s) => { const el = document.querySelector(s); const b = el.getBoundingClientRect();
+  return { top: Math.round(b.top), bottom: Math.round(b.bottom) } };
+const body = document.querySelector('.tab-layout__body');
+({ fixed: r('.page__fixed'), pager: r('.swipe-pager--fill'),
+   scrollH: body.scrollHeight, clientH: body.clientHeight })   // 相等 = 没有空白可滑
+
+// ② 滚一下，固定区必须一动不动（这是"只能滚动主题内容"的正面证据）
+const fixed = document.querySelector('.page__fixed');
+const before = fixed.getBoundingClientRect().top;
+body.scrollTop = 80;  // 等一帧再读
+fixed.getBoundingClientRect().top === before   // 必须相等
+
+// ③ 拖到一半：两页同时在屏（触摸事件，比鼠标那条路稳——见下面"踩过的坑"）
+const pager = document.querySelector('.swipe-pager--fill');
+const rect = pager.getBoundingClientRect();
+const y = Math.round(rect.top + rect.height / 2);
+const touch = (x) => new Touch({ identifier: 1, target: pager, clientX: x, clientY: y, pageX: x, pageY: y });
+const fire = (type, x) => pager.dispatchEvent(new TouchEvent(type, {
+  bubbles: true, cancelable: true,
+  touches: type === 'touchend' ? [] : [touch(x)],
+  targetTouches: type === 'touchend' ? [] : [touch(x)],
+  changedTouches: [touch(x)],
+}));
+fire('touchstart', 300);
+[270, 240, 210, 180, 150].forEach((x) => fire('touchmove', x));
+// 此刻两页都该在 DOM 里、且**各自露出一部分**（onScreen 都 > 0）
+[...document.querySelectorAll('.swipe-pager__panel')].map((el) => {
+  const b = el.getBoundingClientRect();
+  return { key: el.dataset.panelKey, onScreen: Math.round(Math.max(0, Math.min(360, b.right) - Math.max(0, b.left))) };
+});
+fire('touchend', 150);   // 抬手 → 落位
+```
+
+实测输出（2026-10-16，360×844）：
+
+| 页面 | 固定区 | 可滑区 | 拖动中两页在屏 | 落位 |
+| --- | --- | --- | --- | --- |
+| 我的菜谱（浏览器） | 0–202 | 202–762，`scrollH = clientH = 786` | cooked 220 + favorites 140 px | → 原创的 |
+| 我的菜谱（模拟器） | 24–226（让开状态栏） | 226–808 | cooked 261 + favorites 99 px | → 收藏的 |
+| 打卡墙（模拟器） | 24–246 | 246–808 | family 251 + mine 109 px | → 只看我的（段控高亮跟着变） |
+
+### 四、模拟器上还要多验一条：**滚动时固定区不动**
+
+```bash
+export PATH="$HOME/Library/Android/sdk/platform-tools:$PATH"
+PID=$(adb shell pidof com.yushan.cook | tr -d '\r'); adb forward tcp:9222 localabstract:webview_devtools_remote_$PID
+# 页面里的量法与上面一样；**注意先按可见性过滤**（keep-alive 下同名元素有多份，R-081）：
+#   const page = document.querySelector('.tab-layout__page:not([hidden])')
+```
+
+### 五、踩过的坑
+
+1. **`keep-alive` 下同名元素有多份**（R-081 记过，这一刀又踩一次）：直接 `document.querySelector('.page__fixed')`
+   会拿到**被藏起来的**那一页，量出来全是 0。**一律先取可见的那一层**再往下查；
+2. **鼠标那条跟手路在合成事件下不稳**：`pointerdown` 里 `setPointerCapture` 对合成指针会抛
+   （事件目标随即变成别的元素），拖动看着"完全没反应"。**验手势用触摸事件**，
+   鼠标那条路留给真鼠标（`SwipePager` 里本来就分开处理）；
+3. **不要在 `evaluate` 里串长 await**（`requestAnimationFrame` 循环 + 多次 sleep）：
+   每次 `evaluate` 只有 3 秒预算，超时看到的报错像"页面卡住了"，其实是探针自己写太长。
+   要观察一段时间里的变化，用 **MutationObserver 记日志**，下一格再读（`window.__log`）；
+4. **模拟器第一次开机要等**：`sys.boot_completed` 变 1 之后再装包，否则 `adb install` 偶发失败。

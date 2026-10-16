@@ -35,10 +35,12 @@ function Harness({
   initial = 'a',
   onSwitched,
   panelExtra,
+  fill,
 }: {
   initial?: string
   onSwitched?: (key: string) => void
   panelExtra?: (key: string) => React.ReactNode
+  fill?: boolean
 } = {}) {
   const [active, setActive] = useState(initial)
   return (
@@ -48,6 +50,7 @@ function Harness({
       <SwipePager
         keys={KEYS}
         activeKey={active}
+        fill={fill}
         onChange={(key) => {
           onSwitched?.(key)
           setActive(key)
@@ -243,6 +246,30 @@ it('鼠标也能拖（开发时在桌面浏览器里试的那条路）', () => {
   fireEvent.pointerUp(root(), { pointerType: 'mouse', clientX: 100, clientY: 400 })
 
   expect(onSwitched).toHaveBeenCalledWith('b')
+})
+
+/*
+ * **整屏**（`fill`，用户 2026-10-16：「改成三个 tab 可以互相滑动的，整屏滑动，并高度要自适应，
+ * 菜谱没有超出屏幕时不要空白滑动」）。
+ *
+ * jsdom 没有布局引擎（量不出"剩下的高度是多少"），所以这里只能钉住**类名与结构**
+ * ——真正的几何由浏览器与模拟器实测（见 RUNBOOK）。能钉住的是这三条：
+ * ① `fill` 真的挂上去了（那是 CSS 里 `flex: 1` + `min-height: 100%` 唯一的开关）；
+ * ② 每一页仍然是同一套结构（没有为整屏另起一套 DOM）；
+ * ③ **没传 `fill` 时一个字都不变**（其它页面的滑动仍是"内容多高就多高"）。
+ */
+it('fill：挂上整屏那一类，每一页的结构不变（不是另起一套 DOM）', () => {
+  render(<Harness fill />)
+
+  expect(root().className).toContain('swipe-pager--fill')
+  // 每一页还是 `.swipe-pager__panel`，而且静止时仍然只有当前页
+  expect(panels()).toEqual(['a'])
+})
+
+it('不传 fill 时不挂那个类（其它页面的滑动不受影响）', () => {
+  render(<Harness />)
+
+  expect(root().className).not.toContain('swipe-pager--fill')
 })
 
 describe('甩（速度那一半）', () => {

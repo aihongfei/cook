@@ -64,6 +64,20 @@ interface SwipePagerProps {
   /** 画第 key 页的内容。邻居页也会被调用（那就是"滑到中间两页都能看见"），页面要保证能画 */
   renderPanel: (key: string) => ReactNode
   className?: string
+  /**
+   * **整屏**：让这套翻页占满父元素剩下的高度（用户 2026-10-16：「改成三个 tab 可以互相滑动的，
+   * 整屏滑动，并高度要自适应」）。
+   *
+   * 不传时的高度是"当前那一页内容有多高"——短内容会把可滑的区域缩成窄窄一条，
+   * 滑动看着不像翻页（像是卡片自己在动）、在空白处划也没有反应。
+   * 传了之后：翻页区撑到屏幕底部，**每一页至少占满这块高度**（短内容不留"半数高度"的观感），
+   * 于是"整屏滑过去"成立；而内容比屏幕高时它照旧被顶高、页面正常滚
+   * （`min-height` 不是 `height`，长内容一个字都不会被裁）。
+   *
+   * 它要求父元素能算出剩余高度（`Page` 的 `page__body` 就是一个 flex 列），
+   * 所以只在与固定页头同一套骨架里用（见 `Page.tsx`）。
+   */
+  fill?: boolean
 }
 
 /**
@@ -92,6 +106,7 @@ export default function SwipePager({
   onChange,
   renderPanel,
   className,
+  fill,
 }: SwipePagerProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
@@ -372,7 +387,7 @@ export default function SwipePager({
   return (
     <div
       ref={rootRef}
-      className={['swipe-pager', className].filter(Boolean).join(' ')}
+      className={['swipe-pager', fill && 'swipe-pager--fill', className].filter(Boolean).join(' ')}
       onClickCapture={onClickCapture}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

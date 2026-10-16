@@ -13,9 +13,9 @@
    */
   padding-top: var(--safe-top);
   background: var(--color-cream);
-  /* 页面背景加一点纸感颗粒，与笔绘素材统一 */
-  background-image: radial-gradient(rgb(190 160 120 / 10%) 1px, transparent 1px);
-  background-size: 5px 5px;
+  /* 页面背景加一点纸感颗粒，与笔绘素材统一。值与"钉住的页头"共用一份（见 tailwind.css 的 token） */
+  background-image: var(--paper-grain);
+  background-size: var(--paper-grain-size);
 }
 
 .tab-layout__body {
