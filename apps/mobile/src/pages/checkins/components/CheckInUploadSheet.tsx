@@ -2,12 +2,15 @@ import { useRef, useState } from 'react'
 import { apiErrorMessage } from '@/api/client'
 import { shrinkImage, useCheckInStats, useUploadCheckIn } from '@/api/checkins'
 import BottomSheet, { type BottomSheetHandle } from '@/components/ui/BottomSheet'
+import PhotoSourceButtons from '@/components/ui/PhotoSourceButtons'
 import { toast } from '@/components/ui/toast'
 
 /**
  * 打卡上传（M9 / F9-07、F9-08）。
  *
- * - 选图/拍照（`accept="image/*"` + `capture` 之外由系统决定，安卓上会同时给相册与相机）；
+ * - **两个入口**：`capture="environment"` 的「拍一张」与不带 capture 的「从相册选」
+ *   （用户 2026-10-16：「打卡拍照…现在没有拍照功能只能选择照片」——原先只有一个
+ *   不带 capture 的控件，进不进相机全看系统，多数机型只进相册）；
  * - 选中后在浏览器里**先缩到 1600px** 再传（手机原图 3–10MB → 通常 < 500KB）；
  * - 可以挂到某一餐（只列「已做好」的餐）：从点单卡进来时预先选中那一餐。
  *
@@ -29,7 +32,6 @@ export default function CheckInUploadSheet({
 }) {
   const stats = useCheckInStats()
   const upload = useUploadCheckIn()
-  const fileRef = useRef<HTMLInputElement>(null)
   // 收起走抽屉自己的退场动画（见 BottomSheet 里那段 ⚠️）：直接调 onClose 会让抽屉"啪"地消失
   const sheet = useRef<BottomSheetHandle>(null)
   const closeSheet = () => (sheet.current ? sheet.current.close() : onClose())
@@ -76,22 +78,21 @@ export default function CheckInUploadSheet({
     <BottomSheet ref={sheet} visible={visible} title="打卡拍照" onClose={onClose}>
       <p className="checkin-sheet__hint">拍下今天做的那道菜。家里的每个人都能看到，一起攒这本相册。</p>
 
-      <input
-        ref={fileRef}
-        className="checkin-sheet__file"
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        aria-label="选择照片"
-        onChange={(event) => {
-          void pick(event.target.files?.[0])
-          // 清掉 value：否则连着选同一个文件不会再触发 change
-          event.target.value = ''
-        }}
+      {/*
+        两个入口分开（用户 2026-10-16：「我的打卡拍照…现在没有拍照功能只能选择照片」）：
+        原先只有一个不带 `capture` 的控件，能否进相机完全看系统给不给，
+        多数机型只进相册——所以按钮上写「选一张照片 / 拍照」是**不成立的承诺**。
+        现在「拍一张」带 `capture`、「从相册选」不带，两个都在（见 `PhotoSourceButtons`）。
+      */}
+      <PhotoSourceButtons
+        id="checkin-upload"
+        busy={preparing}
+        cameraLabel={preview ? '重拍一张' : '拍一张'}
+        onPick={(file) => void pick(file)}
       />
 
-      <button type="button" className="checkin-sheet__picker" disabled={preparing} onClick={() => fileRef.current?.click()}>
-        {preparing ? '正在处理照片…' : preview ? '换一张' : '选一张照片 / 拍照'}
-      </button>
+      {/* 缩图要花一两秒，得说出来——原来那句话挂在那颗被禁用的按钮上，按钮拆成两颗后单独留一句 */}
+      {preparing && <p className="checkin-sheet__hint">正在处理照片…</p>}
 
       {preview && <img className="checkin-sheet__preview" src={preview} alt="待上传的照片预览" />}
 

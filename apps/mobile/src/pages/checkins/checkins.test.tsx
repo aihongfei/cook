@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
+import * as checkins from '@/api/checkins'
 import type { CheckIn, CheckInComment, CheckInStats, CheckInWall } from '@/api/checkins'
 import type { Family } from '@/api/family'
 import { Toaster, useToasts } from '@/components/ui/toast'
@@ -180,6 +181,54 @@ it('有更多照片时说清只显示了最近这些', async () => {
   renderWall()
 
   expect(await screen.findByText(/只显示最近 1 张/)).toBeTruthy()
+})
+
+it('打卡上传：两个入口各管一条路——「拍一张」带 capture（直接开相机），「从相册选」不带（用户 2026-10-16：「没有拍照功能只能选择照片」）', async () => {
+  mockGet({ family: familyFixture(), wall: { items: [], total: 0, hasMore: false, scope: 'family' } })
+  renderWall()
+
+  const openButton = await screen.findByRole('button', { name: '打卡拍照' }) as HTMLButtonElement
+  await waitFor(() => expect(openButton.disabled).toBe(false))
+  fireEvent.click(openButton)
+  await screen.findByText(/拍下今天做的那道菜/)
+
+  /*
+   * 盯 `capture` 这个属性而不是"点了会不会开相机"：jsdom 里没有相机，
+   * 能否进相机由**系统**看这个属性决定。原先这里只有一个不带 capture 的控件，
+   * 按钮上却写着「选一张照片 / 拍照」——那句承诺不成立（多数机型只进相册）。
+   */
+  const camera = screen.getByLabelText('拍一张') as HTMLInputElement
+  const album = screen.getByLabelText('从相册选') as HTMLInputElement
+  expect(camera.type).toBe('file')
+  expect(camera.getAttribute('capture')).toBe('environment')
+  expect(camera.accept).toBe('image/*')
+  expect(album.getAttribute('capture')).toBeNull()
+  expect(camera.id).not.toBe(album.id)
+  expect(document.querySelector(`label[for="${camera.id}"]`)?.textContent).toBe('拍一张')
+  expect(document.querySelector(`label[for="${album.id}"]`)?.textContent).toBe('从相册选')
+})
+
+it('打卡上传：**两个入口都能出图**（拆成两个控件后，"从相册选"那条不许被弄丢）', async () => {
+  mockGet({ family: familyFixture(), wall: { items: [], total: 0, hasMore: false, scope: 'family' } })
+  renderWall()
+
+  const openButton = await screen.findByRole('button', { name: '打卡拍照' }) as HTMLButtonElement
+  await waitFor(() => expect(openButton.disabled).toBe(false))
+  fireEvent.click(openButton)
+  await screen.findByText(/拍下今天做的那道菜/)
+
+  const shrink = vi.spyOn(checkins, 'shrinkImage').mockResolvedValue('data:image/jpeg;base64,SHRUNK')
+  const file = new File(['x'], 'dish.jpg', { type: 'image/jpeg' })
+
+  // 相册那条路
+  fireEvent.change(screen.getByLabelText('从相册选'), { target: { files: [file] } })
+  await waitFor(() => expect(shrink).toHaveBeenCalledWith(file))
+  expect(await screen.findByAltText('待上传的照片预览')).toBeTruthy()
+
+  // 相机那条路（同一份处理：缩图 → 预览）
+  shrink.mockClear()
+  fireEvent.change(screen.getByLabelText('重拍一张'), { target: { files: [file] } })
+  await waitFor(() => expect(shrink).toHaveBeenCalledWith(file))
 })
 
 it('上传成功后回到「全家」视角（新照片要看得见，不能在"只看我的"里找不到自己刚传的）', async () => {

@@ -878,3 +878,47 @@ F16-10 让 AI 第一次**真的写库**，于是多出一类全新的假证据�
 - **判别要点**：`migrate dev` 是为了"开发时生成迁移 + 保持影子库一致"，它要重置时**先问一句"这是记账问题还是真漂移"**。真漂移（磁盘上的迁移与库结构不一致）才该谈重置，而且那时也该先 `migrate diff` 看清差在哪。
 - **怎么测**：无自动化（这是流程题，不是代码题）——证据是迁移前后 `CheckIn/MealOrder/Recipe` 三张表的条数不变 + 打卡接口验收 67/67（见 `RUNBOOK.md` R-082）。
 - **相关**：`RUNBOOK.md` **R-082**、`DECISIONS.md` **D-089 六**、`services/api/prisma/migrations/20261015140000_checkin_comments/`、`RISKS.md` R-10（同一族：数据/结构与"我以为的状态"不一致）。
+
+## R-71 拍照只能选相册：**清单里少一行声明**，而且它不会随 Capacitor 升级自动补上（✅ 已修，2026-10-16；配套 D-090 / R-083）
+
+### 一、风险本身：一个"不会报错的降级"
+
+`targetSdk ≥ 30` 时应用默认看不见别的应用，`resolveActivity(ACTION_IMAGE_CAPTURE)` 被可见性规则过滤。
+Capacitor 处理带 `capture` 的 file input 时**先用它判有没有相机**，判空就 `return false` → 上层回退成普通文件选择器。
+
+**这个降级的危险之处是它太安静**：
+
+- 不抛异常、不打日志、界面不报错——用户看到的是"点了「拍一张」弹出相册"，
+  看起来像**我们写错了界面**，而去查界面是查不出问题的（界面没错）；
+- 它**只影响带 `capture` 的入口**：不带 capture 的入口本来就走文件选择器，行为完全一样——
+  所以"两个入口都试一遍"也分不出哪个是坏的；
+- 修完之前**任何单测都拦不住**（jsdom 没有相机、也不实现可见性规则），只有装机点一遍才知道。
+
+### 二、为什么它容易再犯
+
+`<queries>` 是**清单里的一行**，而它在代码里没有任何对应物：
+
+- 删掉它，测试全绿、类型检查全过、界面一行都不变——**只有真机上的那一次点击会失效**；
+- Capacitor 主仓 issue #6536 至今 open，即"官方模板里没有这一行"，
+  将来重装依赖 / 重新 `cap add android` / 换机型重新起步时，**这一行可能连同目录一起被覆盖掉**；
+- 它和"入口写没写 `capture`"是**两个独立的必要条件**，各修一半都不生效（D-090 一）。
+
+### 三、判别要点
+
+- **症状**：点「拍一张」出的是相册/文件选择器，而不是取景框；
+- **先看**合并后的清单里有没有 `<queries>`：`android/app/build/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml`；
+- **判据**：装机点一下、看**前台 activity**（`adb shell dumpsys activity activities | grep topResumedActivity`）——
+  是 `com.android.camera2/CaptureActivity`（或机型的相机包）才算真的开了相机，**截图不算**；
+- **别去加 CAMERA 权限**：官方来源里没有一条说它是修法，`isMediaCaptureSupported()` 在没声明时本来返回 true。
+
+### 四、怎么测
+
+- **单测能守住的只有一半**：`capture` 属性在不在、两个入口是不是各自指向不同的控件（`checkins.test.tsx` / `RecipeFormPage.test.tsx` 各一条）；
+- **另一半只能装机**：清单声明是否生效。做法与实测记录见 `RUNBOOK.md` **R-083**；
+- **先红后绿不适用**：这条不是"某段代码写错了"，而是"少了一行声明"——
+  把声明删掉再跑，测试**全绿**（这正是它的危险之处），所以证据只能是真机上那次前台 activity 的变化。
+
+### 五、相关
+
+`DECISIONS.md` **D-090**、`RUNBOOK.md` **R-083**、`apps/mobile/android/app/src/main/AndroidManifest.xml`、
+`apps/mobile/src/components/ui/PhotoSourceButtons.tsx`。

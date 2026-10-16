@@ -5041,3 +5041,80 @@ node services/api/scripts/verify-checkins-http.cjs
 
 那两条残破记账行留着不影响使用（`migrate deploy` 只看成功记录）。硬要清理得动 `_prisma_migrations` 里的行，
 那是一次**手改迁移元数据**的操作，比"多两行没人看的记录"风险大得多。真到必须清的那天，单独开一刀、单独验收。
+
+## R-083 拍照入口怎么验（D-090 / R-71 配套，✅ 已验证，2026-10-16）
+
+### 一、为什么这一条必须有
+
+拍照这件事**三层各错一层都能让用户看到同一个画面**（弹出相册），而它们的修法完全不同：
+
+1. **入口那一层**：控件有没有 `capture`（没有 → 系统自己决定，多数机型进相册）；
+2. **清单那一层**：有没有 `<queries>` 声明 `IMAGE_CAPTURE`（没有 → Capacitor 判不出相机、静默回退）；
+3. **系统那一层**：机器上有没有能响应这个 intent 的应用（模拟器精简镜像可能真没有）。
+
+所以"点了弹出什么"这一个观察**证明不了是哪一层**。要分开验：静态证据（第 1、2 层）+ 前台 activity（第 3 层）。
+
+### 二、两条静态证据（不用装机）
+
+```bash
+cd /Users/aihf/Downloads/work/cook/apps/mobile
+
+# ① 入口：两个控件各不相同，主入口带 capture、次入口不带
+export PATH="$HOME/.nvm/versions/node/v26.7.0/bin:$PATH"
+npx vitest run src/pages/checkins/checkins.test.tsx src/pages/recipes/RecipeFormPage.test.tsx
+
+# ② 清单：合并之后那一段还在（**这一步最容易被漏掉**——它在源码里，但改的是清单）
+cd android && ./gradlew :app:processDebugMainManifest -q    # JAVA_HOME 要 JDK 21
+grep -A 3 "<queries>" app/build/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml
+
+# ③ 装出来的包里也真的带着它（② 只证明到中间产物）
+"$HOME/Library/Android/sdk/build-tools/$(ls ~/Library/Android/sdk/build-tools | tail -1)/aapt2" \
+  dump xmltree app/build/outputs/apk/debug/app-debug.apk --file AndroidManifest.xml | grep -A 4 queries
+```
+
+### 三、装机实测：**看前台 activity，不看截图**
+
+```bash
+export PATH="$HOME/Library/Android/sdk/platform-tools:$HOME/Library/Android/sdk/emulator:$PATH"
+emulator -avd Medium_Phone_API_37.0 -no-snapshot-save -no-boot-anim &   # 等 sys.boot_completed=1
+cd /Users/aihf/Downloads/work/cook/apps/mobile
+export JAVA_HOME="$HOME/Library/Java/JavaVirtualMachines/temurin-21.0.12.1.jdk/Contents/Home"
+export PATH="$JAVA_HOME/bin:$PATH"
+npx vite build --mode development && npx cap sync android
+cd android && ./gradlew assembleDebug && adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb reverse tcp:3000 tcp:3000 && adb reverse tcp:9000 tcp:9000
+adb shell am start -n com.yushan.cook/.MainActivity
+PID=$(adb shell pidof com.yushan.cook | tr -d '\r'); adb forward tcp:9222 localabstract:webview_devtools_remote_$PID
+```
+
+在页面里点入口（`/tmp/cdp.mjs` 用法见 R-062），然后**马上看前台是谁**：
+
+```bash
+node /tmp/cdp.mjs http://127.0.0.1:9222 --run "(() => { document.querySelector('label[for=\"checkin-upload-camera\"]').click(); return 'clicked' })()"
+sleep 4
+adb shell dumpsys activity activities | grep topResumedActivity
+```
+
+实测输出（2026-10-16，Medium_Phone_API_37.0）：
+
+| 点的入口 | `topResumedActivity` | 含义 |
+| --- | --- | --- |
+| 打卡 `.photo-buttons__item`（camera） | `com.android.camera2/com.android.camera.CaptureActivity` | 相机真的被拉起 |
+| 打卡（album） | `com.google.android.photopicker/PhotopickerGetContentActivity` | 对照：相册那条走的是另一条路 |
+| 冰箱 `.fridge-scan__pick`（camera） | `com.android.camera2/com.android.camera.CaptureActivity` | 用户报的那一处 |
+| 菜谱表单（camera） | `com.android.camera2/com.android.camera.CaptureActivity` | 同族第三处 |
+
+### 四、为什么用前台 activity 当判据
+
+- **截图证不了**：一张取景框的截图说明"屏幕上有个相机界面"，说不出是哪个应用开的、也说不清是不是相机类应用；
+- **`dumpsys` 说的是系统的事实**：谁在前台由系统记账，应用改不了它；
+- **顺带带走一个副产品**：这一条同时排除了第 3 层（机器上真有能响应的相机应用）——
+  模拟器 `cmd package query-activities -a android.media.action.IMAGE_CAPTURE` 能列出 `com.android.camera2`，
+  说明"点了没反应"不是这台机器缺相机。
+
+### 五、踩过的坑
+
+1. **`timeout` 命令 macOS 上没有**（那是 GNU coreutils 的），写脚本时用 `&` + `sleep` 或 `gtimeout`；
+2. **`aapt2` 在 build-tools 下**、不在 platform-tools 里：`ls ~/Library/Android/sdk/build-tools | tail -1` 取最新一版；
+3. **`adb` 不在默认 PATH 里**（`~/Library/Android/sdk/platform-tools`），每条 shell 都要显式加；
+4. **模拟器的电池/相机初始化比应用慢**：`am start` 之后等 6 秒再取 PID，否则 `pidof` 拿到空串、forward 会绑到一个不存在的端口。

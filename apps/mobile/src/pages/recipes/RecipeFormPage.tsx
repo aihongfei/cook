@@ -16,6 +16,7 @@ import {
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Page from '@/components/ui/Page'
 import PageHeader from '@/components/ui/PageHeader'
+import PhotoSourceButtons from '@/components/ui/PhotoSourceButtons'
 import { toast } from '@/components/ui/toast'
 import { readBackLink, readCarry } from '@/pages/back-link'
 import RecipeImage from './components/RecipeImage'
@@ -460,7 +461,11 @@ function RecipeForm({ id, recipe, carry }: { id: string; recipe?: RecipeDetail; 
          * 最显眼的部分，也是用户最想先看一眼的东西。
          */}
         <div className="recipe-form__field">
-          <label htmlFor="recipe-field-image">配图（可以拍一张，也可以先空着）</label>
+          {/*
+           * 字段名不再用 `label htmlFor` 指向某一个控件：现在是**两个**控件（见下），
+           * 指一个就等于把另一个当成不存在的。两颗入口各自带自己的可访问名。
+           */}
+          <span>配图（可以拍一张，也可以先空着）</span>
           <div className="recipe-form__photo">
             <div className="recipe-form__photo-frame">
               {shownImage(form, recipe)
@@ -469,27 +474,19 @@ function RecipeForm({ id, recipe, carry }: { id: string; recipe?: RecipeDetail; 
             </div>
             <div className="recipe-form__photo-actions">
               {/*
-               * 原生文件选择：`accept="image/*"` 让安卓同时给相册与相机（与打卡一致）。
-               * 直接点击是**不行的**——它是隐藏的，这里用 label 关联过去。
+               * 「拍一张 / 从相册选」两个入口（与打卡、冰箱识别同一个共享组件）。
+               *
+               * 原来是**一个**不带 `capture` 的控件 + 一句「选一张图 / 换一张」，
+               * 而 `accept="image/*"` 单打独斗时进相机还是进相册由系统说了算——
+               * 多数机型只进相册。注释里原先写的"安卓会同时给相册与相机"是不成立的，
+               * 与用户在 2026-10-16 报的打卡那处是同一个毛病（D-090）。
                */}
-              <label className="recipe-form__photo-pick" htmlFor="recipe-field-image">
-                {preparingImage ? '正在处理…' : shownImage(form, recipe) ? '换一张' : '选一张图'}
-              </label>
-              <input
-                id="recipe-field-image"
-                className="recipe-form__photo-input"
-                type="file"
-                accept="image/*"
-                onChange={(event) => {
-                  void pickImage(event.target.files?.[0])
-                  /*
-                   * 清掉 value：浏览器只在"值变了"时才发 change，**再选同一张图不会触发**，
-                   * 用户看到的就是"点选图没反应"（用户 2026-10-15：「上传图片有时候上传不生效」——
-                   * "有时候"就是选的是不是上一次那张）。打卡与冰箱那两个上传口都清过，
-                   * 只有这里漏了（见 PhotoSource / CheckInUploadSheet 的同款注释）。
-                   */
-                  event.target.value = ''
-                }}
+              <PhotoSourceButtons
+                id="recipe-image"
+                busy={preparingImage}
+                cameraLabel={shownImage(form, recipe) ? '重拍一张' : '拍一张'}
+                albumLabel={shownImage(form, recipe) ? '换一张' : '从相册选'}
+                onPick={(file) => void pickImage(file)}
               />
               {(form.image ?? '') !== '' && (
                 // 只撤"这次选的"：已存的那张图要换掉只能再选一张（删图是另一个动作，这一刀不做）

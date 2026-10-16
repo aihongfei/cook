@@ -33,4 +33,23 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      拍照入口（F16-04 冰箱识别、M9 打卡、菜谱配图）为什么需要这一段声明：
+
+      targetSdk 30+ 起应用默认"看不见"别的应用，`resolveActivity()` 这类**查询**会被过滤。
+      而 Capacitor 处理带 `capture` 的 file input 时，正是先问一句"有相机吗"
+      （`BridgeWebChromeClient.showImageCapturePicker()` → `takePictureIntent.resolveActivity(...)`），
+      判不出来就**静默回退成文件选择器**——用户看到的是"点『拍一张』弹出的是相册"。
+      `startActivity()` 本身不需要这个声明（隐式 Intent 照常能启动），所以只表现为"判不出来"。
+
+      Capacitor 官方 Camera 插件就是靠同一条 `<queries>` 修好的
+      （ionic-team/capacitor-plugins#160）；主仓 issue #6536 至今仍开着，
+      即：这个声明**必须由 App 自己加**，不会随 Capacitor 升级自动带上。
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
 </manifest>

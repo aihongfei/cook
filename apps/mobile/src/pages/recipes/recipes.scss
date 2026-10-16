@@ -496,34 +496,20 @@
   min-width: 0;
 }
 
-/* 「选一张图 / 换一张」——它是 label，点它等于点那个隐藏的 file input */
-.recipe-form__photo-pick {
+/*
+ * 「拍一张 / 从相册选」在这一格里**竖着排**：这一列只有二百来像素宽，
+ * 共享组件默认的并排会把两个四字按钮挤成"两个字一行"。
+ * （组件用的是 `.photo-buttons`，见 components/ui/ui.scss。）
+ */
+.recipe-form__photo-actions .photo-buttons {
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.recipe-form__photo-actions .photo-buttons__item {
   padding: 9px 14px;
   font-size: 13px;
-  color: #ab5527;
-  text-align: center;
-  cursor: pointer;
-  background: var(--color-paper);
-  border: 1px solid #de9057;
-  border-radius: 999px;
-}
-
-.recipe-form__photo-pick:active {
-  opacity: 0.85;
-}
-
-/*
- * 隐藏原生 file 控件，但**不能用 `display: none`**：那样在一些安卓 WebView 上
- * 点 label 不触发选择器。用 1px + 裁剪把它留在布局里，可聚焦、可点。
- */
-.recipe-form__photo-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  border: 0;
 }
 
 .recipe-form__photo-drop {

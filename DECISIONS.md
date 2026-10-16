@@ -3166,3 +3166,82 @@ Android 12+ 的"精确闹钟"是需要在系统设置里单独开的权限，而
 - **后端 546/546**（新增 4 个权限矩阵 + `parseComment` 边界）、`tsc --noEmit` 0 错；
 - **前端 764/764**（69 文件；新增 9 条：主人看到两颗动作、非主人一颗都不给、改备注发 PATCH 并提示、删除确认框把评论条数说出来、评论正序与归属、`（改过）`、发送去空白并清空输入、空输入禁用、改评论、删评论）、`tsc` 0 错、lint 18 warnings / 0 errors；
 - **权限那半做了先红后绿**：把 `canEdit`/`canDelete` 的传值改成恒真，9 条里权限相关的几条立刻红——证明这些断言真的在管着权限，而不只是在描述现状。
+
+## D-090 拍照入口：**带 `capture` 的控件 + 清单里的 `<queries>`**，两件事都对了才真的开相机（F9-07 / F16-04 / F1-12，用户 2026-10-16 要求，✅ 已实现）
+
+### 一、用户报的是两件不同的事，根因也是两个
+
+> 「冰箱页拍照和我的打卡拍照，现在没有拍照功能只能选择照片，都改下」
+
+拆开：
+
+| 现象 | 真正的毛病 |
+| --- | --- |
+| 冰箱「拍一张」弹出的是**文件选择器** | 入口本身是对的（早有两个控件），但**清单里缺 `<queries>`**，Capacitor 判不出相机就静默回退 |
+| 打卡/菜谱配图「只能选照片」 | **入口只有一半**：单控件、不带 `capture`，进不进相机完全由系统决定 |
+
+两件事**必须都修**才见效——所以这一刀里既有清单声明，也有界面入口。
+
+### 二、`<queries>` 那一条：为什么"点了没反应"其实是"判不出来"
+
+Capacitor 处理带 `capture` 的 file input 时（`BridgeWebChromeClient.showImageCapturePicker()`）第一件事是
+`takePictureIntent.resolveActivity(packageManager)`；判空就 `return false` → 上层**回退成普通文件选择器**。
+
+- targetSdk 30+ 起应用默认"看不见"别的应用，`resolveActivity()` 属于**查询**、会被可见性规则过滤；
+  **不声明就永远判不出相机**——用户看到的是"点『拍一张』弹出相册"，看起来像我们的代码错了。
+- `startActivity()` 隐式 Intent **不需要**这个声明（官方原文：「由于 `startActivity()` 方法不需要软件包可见性来启动另一个应用的 activity，因此您无需向应用清单中添加 `<queries>` 元素」），
+  所以症状只表现为"判不出来"，不是"启动失败"。
+- 上游佐证：Capacitor 官方 Camera 插件就是靠同一条声明修好的（[capacitor-plugins#160](https://github.com/ionic-team/capacitor-plugins/issues/160)）；
+  主仓 [capacitor#6536](https://github.com/ionic-team/capacitor/issues/6536) 至今 open，社区给的推荐片段与这里写的一致。
+  **结论：这个声明必须由 App 自己加，不会随 Capacitor 升级自动带上。**
+
+写进 `apps/mobile/android/app/src/main/AndroidManifest.xml` 的那一段：
+
+```xml
+<queries>
+    <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
+</queries>
+```
+
+**不加 CAMERA 权限**：拍照应用有自己的权限与授权界面，我们只是把"有这个应用"变得可查；
+`isMediaCaptureSupported()` 在应用没声明 CAMERA 时本来就返回 true（"没声明就是不需要"）。
+
+### 三、入口那一条：`capture` 与"给相册选择"在同一控件上互斥
+
+一个只带 `accept="image/*"` 的控件进相机还是进相册**完全看系统**（机型之间都不一样），
+所以"确定开相机"只能靠 `capture="environment"`——而它**必须挂在不给相册的那个控件上**。
+
+这一刀把两个入口**收进一个共享组件** `components/ui/PhotoSourceButtons.tsx`（主入口带 capture、次入口不带），
+四处上传口从此同一个形态：
+
+| 上传口 | 这一刀之前 | 之后 |
+| --- | --- | --- |
+| 冰箱识别 | 两个控件（本来就对） | 不变（只靠清单修好） |
+| AI 助手附件 | 两个控件（本来就对） | 不变 |
+| **打卡上传** | **一个**不带 capture 的控件，按钮却写「选一张照片 / 拍照」 | 「拍一张」+「从相册选」 |
+| **菜谱配图** | 同上，注释里"安卓会同时给相册与相机"是不成立的 | 「拍一张 / 重拍一张」+「从相册选 / 换一张」 |
+
+**顺带订正的一句假注释**：菜谱表单原注释写「`accept="image/*"` 让安卓同时给相册与相机（与打卡一致）」——
+那句是错的（这也是它当初没被一起改掉的原因）。现在四处都指向共享组件，注释也统一到那里。
+
+### 四、为什么"按钮上的话"也算问题
+
+打卡那颗按钮写的是「选一张照片 / 拍照」——**它承诺了一件自己做不到的事**。
+`capture` 加进来之后，「拍一张」才配得上那两个字。这一条与 D-064 的「点不动又不解释最糟」同源：
+界面上的字要能兑现，兑现不了就得改字或改行为。
+
+### 五、验收（2026-10-16）
+
+- **前端 767/767**（69 文件；新增 3 条：打卡两入口各指到带/不带 capture 的控件、打卡两条路都能出图、菜谱两入口同上）、`tsc -b` 0 错、lint 18 warnings / 0 errors；
+- **清单合并验过**：`processDebugMainManifest` 后的合并结果与装出来的 APK（`aapt2 dump xmltree`）里都有那条 `<queries>`；
+- **装机实测（模拟器 Medium_Phone_API_37 + CDP，真点击、看前台 activity）**：
+
+  | 点的入口 | 之后的前台 | 结论 |
+  | --- | --- | --- |
+  | 打卡「拍一张」 | `com.android.camera2/CaptureActivity` | **真的开相机** |
+  | 打卡「从相册选」 | `com.google.android.photopicker/PhotopickerGetContentActivity` | 对照成立（不是"所有入口都开相机"） |
+  | 冰箱「📷 拍照 → 拍一张」 | `com.android.camera2/CaptureActivity` | **用户报的那一处修好** |
+  | 菜谱表单「拍一张」 | `com.android.camera2/CaptureActivity` | 同族第三处一并修好 |
+
+  用前台 activity 作判据而不是"截图看着像相机"：应用被换出、相机被拉起是**系统层面的事实**，
+  截图只能证明"有个取景框"，证明不了是哪个应用、也证明不了是相机而不是别的相机类应用。

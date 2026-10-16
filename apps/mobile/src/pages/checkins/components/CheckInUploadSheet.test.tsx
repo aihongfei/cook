@@ -190,7 +190,7 @@ it('选图后先缩再传：提交带的是缩过的 JPEG dataURL，而不是原
   const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ data: { id: 'ck1', mealKey: null } } as never)
   renderSheet()
 
-  const input = await screen.findByLabelText('选择照片')
+  const input = await screen.findByLabelText('从相册选')
   fireEvent.change(input, { target: { files: [imageFile()] } })
 
   const preview = await screen.findByAltText('待上传的照片预览')
@@ -214,7 +214,7 @@ it('填了备注与餐次就一起传上去，并提示成功', async () => {
   const uploaded = vi.fn()
   renderSheet({ onUploaded: uploaded })
 
-  fireEvent.change(await screen.findByLabelText('选择照片'), { target: { files: [imageFile()] } })
+  fireEvent.change(await screen.findByLabelText('从相册选'), { target: { files: [imageFile()] } })
   await waitFor(() => expect(screen.getByAltText('待上传的照片预览')).toBeTruthy())
 
   fireEvent.change(screen.getByPlaceholderText('如：给小满做的生日面'), { target: { value: '今晚的红烧排骨' } })
@@ -235,7 +235,7 @@ it('后端拒绝时把话术显示出来（如不是图片、太大）', async (
   } as never)
   renderSheet()
 
-  fireEvent.change(await screen.findByLabelText('选择照片'), { target: { files: [imageFile('fake.png')] } })
+  fireEvent.change(await screen.findByLabelText('从相册选'), { target: { files: [imageFile('fake.png')] } })
   await waitFor(() => expect(screen.getByAltText('待上传的照片预览')).toBeTruthy())
   fireEvent.click(screen.getByRole('button', { name: '传上去' }))
 

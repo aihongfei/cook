@@ -353,6 +353,45 @@
 }
 
 /*
+ * 「拍一张 / 从相册选」两颗入口（`PhotoSourceButtons`）。
+ *
+ * 主入口（拍照）用品牌色实心：它是这条路上的第一选择，两颗同等份量时用户会随手点左边那颗。
+ * 次入口描边——不是"次要所以藏起来"，而是让人一眼看出这里还有第二条路。
+ */
+.photo-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.photo-buttons__item {
+  flex: 1;
+  padding: 13px 14px;
+  font-size: 14px;
+  color: #ab5527;
+  text-align: center;
+  cursor: pointer;
+  background: var(--color-paper);
+  border: 1px solid #de9057;
+  border-radius: 999px;
+}
+
+.photo-buttons__item--camera {
+  color: #fff;
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+
+.photo-buttons__item:active {
+  opacity: 0.85;
+}
+
+/* 忙时看着就是"先别点"（真正拦住点击的是组件里那次 preventDefault） */
+.photo-buttons__item.is-busy {
+  opacity: 0.55;
+}
+
+/*
  * 全屏看大图（ImageViewer）。
  *
  * **z-index 必须高过 antd-mobile 的 Popup**（那套是遮罩 1000 / 面板 1010）：

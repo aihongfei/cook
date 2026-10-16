@@ -337,7 +337,7 @@ it('配图：选一张图会先在本地缩一遍，再随新建请求发出去'
   mount('/recipes/new')
 
   const file = new File(['x'], 'dish.png', { type: 'image/png' })
-  fireEvent.change(screen.getByLabelText('配图（可以拍一张，也可以先空着）'), { target: { files: [file] } })
+  fireEvent.change(screen.getByLabelText('从相册选'), { target: { files: [file] } })
   await waitFor(() => expect(shrink).toHaveBeenCalledWith(file))
 
   fillBasics()
@@ -368,7 +368,7 @@ it('配图：只换图、别的字段一个字不改，也是一次有效改动�
   mount('/recipes/own-1/edit')
 
   await waitFor(() => expect(value('菜名')).toBe('外婆的红烧肉'))
-  fireEvent.change(screen.getByLabelText('配图（可以拍一张，也可以先空着）'), {
+  fireEvent.change(screen.getByLabelText('从相册选'), {
     target: { files: [new File(['x'], 'new.png', { type: 'image/png' })] },
   })
   await waitFor(() => expect(screen.getByText('不用这张')).toBeTruthy())
@@ -381,7 +381,7 @@ it('配图：选完把 input.value 清掉——浏览器只在"值变了"时才�
   vi.spyOn(checkins, 'shrinkImage').mockResolvedValue('data:image/jpeg;base64,SHUNK')
   mount('/recipes/new')
 
-  const input = screen.getByLabelText('配图（可以拍一张，也可以先空着）') as HTMLInputElement
+  const input = screen.getByLabelText('从相册选') as HTMLInputElement
   /*
    * 为什么盯"有没有人去清"而不是直接读 `input.value`：testing-library 是把 files **直接挂在元素上**的，
    * jsdom 那个 `C:\fakepath\…` 的取值器看不到它们，于是 value 永远是空串——
@@ -411,7 +411,7 @@ it('配图：连选两张时后选的那张作数（先选的那张缩得慢，�
   )
   mount('/recipes/new')
 
-  const input = screen.getByLabelText('配图（可以拍一张，也可以先空着）')
+  const input = screen.getByLabelText('从相册选')
   fireEvent.change(input, { target: { files: [new File(['x'], 'first.png', { type: 'image/png' })] } })
   fireEvent.change(input, { target: { files: [new File(['y'], 'second.png', { type: 'image/png' })] } })
 
@@ -424,11 +424,33 @@ it('配图：连选两张时后选的那张作数（先选的那张缩得慢，�
   )
 })
 
+it('配图：两个入口各管一条路——「拍一张」带 capture（直接开相机），「从相册选」不带（用户 2026-10-16 报"没有拍照功能只能选择照片"）', async () => {
+  mount('/recipes/new')
+
+  /*
+   * 为什么盯 `capture` 这个属性而不是"点了会怎样"：jsdom 里没有相机、也没有真实的
+   * 文件选择器——能否进相机由**系统**看这个属性决定（`capture="environment"` 才是"确定开相机"的
+   * 标准做法）。Android 上还有第二个条件（清单里的 `<queries>`，见 D-090），单测验不到，装机实测补。
+   */
+  const camera = screen.getByLabelText('拍一张') as HTMLInputElement
+  const album = screen.getByLabelText('从相册选') as HTMLInputElement
+  expect(camera.type).toBe('file')
+  expect(camera.getAttribute('capture')).toBe('environment')
+  expect(camera.accept).toBe('image/*')
+  expect(album.getAttribute('capture')).toBeNull()
+  expect(album.accept).toBe('image/*')
+  // 两个是**不同的**控件：共用一个的话就没法让"拍"和"选"走不同的路
+  expect(camera.id).not.toBe(album.id)
+  // 各自的入口要指到自己那个控件上（id 写错的表现是"点了没反应"）
+  expect(document.querySelector(`label[for="${camera.id}"]`)?.textContent).toBe('拍一张')
+  expect(document.querySelector(`label[for="${album.id}"]`)?.textContent).toBe('从相册选')
+})
+
 it('配图：处理不了的文件如实说一声，且不把图留在预览里（别让人存完才发现）', async () => {
   vi.spyOn(checkins, 'shrinkImage').mockRejectedValue(new Error('这不是一张能显示的图片'))
   mount('/recipes/new')
 
-  fireEvent.change(screen.getByLabelText('配图（可以拍一张，也可以先空着）'), {
+  fireEvent.change(screen.getByLabelText('从相册选'), {
     target: { files: [new File(['x'], 'bad.png', { type: 'image/png' })] },
   })
 
