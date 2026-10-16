@@ -6367,3 +6367,73 @@ pnpm --dir apps/mobile exec vitest run src/components/ui/ConfirmDialog.test.tsx 
 `apps/mobile/src/pages/fridge/fridge.scss`（`.fridge-sheet__actions` 段）、
 `apps/mobile/src/components/ui/ConfirmDialog.test.tsx`、
 `apps/mobile/src/pages/fridge/components/FridgeItemSheet.test.tsx`。
+
+## R-099 验「返回手势跟手」怎么验：进度要**分步拖**才收得到（D-109 / R-89 配套，✅ 已验证，2026-10-16）
+
+> **编号说明**：本节起草时占的是 R-097，与同期另一条线（点菜单只铺三天）撞号，
+> 现改为 R-099；配套决策是 `DECISIONS.md` **D-109**、`RISKS.md` **R-89**。
+
+### 一、什么时候用这个
+
+改了 `BackGesturePlugin`（原生）、`lib/back-gesture.ts`、`BackLink`/`back-transition`，
+或动了 `AndroidManifest` 里 `enableOnBackInvokedCallback` / `capacitor.config.ts` 的
+`disableBackButtonHandler`。用户报的措辞通常是「返回跟手没有了」「边缘一划就退出去了」
+「抽屉还开着应用退了」。
+
+### 二、装包（改原生之后必须重出包）
+
+```bash
+export PATH="$PATH:$HOME/Library/Android/sdk/platform-tools"
+VITE_API_BASE_URL=http://10.0.2.2:3000/api pnpm --dir apps/mobile exec vite build --mode server
+pnpm --dir apps/mobile exec cap sync android
+cd apps/mobile/android && ./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb reverse tcp:3000 tcp:3000
+```
+
+⚠️ 换过签名/来源的旧包要先 `adb uninstall com.yushan.cook`
+（否则 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`；重装后**通知权限会回到未授予**，见 R-094）。
+
+### 三、把 WebView 的调试口接出来（验网页侧那半必须用）
+
+```bash
+adb forward tcp:9223 localabstract:webview_devtools_remote_$(adb shell pidof com.yushan.cook | tr -d '\r')
+curl -s http://127.0.0.1:9223/json | python3 -c "import sys,json;[print(t['url']) for t in json.load(sys.stdin)]"
+```
+
+然后用 CDP 在页面里求值（本项目 `services/api/node_modules` 里有 `ws`，脚本写在那个目录下就能跑）。
+**别忘了求值前等 bridge 就绪**：`for (let i=0;i<40 && !window.Capacitor?.Plugins?.BackGesture;i++) await wait(250)`——
+早于它就绪的调用会落空（那正是 R-89 第二条坑）。
+
+### 四、三条判据（截图不算判据，数字才算）
+
+```bash
+# ① 开关该在哪一档（子页 true / 厨房根页 false / 抽屉开着 true）
+#    在页面里问：await Capacitor.Plugins.BackGesture.isEnabled()
+# ② 进度在流（分步拖，别用 swipe——从 x=0 起手不一定被识别成边缘手势）
+adb shell input motionevent DOWN 3 800
+for x in 80 200 320 400; do adb shell input motionevent MOVE $x 800; sleep 0.06; done
+adb shell input motionevent UP 400 800
+#    页面里挂一个 listener 收 backGestureProgress，应当看到 start → progress(0→…) → press
+# ③ 两层在跟手：拖动中途量两层位置，离开页 x 应当≈ 宽度×进度、目标页 x≈ -14%×(1-进度)
+```
+
+本次实测（Android 17 / SDK 37）：进度序列 `0 → 0.43`；拖到 46% 时
+**离开页 x=190、目标页 x=-31**；松手后继续推进并完成落位、**收尾无残留**；
+厨房根页 `enabled=false` 且**系统自带的退出预览真的出现**（截图存
+`previews/return-two-layer-drag.png` 是中途那一帧）。
+
+### 五、两条不是 bug 的现象
+
+| 现象 | 为什么 |
+| --- | --- |
+| Android 13 及以下怎么拖都不跟手 | 进度要 14+；那条路上退化成"松手后播一趟两层动画" |
+| `adb shell input swipe 0 <y> …` 有时整个手势没反应 | 起手点太靠边/速度不合适，系统不认成边缘手势；用 `motionevent` 分步发 |
+
+### 六、相关
+
+`DECISIONS.md` **D-109**、`RISKS.md` **R-89**、**R-13**（WebView 与原生不一致五条）、
+`android/app/src/main/java/com/yushan/cook/BackGesturePlugin.java`、
+`apps/mobile/android/app/src/main/AndroidManifest.xml`（那个开关）、
+`apps/mobile/capacitor.config.ts`（`disableBackButtonHandler`）、
+`apps/mobile/src/api/back-gesture-native.ts`、`apps/mobile/src/lib/back-gesture.ts`。

@@ -26,6 +26,20 @@ const config: CapacitorConfig = {
   },
   plugins: {
     /*
+     * 返回键的判定**只许有一处**（2026-10-16 / D-109）。
+     *
+     * `@capacitor/app` 自带一条 `OnBackPressedCallback`：按一下就往网页发一个 `backButton`
+     * 事件。而现在返回也由我们自己的 `BackGesturePlugin` 接管（它还要把手势进度送进来）
+     * ——两条 callback 会在同一次按键上各做各的判断，谁先注册谁先跑，
+     * 行为取决于注册顺序。所以关掉插件那条，只留我们这一处。
+     *
+     * 关掉之后 `App.addListener('backButton', ...)` 不再触发；
+     * 判定与动作都收在 `lib/android-back.ts` + `lib/back-go.ts` 里（见那两个文件头）。
+     */
+    App: {
+      disableBackButtonHandler: true,
+    },
+    /*
      * 后台巡查（M10 交付三）：让"别人点了菜"这类事在**应用退到后台之后**也能弹出来。
      *
      * 为什么非它不可（实测）：应用退到后台约 40 秒，WebView 里的 JS 就完全不执行了

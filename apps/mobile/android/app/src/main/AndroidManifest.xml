@@ -1,12 +1,27 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      `android:enableOnBackInvokedCallback="true"`（2026-10-16 / D-109）：
+      打开新式的返回回调，让**手势进度**能到达应用（`OnBackPressedCallback` 的
+      `handleOnBackStarted/Progressed/Cancelled` → `BackGesturePlugin` → 网页）。
+      没有它，Android 13+ 的手势只有"放手后系统直接退"这一种，跟手效果无从谈起。
+
+      显式写出来而不是吃系统默认值：这个开关的默认值随目标 SDK 版本变过
+      （Android 13 起"目标 33+ 默认开"，更低的机型上根本没有这一套），
+      写死之后行为只由这个仓库决定，不随系统版本漂。
+
+      它同时会改掉**系统对返回手势的默认处理**：放手那一刻不再由系统直接退，
+      而是先问应用（我们那个 callback）。"在厨房根页放手、让系统自己播退出预览"
+      就是靠 callback 里的 `setEnabled(false)` 做到的（见 `lib/back-gesture.ts`）。
+    -->
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/AppTheme">
+        android:theme="@style/AppTheme"
+        android:enableOnBackInvokedCallback="true">
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"

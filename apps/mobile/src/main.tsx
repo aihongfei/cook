@@ -5,6 +5,7 @@ import { RouterProvider } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toast'
 import { installAndroidBack } from '@/lib/android-back'
 import { setBackNavigator } from '@/lib/back-go'
+import { installBackGesture } from '@/lib/back-gesture'
 import { installNoImageDrag } from '@/lib/no-image-drag'
 import { LocalNotifySync } from '@/lib/local-notify-sync'
 import { PatrolSync } from '@/lib/patrol-sync'
@@ -19,6 +20,16 @@ import '@/styles/index.scss'
  * 弹层优先关、再回上一层、到首页才退出 App。浏览器里这个函数直接返回空卸载器，没有副作用。
  */
 installAndroidBack()
+
+/*
+ * 返回手势的**跟手**（D-109）：手指从屏幕左缘拖，页面跟着走。
+ *
+ * 与上一条是同一个功能的两半：上一条管"按下去了、该去哪"，这一条管"拖动过程中两页
+ * 各自在哪"。它同时负责**告诉原生"这一次归不归我们"**——在厨房根页放手，
+ * 让系统自己播"窗口缩回桌面"的退出预览（那是最"原生"的那种退出）。
+ * 浏览器 / iOS 上没有这个插件，函数自己会空转。
+ */
+installBackGesture()
 
 /*
  * 「退回去」接到真实路由上（D-105）：页面上的「← 返回」与系统返回键都调

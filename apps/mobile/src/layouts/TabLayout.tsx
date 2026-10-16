@@ -11,6 +11,7 @@ import { targetOf } from '@/lib/local-notify'
 import { emitTabRetap } from '@/lib/tab-retap'
 import { pageKeyOf, createScrollMemory } from '@/lib/scroll-memory'
 import { setScrollReader } from '@/lib/back-transition'
+import { syncBackGesture } from '@/lib/back-gesture'
 import KeepAlivePages from './KeepAlivePages'
 import { usePageTurn } from './use-page-turn'
 import './TabLayout.scss'
@@ -124,6 +125,18 @@ export default function TabLayout() {
    * `/fridge` 三处都对（见 `useMarkArrived` 的注释）。
    */
   useMarkArrived(pageKey)
+
+  /*
+   * 「这次返回归不归我们管」要跟着位置走（D-109）：子页归我们（要跟手、要播两层），
+   * 厨房根页不归我们（那一下要让**系统**自己播"窗口缩回桌面"的退出预览）。
+   *
+   * 地址变化**不能**靠 `popstate` 监听：路由的编程式跳转不发那个事件。
+   * 而"人在哪一页"是这一层每次渲染都知道的事实——所以挂在 `pathname` 上，
+   * 换页就重算一次（`syncBackGesture` 内部对同值去重，不会反复跨桥调原生）。
+   */
+  useEffect(() => {
+    syncBackGesture()
+  }, [pathname])
 
   /*
    * 手机弹窗提醒的**排程**不在这里（M10 交付二）：它挂在 `main.tsx` 的根层上，

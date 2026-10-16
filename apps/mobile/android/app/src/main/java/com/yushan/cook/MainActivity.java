@@ -13,6 +13,14 @@ public class MainActivity extends BridgeActivity {
          * （表现是 JS 那边 `RealtimeNative.start()` 报 "not implemented"）。
          */
         registerPlugin(RealtimeNativePlugin.class);
+        /*
+         * 返回手势的进度（D-109）：同理，也要在 super 之前注册。
+         *
+         * 它接管系统的返回键与返回手势（`onBackPressedDispatcher` 上**唯一**的 callback
+         * ——`@capacitor/app` 那条已在 `capacitor.config.ts` 里关掉：两处各判一次会打架）。
+         * 手势进度只有 Android 14+ 有；低版本这条只转发按键，行为与旧版一致。
+         */
+        registerPlugin(BackGesturePlugin.class);
         super.onCreate(savedInstanceState);
 
         /*

@@ -1,5 +1,4 @@
 import { App as CapacitorApp } from '@capacitor/app'
-import { Capacitor } from '@capacitor/core'
 import { goBack } from './back-go'
 import { backTargetOf } from './back-target'
 import { resolveBack } from './back-policy'
@@ -48,14 +47,37 @@ import { resolveBack } from './back-policy'
 const closers: Array<() => void> = []
 
 /**
+ * 弹层开合时通知外面（**手势那一层要用**，见文件末尾 `installAndroidBack`）。
+ *
+ * 为什么要有这条：`lib/back-gesture` 要算"这一次返回归不归我们管"，而**弹层是判据之一**
+ * （开着弹层时要关弹层、不该摆两页）。它 subscribe 这里，一开一关就重算；
+ * 反向的依赖（本模块 import back-gesture）会造成环形 import，所以用订阅而不用回调。
+ */
+const closerListeners = new Set<() => void>()
+
+/** 订阅"弹层开合了"。返回取消订阅 */
+export function subscribeBackCloserChanges(listener: () => void): () => void {
+  closerListeners.add(listener)
+  return () => {
+    closerListeners.delete(listener)
+  }
+}
+
+function notifyCloserChanges(): void {
+  for (const listener of closerListeners) listener()
+}
+
+/**
  * 注册一个"返回时优先关闭我"的弹层。返回注销函数（组件卸载/收起时调用）。
  * 用栈而不是"只记一个"：AI 抽屉里还能再开别的抽屉，谁最后开谁先关。
  */
 export function registerBackCloser(close: () => void): () => void {
   closers.push(close)
+  notifyCloserChanges()
   return () => {
     const index = closers.lastIndexOf(close)
     if (index >= 0) closers.splice(index, 1)
+    notifyCloserChanges()
   }
 }
 
@@ -113,15 +135,17 @@ export function handleBackPress(options?: {
   return 'back'
 }
 
-/** 装一次即可（main.tsx 调）。返回卸载函数；重复调用是安全的 */
+/**
+ * 装一次即可（`main.tsx` 调）。返回卸载函数；重复调用是安全的。
+ *
+ * **它不再监听 `@capacitor/app` 的 `backButton` 事件**（2026-10-16 / D-109）：
+ * 那个事件已经被关掉了（`capacitor.config.ts` 的 `plugins.App.disableBackButtonHandler`），
+ * 按键与手势统一由 `BackGesturePlugin` → `lib/back-gesture` → `handleBackPress()` 走。
+ *
+ * 所以这个函数现在只做一件接口上的小事：把 `handleBackPress` 暴露出去——
+ * `installBackGesture()` 从 `lib/back-gesture` 那边接（它 import 本模块，
+ * 本模块不回头 import 它，避免环形 import）。`main.tsx` 那两行不用管谁先谁后。
+ */
 export function installAndroidBack(): () => void {
-  if (!Capacitor.isNativePlatform()) return () => {}
-
-  const handle = CapacitorApp.addListener('backButton', () => {
-    handleBackPress()
-  })
-
-  return () => {
-    void handle.then((listener) => listener.remove())
-  }
+  return () => {}
 }
