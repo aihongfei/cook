@@ -208,3 +208,34 @@ describe('标题带', () => {
       .toMatch(/margin\s*:\s*0\s/)
   })
 })
+
+/*
+ * 跟手翻页时**两页之间要有空白间隙**（用户 2026-10-16：「这个滚动时，两个 tab 的内容没有空白间隙」）。
+ *
+ * 现象：拖到一半时左页最后一张卡与右页第一张卡贴在一起（实测间距 **0px**）。
+ * 根因：左右栏距挂在外层容器（`.recipes-page` 的 `padding`）上，而两页各自是 100% 宽、紧挨在一起，
+ * 于是"页与页"这一段没有任何留白——看着像一长排卡片连着铺过去，而不是两页。
+ * （订单页 / 打卡墙是 32px，那两页的栏距本来就在卡片自己身上。）
+ *
+ * 修法是把栏距从外层挪到**每一页**（`.swipe-pager__panel`）上。jsdom 算不了布局，
+ * 所以这条守规则（与上面「标题带」那条同一手法）：**栏距必须挂在页上**，
+ * 而且外层不能再留一份（两份会叠成 64px）。
+ *
+ * ⚠️ 写成"页上的 padding-inline 是 var(--spacing-page)"而不是写死 `16px`：
+ * 栏距是全站的变量，将来调它时这条断言不该跟着变红。
+ */
+describe('翻页时两页之间的间隙', () => {
+  it('横向栏距挂在每一页上，外层容器不再留一份（两份会叠起来）', () => {
+    const css = readFileSync(join(__dirname, 'recipes.scss'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+    const rule = (name: string) =>
+      css.match(new RegExp(`\\.${name}\\s*\\{[\\s\\S]*?\\n\\}`))?.[0] ?? ''
+
+    const panel = rule('recipes-page--body \\.swipe-pager__panel') || rule('swipe-pager__panel')
+    expect(panel, '没读到"每一页自带栏距"那条规则').toBeTruthy()
+    expect(panel, '每一页要自带左右栏距，否则翻到一半两页的卡片会贴在一起').toMatch(/padding-inline\s*:\s*var\(--spacing-page\)/)
+
+    const body = rule('recipes-page--body')
+    expect(body, '没读到 .recipes-page--body 规则').toBeTruthy()
+    expect(body, '外层不能再留横向栏距（会与页上那份叠成两倍）').toMatch(/padding\s*:\s*0\b/)
+  })
+})
