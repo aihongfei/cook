@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { jwtSecret } from '../auth/jwt.config'
 import { PrismaService } from '../recipes/prisma.service'
+import { RealtimeModule } from '../realtime/realtime.module'
 import { NotificationsController } from './notifications.controller'
 import { PatrolAuthGuard } from './notifications.patrol.guard'
 import { NotificationsService } from './notifications.service'
@@ -17,6 +18,9 @@ import { NotificationsService } from './notifications.service'
  *
  * 两个守卫并存：`JwtAuthGuard`（界面上的人）与 `PatrolAuthGuard`（后台那段代码，
  * 凭巡查令牌）。两条路对下游完全一样——都把身份挂到 `request.userId`（见守卫里那段说明）。
+ *
+ * 2026-10-16 加 `RealtimeModule`：提醒写完就**当场推**给正开着应用的那几台设备
+ * （用户要的"立马收到"）。方向仍然是单向的——本模块用它，它不认识本模块。
  */
 @Module({
   imports: [
@@ -24,6 +28,7 @@ import { NotificationsService } from './notifications.service'
       secret: jwtSecret(),
       signOptions: { expiresIn: Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 7200) },
     }),
+    RealtimeModule,
   ],
   controllers: [NotificationsController],
   providers: [PrismaService, NotificationsService, JwtAuthGuard, PatrolAuthGuard],

@@ -13,6 +13,7 @@ import { FridgeModule } from './modules/fridge/fridge.module'
 import { HealthModule } from './modules/health/health.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { OrdersModule } from './modules/orders/orders.module'
+import { RealtimeModule } from './modules/realtime/realtime.module'
 import { RecipesModule } from './modules/recipes/recipes.module'
 import { ShoppingModule } from './modules/shopping/shopping.module'
 import { TasteModule } from './modules/taste/taste.module'
@@ -32,6 +33,8 @@ import { TasteModule } from './modules/taste/taste.module'
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
     HealthModule,
     AiModule,
+    // 实时通道（F10-08）：挂到既有 http server 的 upgrade 上，不新开端口、也不新开模块边界
+    RealtimeModule,
     NotificationsModule,
     AuthModule,
     FamilyModule,

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { isSupported, readNotifyStatus } from '@/lib/local-notify'
 import { notifyStatusText } from '@/lib/local-notify.rules'
+import { nativeSupported, nativeLinkRunning } from '@/api/realtime-native'
 
 /**
  * 「手机提醒」这一行的现状（M10 交付二 / 交付三；用户 2026-10-15 报「真机也没收到通知」之后加的）。
@@ -36,6 +37,24 @@ export default function NotifyStatusRow() {
     retry: 0,
   })
 
+  /*
+   * 实时连接（F10-08）：**第二句**问的是原生那条长连接现在在不在。
+   *
+   * 为什么也放在这一行、而不是新起一行：两个都是"手机在不在替我盯着家里的事"
+   * ——用户心里那件事只有一件。新起一行「实时连接」会让人以为它们是两套东西、
+   * 还要分别判断，而实际上实时那条不通时，下面那条巡查兜着（只是慢一点）。
+   *
+   * 与上面那条同样**只读**：用户没要过"关掉实时"这个开关，
+   * 而他真想要"安静一会儿"时该关的是通知权限（那一句本来就指到系统设置）。
+   */
+  const live = useQuery({
+    queryKey: ['notify', 'realtime'],
+    queryFn: nativeLinkRunning,
+    enabled: nativeSupported(),
+    staleTime: 0,
+    retry: 0,
+  })
+
   if (!supported) return null
   const view = notifyStatusText(query.data ?? { permission: 'prompt', pending: 0, next: null })
 
@@ -47,6 +66,12 @@ export default function NotifyStatusRow() {
         <div className={['row__sub', view.tone === 'warn' && 'row__sub--warn'].filter(Boolean).join(' ')}>
           {query.isPending ? '正在看提醒排上了没有…' : view.text}
         </div>
+        {/* 装到手机上才有实时那条；浏览器里 `nativeSupported()` 为假，这一句不出现 */}
+        {nativeSupported() && (
+          <div className="row__sub">
+            {live.isPending ? '正在看实时连接…' : live.data ? '实时连接中：家里的事立刻到' : '实时连接没开着（家里的事最多晚一刻钟）'}
+          </div>
+        )}
       </div>
     </div>
   )

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { useAuth } from '@/stores/auth'
 import { clearSince, deviceId, fetchPatrolToken, revokePatrolToken } from '@/api/patrol'
+import { startNativeLink, stopNativeLink } from '@/api/realtime-native'
 
 /**
  * 后台巡查的**接线层**（M10 交付三）：什么时候把配置交给那段后台代码。
@@ -93,6 +94,18 @@ export function usePatrolSync(): void {
         const token = await fetchPatrolToken()
         if (cancelled) return
         await pushConfig({ token, userId })
+        /*
+         * 同一枚令牌**顺便交给原生那条实时连接**（F10-08）。
+         *
+         * 必须复用这一枚，不能让它自己再领一次：`issuePatrol` 是 upsert，
+         * 再领一次会把这枚换掉，而上面刚推给调度器的那份就成了废的
+         * （表现是后台巡查从此 401，且只在"开了实时之后"才出现，很难查）。
+         * 所以这个顺序也不能反：先领一次，两边共用。
+         *
+         * 失败了不影响什么：实时只"更快"，后台巡查与前台都在（见 realtime-native 文件头）。
+         */
+        const base = apiBase()
+        if (base) await startNativeLink({ token, apiBase: base, userId })
       } catch {
         // 领不到（断网/后端没起）：这次不启用后台巡查，下次登录或下次启动会重来
       }
@@ -105,13 +118,19 @@ export function usePatrolSync(): void {
 }
 
 /**
- * 退出登录时调（`api/auth.ts` 的 `logout` 里）：交还令牌 + 清本地水位线。
+ * 退出登录时调（`api/auth.ts` 的 `logout` 里）：交还令牌 + 清本地水位线 + 停掉原生那条连接。
  *
  * 顺序：**先交还再清会话**（交还需要登录态）。交还不成也要清本地——
  * 那台手机从此不该再弹任何东西（它手里已经没凭据了，后端也吊销了）。
  */
 export async function releasePatrol(userId: string): Promise<void> {
   clearSince(userId)
+  /*
+   * 原生那条连接要先停：它手里那枚令牌马上就会被吊销，而**断开的动作得由我们做**
+   * ——不停的话它要等到自己下一次重连失败（最长 60 秒后才试）才知道，那期间
+   * 通知栏里那条常驻通知还在，用户以为"退出了还在收家里的事"。
+   */
+  await stopNativeLink()
   try {
     await revokePatrolToken()
   } catch {

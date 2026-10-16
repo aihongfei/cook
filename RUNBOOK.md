@@ -5591,3 +5591,129 @@ Array.from(document.querySelectorAll('.order-card')).map((card) => {
 `DECISIONS.md` **D-098**、`RISKS.md` **R-80**、
 `services/api/src/modules/orders/orders.rules.ts`（`ALLOWED_TRANSITIONS` / `FLOW_NEXT`）、
 `services/api/scripts/verify-orders-http.cjs`；容器那条坑另见本文件开头的「注意（容器代码是构建产物）」。
+
+## R-091 验「实时通知」怎么验：三条路各验各的，延迟要量出来（D-099 / R-81 配套，✅ 已验证，2026-10-16）
+
+### 一、先想清楚"验哪一条"
+
+"实时"在本项目里有**三条路**，它们的判据完全不同，不能互相替代：
+
+| 路 | 覆盖场景 | 怎么验 | 判据 |
+| --- | --- | --- | --- |
+| WebView 那条 | 应用在前台 | 浏览器/真机停在某页，另一台做事 | 页面**不刷新自己**变了 |
+| 原生那条 | 应用在后台（WebView 已冻） | 真机装 APK、压到后台、另一台做事 | `logcat` + `dumpsys notification` |
+| 系统调度器 | 进程被杀 | 见 **R-072**（那一条没变） | 最多约一刻钟 |
+
+**只验第一条是不够的**：WebView 在前台时本来就正常，而用户报的毛病往往出在后台。
+
+### 二、自动化那半：真实请求 + 真 WebSocket
+
+```bash
+node services/api/scripts/verify-realtime-ws.cjs
+# → 实时通道验收：22/22 通过
+```
+
+这个脚本用 Node 内置的 `WebSocket`（与服务端同一条协议，与浏览器/Android 客户端无差别），
+**自带两个家庭四个人**，覆盖：另一台当场收到、打卡上传当场推、做事的人自己不收到、
+**别家的人一条都收不到**、状态型两档也推、巡查令牌那条路同样收得到、
+吊销之后连不上、没有凭据/伪造凭据连不上、关掉之后不再收。
+
+⚠️ 与其它脚本一样会撞 60 次/分的限流（它一个人打几十个请求），必须读 `retry-after` 重试
+（见 R-089 第三节）。
+
+### 三、延迟要**量**出来，不能只说"很快"
+
+判据是"发出这件事的时刻"与"对面页面变化的时刻"之差。做法：
+
+1. **在页面里装观察器**（这一步是关键，别用"看一眼觉得变了"）：
+
+```js
+// 浏览器标签页里跑一次：记录卡片张数与底栏红点的每次变化
+window.__probe = { start: Date.now(), events: [], baseline: null }
+const read = () => ({
+  at: Date.now(),
+  cards: document.querySelectorAll('.order-card').length,
+  dots: Array.from(document.querySelectorAll('.tab-bar__dot')).map((d) => d.textContent).join(','),
+})
+const obs = new MutationObserver(() => {
+  const now = read()
+  const last = window.__probe.events.at(-1) ?? window.__probe.baseline
+  if (now.cards !== last.cards || now.dots !== last.dots) window.__probe.events.push(now)
+})
+obs.observe(document.body, { childList: true, subtree: true, characterData: true })
+window.__probe.baseline = read()
+```
+
+2. 由**另一个账号**（走 API 或另一台设备）做一件事，并把发出时刻打出来；
+3. 读 `window.__probe.events`，与发出时刻相减。
+
+本次实测：**48 毫秒**（发出 `1792134212255` → 红点变化 `1792134212303`），期间**无任何刷新或点击**。
+
+> 底栏红点的类名是 **`tab-bar__dot`**（不是 `badge`）。用错选择器会得到"红点一直是空的"这种假结论
+> ——本次就先用错了一次。
+
+### 四、原生那条：必须真机/模拟器，且要看两处日志
+
+```bash
+# 1. 装包并启动（地址指向宿主机时用 10.0.2.2，模拟器访问宿主机的固定地址）
+VITE_API_BASE_URL=http://10.0.2.2:3000/api pnpm --dir apps/mobile exec vite build --mode server
+pnpm --dir apps/mobile exec cap sync android
+cd apps/mobile/android && ./gradlew :app:assembleDebug && adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# 2. 启动应用 → 应当看到这两行
+adb logcat -d | grep -i RealtimeLink      # 「connecting …」然后「connected」
+#    同时 JS 侧会打出 {"running":true}（那是插件 start() 的返回）
+
+# 3. 压到后台（**这一步不能省**：前台收到的会走 WebView 那条，验不到原生）
+adb shell input keyevent KEYCODE_HOME
+adb shell dumpsys activity activities | grep -m1 ResumedActivity   # 应当不是本应用
+
+# 4. 由另一个账号做事，然后看通知栏
+adb logcat -d | grep -i RealtimeLink       # 「patrol fetched: N new」
+adb shell dumpsys notification --noredact | grep -E "android.title=|android.text="
+```
+
+本次实测输出（决定性的一行）：
+
+```
+android.title=String (验收小满打卡了：模拟器后台验收)
+```
+
+以及常驻那条：`android.title=String (家里的事会立刻告诉你)`（channel=`realtime_link`，最低优先级）。
+
+### 五、"连接在风暴里"怎么看出来（R-81 那个坑的观察法）
+
+```bash
+docker compose logs api --since 45s | grep -c "实时通道接入"
+```
+
+**空闲时这个数应当稳定不动**（只有真正重连时才 +1）。本次第一版写错时，
+45 秒里刷出十几条、且"现有 N 条"永远是满的——那就是互相踢的风暴。
+修好之后同一观察是稳定的。
+
+另外两个排查入口：
+- `docker compose logs api | grep "实时通道拒绝接入"`：真的到上限了（那是**防跑飞**，不是攻击面）；
+- `onlineCount()`（`RealtimeService`）可以在控制台/单测里问"这个账号现在几条"。
+
+### 六、三件**不是 bug** 的现象
+
+| 现象 | 是不是 bug | 为什么 |
+| --- | --- | --- |
+| 浏览器里怎么都没有系统通知 | **不是** | 网页版没有"关掉页面还能响"，原生长连接是 Android 专属（与交付二/三同一条口径） |
+| 应用**正在前台**时，后台那条不弹系统通知 | **不是** | 刻意的：用户此刻就在看着应用，红点与列表当场更新了，再弹通知栏是骚扰（见 D-099 八） |
+| 进程被杀之后要等最多约一刻钟 | **不是** | 原生长连接也活不过 `am kill`；那一档只有厂商推送通道能覆盖（`RESEARCH.md` 七） |
+
+### 七、改完这一步必须复查的东西
+
+1. **退出登录**：常驻通知要消失、那条连接要断（原生服务由 `releasePatrol` 显式叫停，
+   不等它自己重连失败——否则用户会看到"退出了还在收家里的事"）；
+2. **换账号**：新账号不该收到上一个人期间发生的事（水位线按账号记，原生侧也校验 `userId`）；
+3. **别家不受影响**：另一个家庭的人一条都收不到（脚本里有这条断言）；
+4. **后台巡查没被弄坏**：`pnpm --dir services/api run test:http:patrol` 仍 33/33
+   ——它与原生那条**共用一份水位线**，改动任何一边都要重跑这一条。
+
+### 八、相关
+
+`DECISIONS.md` **D-099**、`RISKS.md` **R-81**、
+`services/api/scripts/verify-realtime-ws.cjs`、`services/api/src/modules/realtime/`、
+`apps/mobile/src/lib/realtime-sync.ts`、`apps/mobile/android/app/src/main/java/com/yushan/cook/RealtimeService.java`。

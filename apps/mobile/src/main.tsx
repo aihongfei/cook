@@ -7,6 +7,7 @@ import { installAndroidBack } from '@/lib/android-back'
 import { installNoImageDrag } from '@/lib/no-image-drag'
 import { LocalNotifySync } from '@/lib/local-notify-sync'
 import { PatrolSync } from '@/lib/patrol-sync'
+import { RealtimeSync } from '@/lib/realtime-sync'
 import { router } from '@/router'
 import '@/styles/tailwind.css'
 import '@/styles/index.scss'
@@ -52,6 +53,13 @@ createRoot(document.getElementById('root')!).render(
         （交付二在这一点上踩过一次，见 lib/local-notify-sync 文件头）。
       */}
       <PatrolSync />
+      {/*
+        实时通道（F10-08）：应用**开着**的时候，家里发生的变动当场刷新到屏幕上——
+        通知中心、订单、打卡墙、冰箱、菜谱、家庭那几块。
+        它补的是"两台都开着反而最慢"那一段（要等 60 秒的 staleTime）。
+        手机退到后台之后由原生那条路接着收（见 lib/realtime-sync 文件头）。
+      */}
+      <RealtimeSync />
     </QueryClientProvider>
   </StrictMode>,
 )

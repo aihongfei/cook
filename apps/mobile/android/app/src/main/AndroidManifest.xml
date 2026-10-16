@@ -28,11 +28,47 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!--
+          实时连接的前台服务（F10-08）：应用退到后台之后，家里的变动仍要**当场**到达。
+
+          为什么必须是前台服务：Android 8 起，应用退到后台之后普通后台服务会被系统随时收走；
+          要长期活着就得上常驻通知（用户看得见"它还在连着"）。这也是这个功能诚实的代价
+          ——通知栏里会多一条常驻的「家里的事会立刻告诉你」，它不响、点它回到应用。
+
+          关于 `foregroundServiceType`：Android 14 起**必须**声明类型，系统按类型施加限制。
+          这里选 `specialUse`，因为另外几档都不合适：
+          - `dataSync` 在 Android 15 上有 **6 小时/24 小时**的累计上限，而这个功能要的是长期连着；
+          - `connectedDevice` 说的是连外设（蓝牙/手表），不是我们这件事；
+          - `specialUse` 是留给"以上都不属于"的场景，代价是**上架时要在商店里说明用途**
+            ——本项目是个人自用、不上架（见 docs/context/RESEARCH.md 七），所以这个代价不存在。
+          哪天要上架，这一条是必须先解决的问题（要么换类型、要么接受 6 小时上限）。
+        -->
+        <service
+            android:name=".RealtimeService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="family_realtime_link" />
+        </service>
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 前台服务（F10-08，见上面那段）：Android 9 起要显式声明，否则 `startForeground` 直接抛异常 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14 起，声明了 `foregroundServiceType` 还要有与它配套的那一条 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!--
+      「应用在后台时也不要被系统掐断连接」：息屏之后 CPU 会睡，长连接的心跳因此发不出去，
+      对端以为这台设备没了。要不要真的持锁由系统调度，这里只是声明"我需要"。
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 开机/重启后能自己把连接接回来（与那段调度器代码用的是同一条权限） -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!--
       拍照入口（F16-04 冰箱识别、M9 打卡、菜谱配图）为什么需要这一段声明：

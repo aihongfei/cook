@@ -1,14 +1,16 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '../recipes/prisma.service'
+import { RealtimeService } from '../realtime/realtime.service'
 import { MEAL_LABEL, dateKey, dayWindow, mealWhenLabel, visibleToMember } from '../orders/orders.rules'
 import type { FamilyRole } from '../family/family.roles'
 import { expiryState } from '../fridge/fridge.rules'
 import { digest, randomToken } from '../auth/token'
 import {
+  areaOfKind,
   buildChange, buildNotifications, dateKey as calendarKey, dedupeKeyOf, mergeStored, NOTIFICATION_PREF_KEYS, prefOfKind,
   PREP_WINDOW_DAYS, unreadByArea, unreadCount,
-  type ChangeFact, type DoneFact, type FridgeFact, type NotificationInput, type NotificationItem, type NotificationKind,
-  type NotificationPrefKey, type NotificationPrefs, type PlanFact, type PrepFact, type NotificationRow,
+  type ChangeFact, type DoneFact, type FridgeFact, type NotificationArea, type NotificationInput, type NotificationItem,
+  type NotificationKind, type NotificationPrefKey, type NotificationPrefs, type PlanFact, type PrepFact, type NotificationRow,
 } from './notifications.rules'
 import { PATROL_MAX_ITEMS, nextSince, notifyIdOf, pickPatrolItems, type PatrolItem } from './patrol.rules'
 
@@ -46,7 +48,10 @@ const RELATIVE_DAY_SPAN = 3
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
+  ) {}
 
   /** 我的偏好；没有行就按默认全开（**不是**"没同意过"——见 schema 里那段说明） */
   async prefs(userId: string): Promise<NotificationPrefs> {
@@ -294,8 +299,50 @@ export class NotificationsService {
         })),
         skipDuplicates: true,
       })
+
+      /*
+       * ③ **当场推给正开着应用的那几台**（2026-10-16 加的实时通道，见 `realtime.service`）。
+       *
+       * 放在**写库之后**、`await` 之前的位置不是随意的：先落库再推，
+       * 收到通知的那台设备立刻去取列表时那一行**一定已经在了**——反过来（先推后写）
+       * 会重现 R-78 那一族"页面上看不见刚发生的事"。
+       *
+       * 推的是一句**信号**，不是那条通知本身：前端收到就刷新通知列表（`invalidateQueries`），
+       * 拿到的仍然是自己这一份（可见范围、开关、已读都在服务端算过，同一次 `list()`）。
+       * 若把整条提醒塞进推送里，就等于把"谁能看什么"的判断复制到了推送这一侧
+       * ——本项目在别处栽过两次的那种重复（见 D-078 四）。
+       *
+       * 不在线（应用关着/被系统冻住）就发出去 0 条，**这不是失败**：
+       * 那件事已经在库里，他下次打开或后台巡查时照旧看得到（口径见 `realtime.rules`）。
+       */
+      this.realtime.signal(receivers, { type: 'changed', area: areaOfKind(item.kind) })
     } catch (error) {
       this.logger.warn(`记录变动提醒失败（不影响主流程）：${String(error)}`)
+    }
+  }
+
+  /**
+   * 给家里其他人推一条"有变化"的信号（**状态型**那几类用它）。
+   *
+   * 为什么要单独一个入口：`plan`（菜单定下来了）与 `done`（饭做好了）这两类
+   * **不走 `recordChange`**——它们由事实现算（`confirmedAt` / `doneAt`），
+   * 在这儿再写一条事件型的会导致同一件事两条提醒（见 `orders.updateStatus` 那段）。
+   * 但"不写提醒"不等于"不告诉那台设备"：正开着应用的家里人应当**当场**看到红点亮、
+   * 卡片上多出「选好了」那个角标——那两项都是从那两个事实算出来的，
+   * 所以推一句"这一块有变化"、让他去重取就够了。
+   *
+   * 开关在这一层**不过滤**：信号只是"去重取一次"，取回来的东西仍然按他自己的开关过滤
+   * （正确性不受影响），而为此在这里再查一遍偏好表不值当——一次重取的成本是几十毫秒。
+   */
+  async signalFamily(familyId: string, area: NotificationArea, actorId: string): Promise<void> {
+    try {
+      const members = await this.prisma.familyMember.findMany({
+        where: { familyId, userId: { not: actorId } },
+        select: { userId: true },
+      })
+      this.realtime.signal(members.map((member) => member.userId), { type: 'changed', area })
+    } catch (error) {
+      this.logger.warn(`推送变动信号失败（不影响主流程）：${String(error)}`)
     }
   }
 

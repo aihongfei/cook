@@ -763,6 +763,16 @@ export class OrdersService {
         tag: target === 'COOKING' ? '开做了' : '取消了',
         scope: `status:${mealOrder.id}:${target}`,
       }, userId)
+    } else if (target === 'PLANNED' || target === 'DONE') {
+      /*
+       * 这两档走**另一条**：它们不写事件型提醒（上面那段说了为什么），
+       * 但**仍然要推**——正开着应用的家里人得当场看到红点亮、卡片上多出「选好了」/「做好了」
+       * 那个角标，而那两样都是从 `confirmedAt` / `doneAt` 现算的，重取一次就有。
+       *
+       * 少了这一步，菜单定下来/饭做好了这两件事在"两台都开着"的场景里**反而是最慢的**
+       * （要等 60 秒的 `staleTime`），而那正是用户这次报的那个毛病。
+       */
+      await this.notifications.signalFamily(familyId, 'order', userId)
     }
 
     return this.card(mealOrder.id, userId)

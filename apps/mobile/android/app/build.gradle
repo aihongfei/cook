@@ -84,6 +84,14 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    /*
+     * OkHttp（F10-08）：原生那条实时连接用它挂 WebSocket（`RealtimeService`）。
+     *
+     * 为什么要自己引一个：Capacitor 的 Android 库**没有**传递依赖 OkHttp（它走 WebView 的请求栈），
+     * 实测整个依赖图里确实没有它。版本定 4.12.0：与这里的 AndroidX/Java 版本兼容，
+     * 且它的 `pingInterval` 正好是长连接保活要的那个开关（不靠读超时保活）。
+     */
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
