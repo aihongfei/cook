@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toast'
 import { installAndroidBack } from '@/lib/android-back'
+import { installNoImageDrag } from '@/lib/no-image-drag'
 import { LocalNotifySync } from '@/lib/local-notify-sync'
 import { PatrolSync } from '@/lib/patrol-sync'
 import { router } from '@/router'
@@ -16,6 +17,12 @@ import '@/styles/index.scss'
  * 弹层优先关、再回退、到根才退出 App。浏览器里这个函数直接返回空卸载器，没有副作用。
  */
 installAndroidBack()
+
+/*
+ * 图片不能拖（用户 2026-10-16）：与上一条同一类——装一次、全局生效。
+ * 原生拖放会抢走正在跟手的那一下（翻页 / 长按 / 抽屉下拖），见 lib/no-image-drag.ts 文件头。
+ */
+installNoImageDrag()
 
 const queryClient = new QueryClient({
   defaultOptions: {

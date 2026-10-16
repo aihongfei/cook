@@ -5210,3 +5210,78 @@ PID=$(adb shell pidof com.yushan.cook | tr -d '\r'); adb forward tcp:9222 locala
    每次 `evaluate` 只有 3 秒预算，超时看到的报错像"页面卡住了"，其实是探针自己写太长。
    要观察一段时间里的变化，用 **MutationObserver 记日志**，下一格再读（`window.__log`）；
 4. **模拟器第一次开机要等**：`sys.boot_completed` 变 1 之后再装包，否则 `adb install` 偶发失败。
+
+## R-085 验「页头固定 + 整屏跟手翻页 + 两个开关各管各的」怎么验（D-091 / D-092 / R-72 / R-74 配套，✅ 已验证，2026-10-16）
+
+### 一、这一套验收要在浏览器里量的四件事
+
+这一批改的全是**布局与手势**，四条判据都能在浏览器控制台直接读出来（不必装机就能挡掉大多数回归）：
+
+| 判什么 | 怎么量 | 期望 |
+| --- | --- | --- |
+| 页头真的不跟着滚 | 记 `.page__fixed` 的 `getBoundingClientRect().top`，改 `scrollTop` 再记一次 | 两次**相同**（`sticky` 钉在容器顶边） |
+| 没有空白可滑 | `.tab-layout__body` 的 `scrollHeight - clientHeight` | 短页面 **0**；长页面 >0（那是内容真的更高，不是空白） |
+| 整屏 | `.swipe-pager__panel.is-active` 的高度 ≥ 可视高度 − 固定区高度 | 相等或更高 |
+| 固定区装的是那三样 | `fixed` 里有没有页头 / 开关 / 操作行，`body` 的第一层是不是只有翻页区 | 三样都在 fixed、body 第一层只有 pager |
+
+⚠️ **一定要过滤隐藏页**：本项目开着 keep-alive 页面缓存，同一个选择器可能命中多份 DOM
+（`.tab-layout__page:not([hidden])`），量错一份会得出完全相反的结论（R-081 记过同一个坑）。
+
+### 二、「宽度在拖动时会不会变」必须量两次
+
+用户这一批报过一个"看着像动画坏了、其实是布局"的问题（**拖动时宽度变窄了**，见 R-74）。
+这类问题的可见形态是"**变**"而不是"错"，所以静止时量一次是**测不出来**的：
+
+```js
+// 静止
+const before = body.getBoundingClientRect().width;
+// 派发 touchstart + touchmove 交叉阈值（>8px）挂上邻页后
+fire('touchstart', 300); await sleep(30); fire('touchmove', 288); await sleep(150);
+const during = body.getBoundingClientRect().width;
+// 两者必须相等
+```
+
+**要两段宽度都测**：360 宽（手机）与 1280 宽（桌面）。R-74 那个 bug 在窄屏下差异很小、
+在宽屏下才明显（476 vs 728），只测一种宽度会漏掉。
+
+### 三、两个开关各管各的：三条划动要分开验
+
+订单页有**两个**可切换的开关（段控 + 筛选胶囊行），这正是最容易互相抢手势的地方。三条都要验：
+
+| 在哪儿划 | 期望 | 为什么 |
+| --- | --- | --- |
+| 段控上 | **scope 变、filter 不变** | 用户要的"段控也能滑"（D-092 三） |
+| 筛选胶囊行上 | **两个都不变** | 那一行自己会横滚，带 `data-no-swipe`；在它上面划是"看后面的选项" |
+| 卡片区上 | **filter 变、scope 不变** | 翻页区只翻卡片 |
+
+⚠️ 段控与筛选行**都必须落在 `SwipePager` 外面**。放在里面时同一次划动会被两边抢——
+这一条光看界面看不出来，要在 DOM 里断言：`pager.querySelector('.segmented')` 与
+`pager.querySelector('.chips')` 都必须是 `null`。
+
+### 四、真触摸怎么派发
+
+跟手翻页那套监听**不走 React**（React 17 起 `touchmove` 是 passive 的、`preventDefault()` 无效，
+见 `SwipePager` 文件头），所以要在元素上派发真的 `TouchEvent`：
+
+```js
+const fire = (type, x, y, el) => el.dispatchEvent(new TouchEvent(type, {
+  bubbles: true, cancelable: true,
+  touches: type === 'touchend' ? [] : [new Touch({ identifier: 1, target: el, clientX: x, clientY: y })],
+  changedTouches: [new Touch({ identifier: 1, target: el, clientX: x, clientY: y })],
+}));
+```
+
+两个数**不是随便取的**：位移要 > 400 × 0.22（`SWIPE_SETTLE_RATIO`，按控件宽度算，
+在 1280 宽的浏览器里 `clientWidth` 很大，80px 根本不够），且**每步之间要 `await`**
+让 React 把邻页真的渲染出来（同步连发的话面板还没挂上，量出来永远只有 1 页）。
+鼠标那条路（`pointerdown/move/up`）**在自动化里不可靠**：合成指针上 `setPointerCapture` 会抛
+（R-081 记过），所以验手势一律走触摸。
+
+### 五、IAB 里的两个小坑
+
+- **`setViewportSize` 挂在 `tab` 上、不在 `tab.playwright` 上**（写成 `tab.playwright.setViewportSize(...)`
+  会得到 "is not a function"）；
+- **后台标签页里合成器被节流**：`transition` 可能压根不跑，量到的 `getBoundingClientRect()`
+  会一直停在起点（我第一遍就因此误判"滑块没动"）。要看最终位置就等一次显式
+  `waitForTimeout`，或者直接读 `getComputedStyle(el).transform` 那个 matrix——
+  **矩阵是算出来的真值，不受动画有没有跑完影响**。
