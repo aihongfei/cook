@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+/// <reference types="node" />
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
@@ -228,4 +231,28 @@ it('编辑那一条：标题写清改的是谁，提交走 PATCH，还能"拿出
   fireEvent.click(screen.getByRole('button', { name: '拿出来了' }))
   await waitFor(() => expect(remove).toHaveBeenCalledWith('/fridge/i1'))
   expect(await screen.findByText('「牛奶」拿出来了')).toBeTruthy()
+})
+
+it('动作行两颗按钮：并排、一样高、底边齐（用户 2026-10-16「冰箱这个底部没对齐」）', () => {
+  /*
+   * 照片里那颗「拿出来了」比「改好了」矮一截、还悬在半空中。两个原因叠在一起：
+   * ① `.recipe-button` 自带 `margin-top: 12px`（给"单独一颗按钮"留的），并排时没归零；
+   * ② 两颗高度本来就不同（字号与内边距各一套：42.5 对 45.4），而行是 `align-items: center`
+   *    ——矮的那颗在行里居中，底边就短了 7.5px。
+   *
+   * jsdom 不算布局，所以这里量的是**决定这两件事的规则**（与 bottom-sheet.test 里
+   * "内容区自己滚"那条同一个思路）：高度交给行（stretch），外边距在行内归零，
+   * 两颗的纵向内边距/字号是同一套。真正的像素差在浏览器里另验（见 RUNBOOK）。
+   */
+  const scss = readFileSync(join(process.cwd(), 'src/pages/fridge/fridge.scss'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const rule = (name: string) => new RegExp(`\\.${name}\\s*\\{([^}]*)\\}`).exec(scss)?.[1] ?? ''
+  const actions = rule('fridge-sheet__actions')
+  const drop = rule('fridge-sheet__drop')
+
+  expect(actions).toMatch(/align-items:\s*stretch/) // 高度由这一行说了算，不许各自高矮
+  // 那个 12px 必须在**行内**归零（选择器得比 `.recipe-button` 更具体，同权重会看加载顺序）
+  expect(actions).toMatch(/\.recipe-button\s*\{[^}]*margin-top:\s*0/)
+  // 两颗的纵向内边距与字号同为一档（`.recipe-button` 是 10px / 13px）
+  expect(drop).toMatch(/padding:\s*10px\s+14px/)
+  expect(drop).toMatch(/font-size:\s*13px/)
 })

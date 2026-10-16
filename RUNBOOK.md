@@ -6281,3 +6281,89 @@ async () => {
   点菜窗口是 7 天、窗口内的日子只会随时间靠近，所以这个数对应的一定是第 4～7 天。
 - 这一族改动**不会让任何测试变红**（断言的是"该有的在"），所以**必须先红后绿**地补一条
   边界断言（这次补的是 `LIST_DAY_SPAN < ORDER_DAY_SPAN` 与 `listWindowDays` 的 `to`）。
+
+## R-098 验「浮层的层」与「并排控件的齐」怎么验（D-108 / R-88 配套，✅ 已验证，2026-10-16）
+
+### 一、什么时候用这个
+
+改了**任何浮层的 z-index**、或**任何并排摆放的控件**（尤其"复用组件类 + 并排"的场合）。
+这一族的坑是：**jsdom 不跑层叠也不算布局**——单测全绿、接口全通，而用户在真屏上够不着按钮
+（R-88 一）。
+
+### 二、先跑两条守卫测试（它们盯的是"规矩"，不是像素）
+
+```bash
+pnpm --dir apps/mobile exec vitest run src/components/ui/ConfirmDialog.test.tsx \
+  src/pages/fridge/components/FridgeItemSheet.test.tsx
+```
+
+- `层级要盖得住抽屉、又压得住提示`：从 `ui.scss` 读三个数，断言 `1010 < confirm < toaster < viewer`；
+- `动作行两颗按钮：并排、一样高、底边齐`：从 `fridge.scss` 读 `align-items` / 行内 `margin-top: 0` /
+  纵向内边距与字号。
+
+**先红后绿的验法**（这一步不能省，见 R-068 那条纪律）：
+
+```bash
+# 层级：把 z-index 改回 80 → 应红（expected 80 to be greater than 1010），改回 1030 → 绿
+# 对齐：git show HEAD:apps/mobile/src/pages/fridge/fridge.scss > 临时文件后换回去 → 应红（align-items: center），换回 → 绿
+```
+
+### 三、浏览器里怎么量（390×844，`apps/mobile run dev` 已起）
+
+**① 确认框真的在抽屉之上**——不要只看 `z-index` 那个数，要问"谁接得住中间那一下"：
+
+```js
+() => {
+  const num = (el) => Number(getComputedStyle(el).zIndex);
+  const mask = document.querySelector('.confirm-mask');
+  const confirm = document.querySelector('.confirm');
+  const panel = [...document.querySelectorAll('.adm-popup-body')]
+    .find((el) => el.getBoundingClientRect().height > 0);
+  const r = confirm.getBoundingClientRect();
+  const top = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+  return {
+    confirmZ: num(mask),                      // 期望 1030
+    popupZ: panel ? num(panel) : null,        // 期望 1010（antd 面板）
+    topIsConfirm: confirm === top || confirm.contains(top),  // 期望 true —— 这才是"够得着"
+  };
+}
+```
+
+**走通到底**：从抽屉里点「删掉这张」→ 点确认框的「删掉」→ **接口真的走通**（提示「这张打卡删掉了」、
+抽屉与确认框都关掉、墙上那张卡消失）。**只验"弹窗画出来了"是不够的**——
+原来 80 那个版本也"画出来了"，只是藏在底下。
+
+**② 并排两颗的几何**（编辑态两颗、新增态一颗都要量）：
+
+```js
+() => {
+  const panel = [...document.querySelectorAll('.adm-popup-body')]
+    .filter((el) => el.getBoundingClientRect().height > 0).pop();   // ⚠️ 只认真的开着的那个
+  const row = panel.querySelector('.fridge-sheet__actions');
+  const kids = [...row.children].map((el) => {
+    const b = el.getBoundingClientRect();
+    return { text: el.textContent.trim(), top: +b.top.toFixed(2), bottom: +b.bottom.toFixed(2), h: +b.height.toFixed(2) };
+  });
+  return {
+    kids,
+    bottomDiff: +Math.abs(kids[0].bottom - kids[1].bottom).toFixed(2),  // 期望 0
+    submitMarginTop: getComputedStyle(panel.querySelector('.fridge-sheet__submit')).marginTop, // 期望 0px
+    rowMarginTop: getComputedStyle(row).marginTop,                      // 期望 16px（接住原来 4+12）
+  };
+}
+```
+
+**两条量法上的坑**（都踩过）：
+
+- **`document.querySelector` 会拿到上一次开过的抽屉残留**（antd 的节点不总在关闭时立刻移除）——
+  必须按"`getBoundingClientRect().height > 0`"筛出真的开着的那一个，否则量到的是旧节点，
+  会得出"两个面板同时开着"这种假象（R-098 这一次就差一点按它改代码）。
+- 抽屉有**入场动画**：开完至少要等 ~1s 再量。`translateY` 停在 `100%` 就是"还没上来"。
+
+### 四、相关
+
+`DECISIONS.md` **D-108**、**D-068**（提示层级那条老账）、`RISKS.md` **R-88**、R-64 / R-66（"活着但看不见"那一族）、
+`apps/mobile/src/components/ui/ui.scss`（`.toaster` 段是全站顺序的权威注释）、
+`apps/mobile/src/pages/fridge/fridge.scss`（`.fridge-sheet__actions` 段）、
+`apps/mobile/src/components/ui/ConfirmDialog.test.tsx`、
+`apps/mobile/src/pages/fridge/components/FridgeItemSheet.test.tsx`。

@@ -555,19 +555,40 @@
   border-radius: 999px;
 }
 
+/*
+ * 底部动作行：「拿出来了」+「改好了/记进冰箱」并排。
+ *
+ * **两颗必须一样高、底边齐**（用户 2026-10-16：「冰箱这个底部没对齐」）。歪的原因是两处叠在一起：
+ * ① `.recipe-button` 自带 `margin-top: 12px`（那是给"单独一颗按钮"留的，并排时得归零，
+ *    `.fridge-scan__actions` 早就这么做了，这里漏了）——它把主按钮整体往下压 12px；
+ * ② 两颗的高度本来就不同（12.5px 字号 + 9px 内边距 = 42.5，对 13px + 10px = 45.4），
+ *    而 `align-items: center` 让矮的那颗在行里居中 → 实测**底边差 7.5px**。
+ * 所以这里两件事一起做：行内把那个外边距归零（见下）、`stretch` 让高度由这一行说了算
+ * ——字号或内边距以后再动，也不会又各高各的。
+ *
+ * `margin-top: 16px` 是**把原先那个 12px 接过来**（原来 4px 行距 + 按钮自带 12px = 16px）：
+ * 这里并排归零之后，若不接过来，「记一样食材」（只有一颗按钮）会比改之前紧 12px——
+ * 修对齐不该顺手改掉别处的间距。
+ */
 .fridge-sheet__actions {
   display: flex;
   gap: 9px;
-  align-items: center;
-  margin-top: 4px;
+  align-items: stretch;
+  margin-top: 16px;
+
+  /* `.recipe-button` 自带的那个 margin-top 在这里要归零。写在父级下是**必须的**：
+     与 `.recipe-button` 同权重（都是一个类）时，谁生效取决于两份 scss 谁后被加载——
+     `.fridge-scan__actions` 用的是同一招，不是随手写的 */
+  .recipe-button { margin-top: 0; }
 }
 
-/* 「拿出来了」是删一条：放左边、样式弱一点（它不是这条流程的主动作） */
+/* 「拿出来了」是删一条：放左边、样式弱一点（它不是这条流程的主动作）。
+ * 纵向内边距与字号跟主按钮同一套（10px / 13px），两颗并排才是一样的高度 */
 .fridge-sheet__drop {
   flex: 0 0 auto;
-  padding: 9px 14px;
+  padding: 10px 14px;
   font: inherit;
-  font-size: 12.5px;
+  font-size: 13px;
   color: #a8542a;
   cursor: pointer;
   background: none;

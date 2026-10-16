@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+/// <reference types="node" />
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { useState } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
@@ -198,10 +201,34 @@ it('打开之后换页：关掉（它画在 body 上，不关会盖在下一张�
 
 it('挂载之后先换过页、再打开：**要留在那儿**（记的是打开那一刻的地址，不是挂载那一刻的）', () => {
   renderHarness()
-  // 用户先在页面里走过几步：真机上是"进这一餐详情、再返回"，路由 key 已经不是挂载时那个了
+  // 用户先在页面里走几步：真机上是"进这一餐详情、再返回"，路由 key 已经不是挂载时那个了
   fireEvent.click(screen.getByRole('button', { name: '换个筛选' }))
 
   fireEvent.click(screen.getByRole('button', { name: '打开确认' }))
   expect(screen.getByRole('dialog')).toBeTruthy()
   expect(screen.getByText('删了不能恢复。')).toBeTruthy()
+})
+
+it('层级要盖得住抽屉、又压得住提示：confirm(1030) 在 antd 弹层之上、toast 之下', () => {
+  /*
+   * 用户 2026-10-16：「打卡墙的删除在弹窗层级下面」——确认框原来是 `z-index: 80`，
+   * 而抽屉（antd-mobile Popup）是 1000/1010：从抽屉里点「删掉这张」，确认框整个落在抽屉底下，
+   * 看着就是"点了没反应 / 删除没生效"。
+   *
+   * jsdom 不跑层叠，所以这里量的是**样式表里写的那个数**（与 bottom-sheet.test 里
+   * toast 那条同一个思路）。全站顺序在 `.toaster` 的注释里定着：
+   * 页面 < 悬浮球/弹窗(1000/1010) < 确认框(1030) < 提示(1050) < 看大图(1100)。
+   *
+   * ⚠️ 这三个数必须**都读自样式表**、不许写死：写死的话改了一个数，测试还是绿的。
+   */
+  const scss = readFileSync(join(process.cwd(), 'src/components/ui/ui.scss'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const z = (rule: string) => Number(new RegExp(`\\.${rule}\\s*\\{[^}]*?z-index:\\s*(\\d+)`).exec(scss)?.[1] ?? 0)
+  const confirmZ = z('confirm-mask')
+  const toasterZ = z('toaster')
+  const viewerZ = z('photo-viewer')
+
+  expect(confirmZ).toBeGreaterThan(1010) // 抽屉的面板：从抽屉里点出来的确认框必须在它上面
+  expect(confirmZ).toBeLessThan(toasterZ) // 在确认框里失败时，提示要盖在它上面（D-068 那条）
+  expect(toasterZ).toBeLessThan(viewerZ) // 看大图时整屏让给图
+  expect(new Set([confirmZ, toasterZ, viewerZ]).size).toBe(3) // 三个数不许撞在一起（同数就看后写的，层叠会变得不可预期）
 })
